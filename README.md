@@ -41,18 +41,6 @@ cd dsh-startlux-decision
 - 一个 **API Key 输入框** + `保存` 按钮
 - 一个 `测试端点` 按钮
 
-> 实现要点（踩过的坑）：必须写成
-> ```js
-> ctx.effect(function* () {
->   yield ctx.locale.register(NS, { zh, en });
->   yield ctx.slots.inject("plugins.bundle.config", () => ctx.slots.register({...}, Card));
-> });
-> ```
-> `ctx.effect` 要收 **generator 函数**、用 `yield` 挂载。写成普通函数 + 直接
-> `inject` 时回调不会触发，表现为 Console 只有 `apply() called`、界面空白。
-> 这是照 `dsh-rewind-plugin` 与 `dsh-experimental-client-ui-cot-translation`
-> 两个可用插件的真实写法得出的。
-
 ### 方式二：直接编辑文件
 
 **只需要一个 API key**，写在插件自己的配置文件里：
