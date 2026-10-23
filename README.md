@@ -32,7 +32,7 @@ cd dsh-startlux-decision
 
 ## 配置
 
-### 方式一：插件配置页（推荐）
+### 插件配置页
 
 **插件 → 已安装 → dsh-startlux-decision → 点进该插件**，配置区（「包含的组件」
 **上方**）会出现 StartLux 卡片，布局与内置 `dsh-rewind-plugin` 一致：
@@ -40,28 +40,6 @@ cd dsh-startlux-decision
 - 两个开关：`启用守卫`、`真正拦截`
 - 一个 **API Key 输入框** + `保存` 按钮
 - 一个 `测试端点` 按钮
-
-### 方式二：直接编辑文件
-
-**只需要一个 API key**，写在插件自己的配置文件里：
-
-```
-~/.dsh/plugins/dsh-startlux-decision/startlux.yml
-```
-
-```yaml
-enabled: true
-mode: shadow
-baseUrl: https://api.bamboonode.dev/v1/decisions
-model: startlux-decision-27b-autothink
-apiKey: sk-...
-timeoutMs: 20000
-thinkMode: never
-```
-
-改完**不用重启**：每次工具调用前会比对 mtime 并重载。
-
-可用环境变量 `STARTLUX_GUARD_CONFIG` 指向别的配置文件路径。
 
 ## 模型选择
 

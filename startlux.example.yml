@@ -1,12 +1,12 @@
-# dsh-startlux-decision 配置模板
+# StartLux Decision 配置模板
 #
-# 用法：复制为 startlux.yml 后填写 apiKey。
-#   cp startlux.example.yml startlux.yml
+# 用法：复制到数据目录，按需修改。
+#   mkdir -p ~/.dsh/dsh-startlux-decision
+#   cp startlux.example.yml ~/.dsh/dsh-startlux-decision/startlux.yml
 #
-# 配置文件位置（插件自动读取）：
-#   ~/.dsh/plugins/dsh-startlux-decision/startlux.yml
-#
-# 也可用环境变量 STARTLUX_GUARD_CONFIG 指向任意路径。
+# 数据目录（插件自动读取）：
+#   ~/.dsh/dsh-startlux-decision/startlux.yml     配置
+#   ~/.dsh/dsh-startlux-decision/telemetry.jsonl  决策记录
 #
 # 改完立即生效：每次工具调用前会检查 mtime，无需重启 DSH。
 
@@ -29,12 +29,15 @@ baseUrl: https://api.bamboonode.dev/v1/decisions
 # 或在插件配置页用「获取」拉取列表后下拉选择。
 model:
 
-# 必填：你的 Bamboo API key。
-# 也可留空，改用环境变量（见下方 apiKeyEnv）。
+# 通常留空：密钥从 ~/.dsh/.credentials.yaml 统一读取（见 apiKeyEnv）。
+# 只有临时覆盖时才在这里写明文。
 apiKey: ""
 
-# 当 apiKey 为空时，从这个环境变量读取 key。
-# apiKeyEnv: BAMBOO_API_KEY
+# 去 ~/.dsh/.credentials.yaml 的 refs 段里找这个键名。
+# 把 key 加进去（与 DEEPSEEK_API_KEY 等并列）即可，无需改动本文件：
+#   refs:
+#     BAMBOO_API_KEY: sk-你的key
+apiKeyEnv: BAMBOO_API_KEY
 
 # 超时预算（毫秒）：实测 p50≈0.7s、冷启动 p95≈6.4s。
 # 超时会自动降级放行（不影响干活），连续失败还会进入冷却。

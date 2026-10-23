@@ -1,6 +1,6 @@
 {
   "name": "dsh-startlux-decision",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "StartLux Decision: four-question risk judgement before every tool call in DeepSeek Harness, fail-open by default.",
   "icon": "./icon.svg",
   "type": "module",
