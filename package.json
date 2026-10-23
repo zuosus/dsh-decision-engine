@@ -1,7 +1,7 @@
 {
   "name": "dsh-startlux-decision",
   "version": "0.1.1",
-  "description": "StartLux decision guard for DeepSeek Harness: four typed questions before every tool call, fail-open by default.",
+  "description": "StartLux Decision: four-question risk judgement before every tool call in DeepSeek Harness, fail-open by default.",
   "icon": "./icon.svg",
   "type": "module",
   "main": "lib/index.js",

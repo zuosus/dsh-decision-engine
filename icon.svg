@@ -1,36 +1,17 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="StartLux Decision Guard">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="StartLux Decision">
+  <!-- Bamboo Relay 官方标识（bamboonode.dev），等比放大到插件图标尺寸 -->
   <defs>
-    <linearGradient id="slx-bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#7c8cff"/>
-      <stop offset="1" stop-color="#3b2fd4"/>
-    </linearGradient>
-    <radialGradient id="slx-shine" cx="0.22" cy="-0.08" r="0.95">
-      <stop offset="0" stop-color="#ffffff" stop-opacity="0.34"/>
-      <stop offset="0.6" stop-color="#ffffff" stop-opacity="0"/>
-    </radialGradient>
-    <linearGradient id="slx-shield" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#ffffff"/>
-      <stop offset="1" stop-color="#dfe4ff"/>
+    <linearGradient id="bamboo-grad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#3AC251"/>
+      <stop offset="55%" stop-color="#2BAE7E"/>
+      <stop offset="100%" stop-color="#1481BF"/>
     </linearGradient>
   </defs>
-
-  <!-- 圆角底 -->
-  <rect width="64" height="64" rx="15" fill="url(#slx-bg)"/>
-  <rect width="64" height="64" rx="15" fill="url(#slx-shine)"/>
-
-  <!-- 盾牌：代表「守卫」 -->
-  <path
-    d="M32 12.5 L47.5 18.2 V31.4 C47.5 40.6 40.9 47.9 32 51.5 C23.1 47.9 16.5 40.6 16.5 31.4 V18.2 Z"
-    fill="url(#slx-shield)"
-    fill-opacity="0.97"/>
-
-  <!-- 盾内四问：四个点，呼应「四问判断」 -->
-  <circle cx="25.4" cy="25.2" r="2.5" fill="#4a3ce0"/>
-  <circle cx="38.6" cy="25.2" r="2.5" fill="#4a3ce0" fill-opacity="0.42"/>
-  <circle cx="25.4" cy="33.6" r="2.5" fill="#4a3ce0" fill-opacity="0.42"/>
-  <circle cx="38.6" cy="33.6" r="2.5" fill="#4a3ce0"/>
-
-  <!-- 中间连线：表达「据此裁决」 -->
-  <path d="M28.4 29.4 L35.6 29.4" stroke="#4a3ce0" stroke-opacity="0.55"
-        stroke-width="1.6" stroke-linecap="round"/>
+  <g transform="translate(4 4) scale(2)">
+    <rect x="3" y="10" width="3.2" height="16" rx="1.6" fill="url(#bamboo-grad)"/>
+    <rect x="8" y="4" width="3.2" height="22" rx="1.6" fill="url(#bamboo-grad)"/>
+    <rect x="13" y="0" width="3.2" height="26" rx="1.6" fill="url(#bamboo-grad)"/>
+    <rect x="18" y="6" width="3.2" height="20" rx="1.6" fill="url(#bamboo-grad)"/>
+    <rect x="23" y="12" width="3.2" height="14" rx="1.6" fill="url(#bamboo-grad)"/>
+  </g>
 </svg>
