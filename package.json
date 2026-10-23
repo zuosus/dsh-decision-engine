@@ -1,7 +1,7 @@
 {
   "name": "dsh-startlux-decision",
   "version": "0.1.0",
-  "description": "System-1 judgement for every tool call in DeepSeek Harness, purpose-built for Bamboo Relay / StartLux decisions: shadow-first risk gating, fail-open by construction, token-frugal.",
+  "description": "StartLux decision guard for DeepSeek Harness: four typed questions before every tool call, fail-open by default.",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
