@@ -1,7 +1,8 @@
 {
   "name": "dsh-startlux-decision",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "StartLux decision guard for DeepSeek Harness: four typed questions before every tool call, fail-open by default.",
+  "icon": "./icon.svg",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -10,13 +11,16 @@
       "default": "./lib/client.js"
     },
     "./cordis.patch.yml": "./cordis.patch.yml",
+    "./locale/*.json": "./locale/*.json",
     "./package.json": "./package.json"
   },
   "files": [
     "lib",
     "cordis.patch.yml",
     "README.md",
-    "startlux.example.yml"
+    "startlux.example.yml",
+    "icon.svg",
+    "locale"
   ],
   "keywords": [
     "dsh-plugin",

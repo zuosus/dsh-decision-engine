@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "StartLux Decision Guard",
+    "description": "Four-question risk judgement before every tool call via StartLux, deciding allow, ask or deny. Shadow-first by default, fail-open on any error."
+  }
+}
