@@ -4,20 +4,6 @@
 在每次工具调用前问模型四个问题（风险、可逆性、任务相关性、注入嫌疑），据此放行、
 询问或拦截。默认 `shadow`：只记录判断，绝不打断你干活。
 
-## 为什么另起一个插件
-
-`dsh-jev-interceptor` 0.5.0 在这套环境里有一串叠加缺陷，导致「配了 base URL 和 key，
-但服务商后台一条调用都没有」。本插件针对性绕开：
-
-| 旧插件的问题 | 本插件的做法 |
-| --- | --- |
-| `settings.installSection(...)` 在当前 DSH 中**不存在**，抛错被 catch 吞掉，设置表单永不出现 | 完全不用 settings 服务；配置只放 `startlux.yml` |
-| `Config` 没有 `.volatile()`，settings 的 `volatileForm()` 返回 `undefined`，整个 entry 被丢弃，所有持久化命令必然失败 | 不依赖该机制（也避免 `.volatile()` 把值包成 `{get()}` 导致 `=== true` 判断失效） |
-| `apply()` 里把 `endpoint` 固化进 client，之后改 Base URL **永不影响**已构造的实例 | `classify()` 每次请求现读配置 |
-| 填 `https://api.bamboonode.dev/v1` 会被原样 POST → `404 Invalid URL (POST /v1)` | `normalizeEndpoint()` 自动补 `/decisions`，两种写法都接受 |
-| 默认 `timeoutMs: 1500`，而实测 p50≈0.7s、冷启动 p95≈6.4s → 必然超时 | 默认 8000ms |
-| 默认 `enabled: false` 且无提示，请求静默不发 | 启动日志直接打印端点/模型/密钥状态，「测试端点」按钮可立即真实验证 |
-
 ## 安装
 
 ### 从 npm 安装（推荐）
