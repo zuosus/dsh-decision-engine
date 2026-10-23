@@ -8,13 +8,17 @@
 #   ~/.dsh/dsh-startlux-decision/startlux.yml     配置
 #   ~/.dsh/dsh-startlux-decision/telemetry.jsonl  决策记录
 #
-# 改完立即生效：每次工具调用前会检查 mtime，无需重启 DSH。
+# 改完立即生效：每次工具调用 / 每一步前都会检查 mtime，无需重启 DSH。
 
 # 总开关：true 才开始工作（默认 false，不会擅自介入你的会话）
 enabled: false
 
 # shadow  = 只记录判断结果，绝不拦截（建议先用它观察一段时间）
-# enforce = 真正执行 ask / deny
+# enforce = 真正执行各决策点的处置
+#
+# 注意：这一项现在只是「工具授权」这一个决策点的历史开关。
+# 新写法是给每个决策点单独指定模式，见下面的 pointXxx。
+# pointAuthorize 留 auto 时，就沿用这里的 mode（shadow→observe、enforce→enforce）。
 mode: shadow
 
 # 接受三种写法，等价：
@@ -25,31 +29,110 @@ baseUrl: https://api.bamboonode.dev/v1/decisions
 
 # 模型留空 = 自动（由服务端选当前默认决策模型）。
 # 这样服务商将来换模型名时，本配置不会失效。
-# 想固定某个模型，可填 startlux-decision-27b-autothink，
-# 或在插件配置页用「获取」拉取列表后下拉选择。
 model:
 
 # 通常留空：密钥从 ~/.dsh/.credentials.yaml 统一读取（见 apiKeyEnv）。
-# 只有临时覆盖时才在这里写明文。
 apiKey: ""
 
-# 去 ~/.dsh/.credentials.yaml 的 refs 段里找这个键名。
-# 把 key 加进去（与 DEEPSEEK_API_KEY 等并列）即可，无需改动本文件：
+# 去 ~/.dsh/.credentials.yaml 的 refs 段里找这个键名：
 #   refs:
 #     BAMBOO_API_KEY: sk-你的key
 apiKeyEnv: BAMBOO_API_KEY
 
-# 超时预算（毫秒）：实测 p50≈0.7s、冷启动 p95≈6.4s。
-# 超时会自动降级放行（不影响干活），连续失败还会进入冷却。
+# 超时预算（毫秒）。超时自动降级放行，连续失败进入冷却。
 timeoutMs: 8000
 
-# never = 不思考，最省 token（默认）
-# auto  = 仅在不确定时思考
+# never = 不思考，最省 token（默认）；auto = 仅在不确定时思考
 thinkMode: never
 
-# ---- 以下为可选调优项，按需取消注释 ----
-# cacheSize: 256            # 相同 state 命中缓存即 0 token，省 token 主力
-# recentMessages: 4         # 带给模型的上下文条数，越少越省
-# guardReadOnlyTools: [read, grep, glob, todo_write]   # 这些工具直接放行，不发请求
-# guardDenyConfidence: 0.85 # 高风险判定为 deny 的置信门槛
-# guardIrreversibleCeiling: 0.2  # 低风险但不可逆时的升级门槛
+# ============================================================================
+# 决策模型参与点
+# ============================================================================
+# 三态：off 不参与 / observe 只记录不干预 / enforce 真正生效。
+# 九个点全部已实装。新点默认 off —— 升级不会改变现有行为。
+#
+# 建议：先 observe 跑一段时间，对着 telemetry.jsonl 确认与人工判断一致，
+# 再逐点切 enforce。热路径的点（route / delegate / cotTranslate）尤其如此。
+
+# ---- 1. 工具授权：每次工具调用前判断能否放行 -------------------------------
+# 替代 auto-review——后者把完整会话历史发给主模型，每次调用都跑一遍。
+pointAuthorize: auto
+
+# ---- 2. 模型路由：机械步骤下沉到便宜模型 -----------------------------------
+# 热路径。三道闸控量：每轮最多 routeMaxStepsPerTurn 步、路由未变不问、
+# 新用户输入后的步骤不问。
+# 必须同时配好 routeCheapProvider + routeCheapModel 才会真的换模型；
+# 两者留空时即便打开此点也只会记录「本该换」。
+pointRoute: off
+routeCheapProvider: ""
+routeCheapModel: ""
+# routeMaxStepsPerTurn: 3
+# routeMaxScore: 0.4        # 能力需求归一化后超过此值就保留强模型
+# routeMechanicalFloor: 0.6 # 「机械步骤」的最低置信
+# routeRiskFloor: 0.3       # 风险达线一律保留强模型
+
+# ---- 3. 子任务分派：接着做 / 开 subagent / 组 agent team -------------------
+# 热路径。只在每轮第一步且带新用户输入时判断（分派只在这一刻可能改变）。
+# 生效时注入一条提示，不替模型决定——工具选择仍归模型。
+pointDelegate: off
+# delegateConfidenceFloor: 0.5  # 三选项均分 0.33，实测需 ≥0.5 才算有倾向
+# delegateBlockingFloor: 0.6    # 被本地事实阻塞时继续内联
+# delegateParallelFloor: 0.5    # 组队还需真并行才有意义
+
+# ---- 4. 上下文压缩：摘要 vs 只丢陈旧工具结果 -------------------------------
+# 非热路径。只在实测 token 达触发线（compactThresholdRatio × 窗口）才问。
+# 生效方式：先跑宿主的确定性工具结果裁剪；compaction-basic 随后重新测压，
+# 低于阈值就跳过摘要——这才是真正省下的那一次调用。
+pointCompact: off
+# compactContextWindow: 0     # 0 = 用 compactTriggerTokens 绝对阈值
+# compactThresholdRatio: 0.7  # 提前于 compaction-basic 的 0.8 介入
+# compactTriggerTokens: 100000
+# compactToolResultChars: 8192
+# compactDistilledFloor: 0.6  # 结论已落地 → 允许只裁剪
+# compactVerbatinFloor: 0.6   # 仍需逐字原文 → 一律摘要（安全否决优先）
+
+# ---- 5. 轮次延续：再来一轮有没有增量价值 -----------------------------------
+# 非热路径。生效方式是用 agent.steer() 续一轮，每轮最多 turnStopMaxSteers 次。
+pointTurnStop: off
+# turnStopMaxSteers: 1
+# turnStopClosedFloor: 0.6
+# turnStopUnfinishedFloor: 0.6
+# turnStopValueFloor: 0.35    # 只作弱确认；主判据是 unfinished
+
+# ---- 6. 检索必要性：这条信息是不是已经知道 ---------------------------------
+# 非热路径。只对检索类工具生效，其余工具零开销。
+pointRetrieval: off
+# retrievalTools: [web_search, web_fetch, research, multi_search, advanced_search]
+# retrievalCoveredFloor: 0.5     # 上下文已覆盖该事实
+# retrievalWouldAddCeiling: 0.8  # 且再搜基本没有新信息
+
+# ---- 7. 技能选择：该装哪个技能 ---------------------------------------------
+# 非热路径。只对 skill 工具、且候选 ≥2 时判断。
+# 生效时拦下不匹配的加载并指路，避免「装错再换」付两遍正文 token。
+pointSkillPick: off
+# skillPickCandidates: 8      # 送给模型挑选的候选上限（只带名称+描述）
+# skillPickConfidenceFloor: 0.5
+
+# ---- 8. 思维链翻译门槛：这条内容真的需要翻译吗 -----------------------------
+# 热路径（每条消息）。本地先做免费预筛（去代码块/URL 后判断有无正文），
+# 预筛不过的直接跳过，不发请求。生效时判为「不需要」则返回原文。
+pointCotTranslate: off
+# cotProseFloor: 0.5
+# cotSameLanguageFloor: 0.8
+
+# ============================================================================
+# 自身开销护栏
+# ============================================================================
+# 决策模型自己也烧 token（实测约 1.9k/次，p50 约 0.5s）。
+# 这是每小时上限，超出后所有决策点自动退回启发式并放行——
+# 省钱的东西不能反过来变成主要消耗方。0 表示不限制。
+budgetTokens: 400000
+budgetWindowMs: 3600000
+
+# ---- 以下为可选调优项 ----
+# cacheSize: 256            # 缓存条数上限
+# cacheTtlMs: 600000        # 裁决存活时间
+# recentMessages: 4         # 带给模型的上下文条数
+# guardReadOnlyTools: [read, grep, glob, todo_write]
+# guardDenyConfidence: 0.85
+# guardIrreversibleCeiling: 0.2
