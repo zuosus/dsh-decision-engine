@@ -352,6 +352,40 @@ test("custom 地址非法时给出具体原因", async () => {
   assert.ok(text.includes("必须以 http:// 或 https:// 开头"), "非法地址没有给出原因");
 });
 
+test("端点风格下拉说明它是「首选」且 404 会自动换路径", async () => {
+  const { text, controls } = await render(
+    stateWith({ provider: "custom", providerLabel: "custom", customBaseUrl: "https://x.dev/v1" }),
+  );
+  assert.ok(text.includes("首选"), "端点风格的说明没讲清它是首选而不是唯一");
+  assert.ok(text.includes("404"), "端点风格的说明没讲 404 会自动换路径");
+  const styleSelect = controls.find(
+    (node) => node.type === "select" && node.props.value === "auto",
+  );
+  assert.ok(styleSelect !== undefined, "端点风格下拉未回显 auto");
+  // 下拉必须保留三条选项：auto / decisions / systemone
+  const options = (styleSelect?.children ?? []).filter((child) => child?.type === "option");
+  assert.deepEqual(
+    options.map((item) => item.props.value),
+    ["auto", "decisions", "systemone"],
+    "端点风格下拉的选项不完整",
+  );
+});
+
+test("探测出的可用端点会显示在「生效端点」下方", async () => {
+  const { text } = await render(
+    stateWith({
+      provider: "custom",
+      providerLabel: "custom",
+      baseUrl: "https://api.siliconflow.cn/v1/decisions",
+      detectedEndpoint: "https://api.siliconflow.cn/v1/systemone",
+    }),
+  );
+  assert.ok(
+    text.includes("已验证可用") && text.includes("/v1/systemone"),
+    "探测出的可用端点没有显示出来",
+  );
+});
+
 test("服务端拒绝的原因会显示在界面上", async () => {
   const { text } = await render(
     stateWith({

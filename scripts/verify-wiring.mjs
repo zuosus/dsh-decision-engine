@@ -271,6 +271,27 @@ check(
   `实际 ${customProvider.endpoint}`,
 );
 
+// 端点回退：404 时换另一条路径。路径后缀由服务商决定（实测 SiliconFlow
+// 的 Kev-4B 只通 /v1/systemone），只拼一条路径必然踩空并静默降级。
+check(
+  "resolveProvider 给出候选端点（404 时有路可退）",
+  Array.isArray(customProvider.candidates) && customProvider.candidates.length === 2,
+  `实际 ${JSON.stringify(customProvider.candidates)}`,
+);
+check(
+  "候选端点覆盖 decisions 与 systemone 两条路径",
+  customProvider.candidates.some((item) => item.endsWith("/decisions")) &&
+    customProvider.candidates.some((item) => item.endsWith("/systemone")),
+  `实际 ${JSON.stringify(customProvider.candidates)}`,
+);
+check(
+  "地址已自带端点时只给一个候选（用户的明确决定不被改写）",
+  plugin
+    .resolveProvider({ ...defaults, provider: "custom", customBaseUrl: "https://gw.example.com/v1/systemone" })
+    .candidates.length === 1,
+  "实际候选多于一个",
+);
+
 console.log("");
 if (failures.length === 0) {
   console.log("全部接线检查通过");

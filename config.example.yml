@@ -71,10 +71,17 @@ systemoneModel: ""
 # 允许省略 scheme，custom 不允许——自定义地址必须显式，避免猜错协议）。
 # customBaseUrl: https://api.example.com/v1
 #
-# 端点风格：
-#   auto       地址已带 /decisions 或 /systemone 就原样用，否则按 decisions 拼
-#   decisions  POST <base>/decisions
-#   systemone  POST <base>/systemone
+# 端点风格（**首选**路径，不是唯一路径）：
+#   auto       地址已带 /decisions 或 /systemone 就原样用，否则先试 decisions
+#   decisions  先试 POST <base>/decisions
+#   systemone  先试 POST <base>/systemone
+#
+# 路径后缀由**服务商**决定，不由模型决定。实测（2026-10-25，真实端点）：
+#   SiliconFlow 的 Kev-4B   /v1/decisions → 404，/v1/systemone → 200
+#   bamboonode 的决策模型     两条路径都 200
+#
+# 所以首选路径返回 404 时，插件会自动改用另一条再试一次，并记住试通的那条。
+# 只有 404 会触发换路径：400（模型/内容不合法）与 401（key 不对）都跟路径无关。
 customEndpointStyle: auto
 #
 # custom 自己的模型（留空 = 服务端默认）。与内置预设的 model 分开存，
