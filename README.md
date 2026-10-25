@@ -104,14 +104,14 @@ Windows 允许点开头的目录。真正与平台相关的是分隔符与家目
 - 选 `custom` 时展开四个字段：`Base URL`（必填）、`端点风格`、`附加请求头`、`密钥变量名`
 - 一个 `测试端点` 按钮（回显 provider、实际 POST 的完整地址、HTTP 码、请求 id 与响应体）
 - **决策模型参与点**列表：每个决策点一行，右侧是 `关闭 / 观察 / 生效` 三态
-- `自身 token 预算` 输入框，以及实时的缓存命中率与每个点的 token / 延迟统计
+- 实时的缓存命中率与每个点的 token / 延迟统计
 
 **改完即保存，没有「保存」按钮**：开关 / 下拉 / 分段控件点一下就落盘；文本框
-（地址、请求头、预算）停手约 0.7 秒或失焦后落盘；API Key 只在**失焦或回车**
+（地址、请求头）停手约 0.7 秒或失焦后落盘；API Key 只在**失焦或回车**
 时落盘（避免把打字途中的半截 key 写进凭据文件）。底部状态行实时显示
 `待保存… / 保存中… / 已保存 / 未保存：原因`，失败时附「重试」。落盘即写入
 `config.yml`，**不需要重启**：监听器常驻注册，provider 与模式在每次调用时现读；
-预算与缓存参数同样是取值函数而非启动期快照。
+缓存参数同样是取值函数而非启动期快照。
 
 一个例外：选 `custom` 但 `Base URL` 还没填或不合法时，配置改动会**整体延后**
 （状态行给出原因），地址补全后自动落盘；此时决策点改动不受影响，照常保存。
@@ -314,11 +314,9 @@ content-type: application/json
 决策点（注册表里标了 `hotPath`，配置页显示「热路径」角标）都带明确的触发闸，
 不能无条件调用。
 
-同时有两道护栏兜底：
-
-- **自身预算**（`budgetTokens`，默认每小时 40 万）：超限后所有决策点自动退回
-  启发式并放行。省钱的东西不能反过来成为主要消耗方。
-- **双层缓存**：见下节。
+护栏是**双层缓存**（见下节）：命中缓存就不发请求，把热路径上的重复调用挡掉。
+本插件不设每小时的 token 预算——一次决策约 1.9k token，命中缓存后几乎为零，
+不值得用「超限即停止判断」的方式省，那会让守卫在最需要它的时刻失效。
 
 ## 模型选择
 
@@ -353,7 +351,7 @@ chat 模型，拿去打 `/v1/decisions` 会 400 `model ... is not served by this
 每次请求都带**硬超时**（默认 8000ms），超时不是错误，而是降级放行：
 
 ```
-AbortSignal.timeout(budget) → 超时 → degrade("timeout") → 钩子 next() 放行
+AbortSignal.timeout(timeoutMs) → 超时 → degrade("timeout") → 钩子 next() 放行
 ```
 
 三层保护，保证守卫永远不会拖住工具执行：
@@ -388,7 +386,7 @@ AbortSignal.timeout(budget) → 超时 → degrade("timeout") → 钩子 next() 
 | 命中失败冷却 | `cooldown` |
 | 端点 4xx / 5xx | `http-404` / `http-500` 等（附 `endpoint`、`body`） |
 | 网络不可达 | `network-error` |
-| 超时 | `timeout`（附 `budgetMs`） |
+| 超时 | `timeout`（附 `timeoutMs`） |
 | 返回非 JSON / 非对象 | `invalid-json` / `invalid-response` |
 | 缺 `answers` 字段 | `missing-answers` |
 | provider 配置不可用（如 custom 的 base URL 非法） | `invalid-base-url`（附 `provider` 与原因） |
@@ -426,7 +424,7 @@ AbortSignal.timeout(budget) → 超时 → degrade("timeout") → 钩子 next() 
 - **只读工具直接放行**：`read`/`grep`/`glob`/`todo_write` 等不发请求。
 - **state 截断**：`args` 走头尾摘要，`recent` 只带最近 4 条、每条 240 字符。
 - **失败冷却**：连续 3 次失败进入 60s 冷却，避免对着故障端点烧钱。
-- **自身预算**：`budgetTokens` 限制决策模型每小时的花费，超限自动退回启发式。
+- **双层缓存**：精确命中与同类复用都不发请求，热路径上的重复判断几乎零成本。
 - **默认只观察**：新决策点先跑 `observe`，确认与人工判断一致后再切 `enforce`。
 
 ## 验证链路
