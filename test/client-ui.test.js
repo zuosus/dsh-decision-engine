@@ -133,6 +133,18 @@ function collectControls(node, out = []) {
   return out;
 }
 
+/** 渲染树里是否有文字恰好是 label 的按钮。 */
+function hasButtonLabeled(node, label) {
+  if (node === null || node === undefined || node === false) return false;
+  if (Array.isArray(node)) return node.some((child) => hasButtonLabeled(child, label));
+  if (typeof node !== "object") return false;
+  if (node.type === "button") {
+    const texts = (node.children ?? []).filter((child) => typeof child === "string");
+    if (texts.includes(label)) return true;
+  }
+  return (node.children ?? []).some((child) => hasButtonLabeled(child, label));
+}
+
 /** 一份带三个预设的服务端状态（模拟已加载）。 */
 function stateWith(over) {
   return {
@@ -186,12 +198,117 @@ function stateWith(over) {
 // ---------------------------------------------------------------- 用例
 
 test("状态未加载时也渲染出完整表单（不空白）", async () => {
-  const { text } = await render(null);
-  for (const label of ["服务提供方", "生效端点", "启用守卫", "真正拦截", "模型", "API Key", "保存", "测试端点"]) {
+  const { text, tree } = await render(null);
+  for (const label of ["服务提供方", "生效端点", "启用守卫", "真正拦截", "模型", "API Key", "测试端点"]) {
     assert.ok(text.includes(label), `缺少「${label}」：\n${text.slice(0, 400)}`);
   }
   // 兜底状态不得自带服务商地址：地址只能来自服务端下发的预设
   assert.equal(text.includes("bamboonode.dev"), false, "兜底状态硬编码了服务商地址");
+  // 自动保存：没有「保存」按钮，只有状态提示。
+  assert.ok(text.includes("改动即保存"), "缺少自动保存的状态提示");
+  assert.equal(hasButtonLabeled(tree, "保存"), false, "不该再有独立的「保存」按钮");
+});
+
+test("有改动时状态行说明自动保存，而不是等用户点按钮", async () => {
+  // 这条防的是「改回旧版」：把保存按钮加回来、或把状态提示删掉，
+  // 都会让用户重新面对「改了没存 / 存没存不知道」。
+  const { text, tree } = await render(stateWith({}));
+  assert.ok(text.includes("改动即保存"), `应提示自动保存，实际：\n${text.slice(0, 600)}`);
+  assert.equal(hasButtonLabeled(tree, "保存"), false, "配置页不应有「保存」按钮");
+  assert.ok(hasButtonLabeled(tree, "测试端点"), "「测试端点」按钮应保留");
+});
+
+// ------------------------------------------------- 改动即保存（不点按钮）
+
+/** 找到第一个 `predicate` 为真的节点（含 children）。 */
+function findNode(node, predicate) {
+  if (node === null || node === undefined || node === false) return null;
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const hit = findNode(child, predicate);
+      if (hit !== null) return hit;
+    }
+    return null;
+  }
+  if (typeof node !== "object") return null;
+  if (predicate(node) === true) return node;
+  return findNode(node.children, predicate);
+}
+
+/**
+ * 拦截 fetch：记录每次调用，并回一份「服务端原样接受」的响应。
+ *
+ * @returns `{ calls, restore }`：calls 是 `{ url, init }` 列表。
+ */
+function stubFetch() {
+  const calls = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), init });
+    return {
+      ok: true,
+      status: 200,
+      async text() {
+        return JSON.stringify({ ok: true, enabled: true });
+      },
+    };
+  };
+  return {
+    calls,
+    restore() {
+      globalThis.fetch = original;
+    },
+  };
+}
+
+test("拨一下开关就发出 PUT /config，不需要点保存", async () => {
+  const { tree } = await render(stateWith({ enabled: false }));
+  const toggleButton = findNode(tree, (node) => node.type === "button" && node.props["aria-pressed"] !== undefined);
+  assert.ok(toggleButton !== undefined && toggleButton !== null, "没有找到开关按钮");
+  assert.equal(toggleButton.props["aria-pressed"], false, "开关初始应为关闭");
+
+  const stub = stubFetch();
+  try {
+    toggleButton.props.onClick();
+    // 自动保存是异步的：给微任务一个回合。
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  } finally {
+    stub.restore();
+  }
+
+  assert.ok(stub.calls.length > 0, "改动后应自动发出请求（无需点保存按钮）");
+  const configCall = stub.calls.find((item) => item.url.endsWith("/api/decision-engine/config"));
+  assert.ok(configCall !== undefined, `应 PUT /config，实际请求：${stub.calls.map((c) => c.url).join(", ")}`);
+  assert.equal(configCall.init.method, "PUT", "配置改动应走 PUT");
+  const body = JSON.parse(configCall.init.body);
+  assert.equal(body.enabled, true, `patch 应带上刚拨动的开关，实际：${configCall.init.body}`);
+});
+
+test("粘贴 API Key 后失焦即提交，且只带 key 那一格", async () => {
+  const { tree } = await render(stateWith({ provider: "bamboonode" }));
+  const keyInput = findNode(tree, (node) => node.type === "input" && node.props.type === "password");
+  assert.ok(keyInput !== undefined && keyInput !== null, "没有找到 API Key 输入框");
+
+  const stub = stubFetch();
+  try {
+    // 模拟粘贴 + 失焦：输入本身不落盘（半截 key 不能进凭据文件），失焦才提交。
+    keyInput.props.onChange({ target: { value: "sk-test-1234567890" } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(stub.calls.length, 0, "仅输入（未失焦/回车）不该落盘");
+
+    keyInput.props.onBlur();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  } finally {
+    stub.restore();
+  }
+
+  const configCall = stub.calls.find((item) => item.url.endsWith("/api/decision-engine/config"));
+  assert.ok(configCall !== undefined, "失焦后应自动提交密钥");
+  const body = JSON.parse(configCall.init.body);
+  assert.equal(body.bamboonodeApiKey, "sk-test-1234567890", `patch 应带上密钥，实际：${configCall.init.body}`);
+  // 只写当前 provider 那一格：切 provider 不会把 A 的 key 存到 B 名下。
+  assert.equal(Object.hasOwn(body, "systemoneApiKey"), false, "不该写其它 provider 的 key 字段");
+  assert.equal(Object.hasOwn(body, "customApiKey"), false, "不该写其它 provider 的 key 字段");
 });
 
 test("provider 下拉包含全部预设，默认 bamboonode", async () => {

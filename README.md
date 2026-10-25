@@ -100,14 +100,21 @@ Windows 允许点开头的目录。真正与平台相关的是分隔符与家目
 - 两个开关：`启用守卫`、`真正拦截`
 - **思考模式**下拉：`never` / `auto` / `always`（见下文「省 token 的手段」里的取舍）
 - **模型**下拉（来自当前 provider 的 `/v1/models`，含「自动（服务端默认）」）
-- 一个 **API Key 输入框** + `保存` 按钮
+- 一个 **API Key 输入框**
 - 选 `custom` 时展开四个字段：`Base URL`（必填）、`端点风格`、`附加请求头`、`密钥变量名`
 - 一个 `测试端点` 按钮（回显 provider、实际 POST 的完整地址、HTTP 码、请求 id 与响应体）
 - **决策模型参与点**列表：每个决策点一行，右侧是 `关闭 / 观察 / 生效` 三态
 - `自身 token 预算` 输入框，以及实时的缓存命中率与每个点的 token / 延迟统计
 
-改完点`保存`即写入 `config.yml`，**不需要重启**：监听器常驻注册，provider 与
-模式在每次调用时现读；预算与缓存参数同样是取值函数而非启动期快照。
+**改完即保存，没有「保存」按钮**：开关 / 下拉 / 分段控件点一下就落盘；文本框
+（地址、请求头、预算）停手约 0.7 秒或失焦后落盘；API Key 只在**失焦或回车**
+时落盘（避免把打字途中的半截 key 写进凭据文件）。底部状态行实时显示
+`待保存… / 保存中… / 已保存 / 未保存：原因`，失败时附「重试」。落盘即写入
+`config.yml`，**不需要重启**：监听器常驻注册，provider 与模式在每次调用时现读；
+预算与缓存参数同样是取值函数而非启动期快照。
+
+一个例外：选 `custom` 但 `Base URL` 还没填或不合法时，配置改动会**整体延后**
+（状态行给出原因），地址补全后自动落盘；此时决策点改动不受影响，照常保存。
 
 ## Provider：接任意 system-one 风格服务
 
@@ -193,7 +200,7 @@ content-type: application/json
 | `credentials`（默认） | `~/.dsh/.credentials.yaml` 的 `refs:` 段 | 与其他服务（DeepSeek / ModelScope …）统一托管，插件目录不留明文 |
 | `config` | 插件配置目录下的 `config.yml` | 希望配置自包含、能随目录整体备份或迁移；注意是**明文** |
 
-在设置界面「密钥保存位置」下拉切换，保存后立即按新位置写入；已有的 key 不会被
+在设置界面「密钥保存位置」下拉切换，切换即按新位置写入；已有的 key 不会被
 自动搬家（避免"看不到的地方被改动"），需要时重新粘贴一次即可。
 
 写入 `credentials` 的行为约束：
@@ -210,7 +217,7 @@ content-type: application/json
 
 | 情形 | 表现 |
 |---|---|
-| base URL 非法 / 为空（custom） | 保存直接被拒（HTTP 400 + 具体原因，如「必须以 http:// 或 https:// 开头」），**不会写进 yml** |
+| base URL 非法 / 为空（custom） | 该次落盘直接被拒（HTTP 400 + 具体原因，如「必须以 http:// 或 https:// 开头」），**不会写进 yml**；自动保存会一直挂着「未保存」并允许重试 |
 | 密钥缺失 | 不发请求，`no-key` 降级（记录里带该 provider 的变量名） |
 | 鉴权失败（401/403） | `auth-failed` 降级，提示检查该 provider 的 key 是否有效、是否与地址匹配 |
 | 地址错（404/400） | `http-404` / `http-400` 降级，记录里带 `provider`、`endpoint` 与响应体 |
@@ -416,7 +423,7 @@ pnpm verify            # 前两条一起跑
 | `test/engine.test.js` | 适配器接线、off/observe/enforce 语义、全部降级分支 |
 | `test/providers.test.js` | provider 预设、地址拼接、URL 校验、鉴权与请求构造 |
 | `test/config-file.test.js` | `config.yml` 读写往返：保存后再打开的回显、切换不互相覆盖 |
-| `test/client-ui.test.js` | 设置界面渲染：provider 下拉、custom 字段、错误提示 |
+| `test/client-ui.test.js` | 设置界面渲染与交互：provider 下拉、custom 字段、错误提示、**改动即保存**（无保存按钮、改动自动 PUT /config、API Key 失焦提交） |
 
 `test/providers.test.js` 是 provider 改造的验收用例（不依赖宿主依赖，
 裸仓库可直接跑），覆盖六项硬约束：
