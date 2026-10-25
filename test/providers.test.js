@@ -128,6 +128,13 @@ test("providerCatalog 覆盖全部 provider 且带展示信息", () => {
     if (item.id === "custom") continue;
     assert.ok(/^https?:\/\//.test(item.baseUrl), `${item.id} 的默认地址不是 http(s)`);
   }
+  // 每个 provider 必须带自己的显式 key 字段名：界面靠它说明「key 存在
+  // 配置文件的哪一格」。缺了它，就只能退回显示凭据变量名——那正是
+  // 「keyStorage=config 却显示 BAMBOO_API_KEY」误解的来源。
+  const fields = catalog.map((item) => item.keyField);
+  assert.deepEqual(fields, ["systemoneApiKey", "bamboonodeApiKey", "customApiKey"]);
+  // 三个字段必须互不相同：共用一格会导致切换 provider 时互相覆盖。
+  assert.equal(new Set(fields).size, fields.length);
 });
 
 // ------------------------------------------------- 2. bamboonode 行为不变

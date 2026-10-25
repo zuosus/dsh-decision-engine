@@ -165,9 +165,18 @@ function stateWith(over) {
     keyEnvName: "BAMBOO_API_KEY",
     keyStorage: "credentials",
     keyStatus: {
-      systemone: { configured: false, hint: "", refName: "TYPESAFE_API_KEY", source: "none" },
-      bamboonode: { configured: true, hint: "…abcd", refName: "BAMBOO_API_KEY", source: "credentials" },
-      custom: { configured: false, hint: "", refName: "DECISION_ENGINE_CUSTOM_KEY", source: "none" },
+      systemone: {
+        configured: false, hint: "", refName: "TYPESAFE_API_KEY", keyField: "systemoneApiKey",
+        source: "none", sourceLabel: "未配置",
+      },
+      bamboonode: {
+        configured: true, hint: "…abcd", refName: "BAMBOO_API_KEY", keyField: "bamboonodeApiKey",
+        source: "credentials", sourceLabel: "~/.dsh/.credentials.yaml 的 BAMBOO_API_KEY",
+      },
+      custom: {
+        configured: false, hint: "", refName: "DECISION_ENGINE_CUSTOM_KEY", keyField: "customApiKey",
+        source: "none", sourceLabel: "未配置",
+      },
     },
     stats: { requests: 0, cached: 0 },
     ...over,
@@ -312,4 +321,124 @@ test("状态未加载时思考模式下拉仍有兜底选项", async () => {
     .filter((child) => child !== null && typeof child === "object" && child.type === "option")
     .map((child) => child.props.value);
   assert.deepEqual(options, ["never", "auto", "always"]);
+});
+
+// ------------------------------------------- 密钥来源必须显示「真实来源」
+
+test("keyStorage=config 时显示配置文件的字段名，不显示凭据变量名", async () => {
+  // 这是本用例要防的核心误解：页面曾显示 `BAMBOO_API_KEY`，
+  // 而该变量在 keyStorage=config 下根本没被读取——用户会以为 key
+  // 存在 .credentials.yaml 里，甚至误判它过期。
+  const { text } = await render(
+    stateWith({
+      keyStorage: "config",
+      keyStatus: {
+        systemone: {
+          configured: false, hint: "", refName: "TYPESAFE_API_KEY", keyField: "systemoneApiKey",
+          source: "none", sourceLabel: "未配置",
+        },
+        bamboonode: {
+          configured: true, hint: "…abcd", refName: "BAMBOO_API_KEY", keyField: "bamboonodeApiKey",
+          source: "config", sourceLabel: "配置文件 config.yml 的 bamboonodeApiKey",
+        },
+        custom: {
+          configured: false, hint: "", refName: "DECISION_ENGINE_CUSTOM_KEY", keyField: "customApiKey",
+          source: "none", sourceLabel: "未配置",
+        },
+      },
+    }),
+  );
+  assert.ok(
+    text.includes("密钥来源 配置文件 config.yml 的 bamboonodeApiKey"),
+    `应显示真实来源（配置字段），实际文案：\n${text.slice(0, 1200)}`,
+  );
+  // 关键断言：不能把未被读取的凭据变量名当成「密钥来源」展示。
+  assert.equal(
+    text.includes("密钥来源 BAMBOO_API_KEY"),
+    false,
+    "不得把未被读取的凭据变量名显示为密钥来源",
+  );
+});
+
+test("凭据文件来源时显示 .credentials.yaml 与变量名", async () => {
+  const { text } = await render(stateWith({ keyStorage: "credentials" }));
+  assert.ok(
+    text.includes("密钥来源 ~/.dsh/.credentials.yaml 的 BAMBOO_API_KEY"),
+    `应显示凭据文件来源，实际：\n${text.slice(0, 1200)}`,
+  );
+});
+
+test("环境变量来源时明确标注是环境变量", async () => {
+  const { text } = await render(
+    stateWith({
+      keyStatus: {
+        systemone: {
+          configured: false, hint: "", refName: "TYPESAFE_API_KEY", keyField: "systemoneApiKey",
+          source: "none", sourceLabel: "未配置",
+        },
+        bamboonode: {
+          configured: true, hint: "…abcd", refName: "BAMBOO_API_KEY", keyField: "bamboonodeApiKey",
+          source: "env", sourceLabel: "环境变量 BAMBOO_API_KEY",
+        },
+        custom: {
+          configured: false, hint: "", refName: "DECISION_ENGINE_CUSTOM_KEY", keyField: "customApiKey",
+          source: "none", sourceLabel: "未配置",
+        },
+      },
+    }),
+  );
+  assert.ok(text.includes("密钥来源 环境变量 BAMBOO_API_KEY"), `实际：\n${text.slice(0, 1200)}`);
+});
+
+test("未配置时来源显示「未配置」并标注未读到", async () => {
+  const { text } = await render(
+    stateWith({
+      keyStatus: {
+        systemone: {
+          configured: false, hint: "", refName: "TYPESAFE_API_KEY", keyField: "systemoneApiKey",
+          source: "none", sourceLabel: "未配置",
+        },
+        bamboonode: {
+          configured: false, hint: "", refName: "BAMBOO_API_KEY", keyField: "bamboonodeApiKey",
+          source: "none", sourceLabel: "未配置",
+        },
+        custom: {
+          configured: false, hint: "", refName: "DECISION_ENGINE_CUSTOM_KEY", keyField: "customApiKey",
+          source: "none", sourceLabel: "未配置",
+        },
+      },
+    }),
+  );
+  assert.ok(text.includes("密钥来源 未配置（未读到）"), `实际：\n${text.slice(0, 1200)}`);
+});
+
+test("存到插件配置时提示的是字段名，而不是凭据变量名", async () => {
+  const { text } = await render(
+    stateWith({
+      keyStorage: "config",
+      keyStatus: {
+        systemone: {
+          configured: false, hint: "", refName: "TYPESAFE_API_KEY", keyField: "systemoneApiKey",
+          source: "none", sourceLabel: "未配置",
+        },
+        bamboonode: {
+          configured: true, hint: "…abcd", refName: "BAMBOO_API_KEY", keyField: "bamboonodeApiKey",
+          source: "config", sourceLabel: "配置文件 config.yml 的 bamboonodeApiKey",
+        },
+        custom: {
+          configured: false, hint: "", refName: "DECISION_ENGINE_CUSTOM_KEY", keyField: "customApiKey",
+          source: "none", sourceLabel: "未配置",
+        },
+      },
+    }),
+  );
+  assert.ok(
+    text.includes("存到插件配置 config.yml 的 bamboonodeApiKey"),
+    `保存目标应说明字段名，实际：\n${text.slice(0, 1200)}`,
+  );
+  assert.equal(
+    text.includes("存到「插件配置」的 BAMBOO_API_KEY"),
+    false,
+    "不应再出现「存到插件配置的 BAMBOO_API_KEY」这种自相矛盾的文案",
+  );
 });
