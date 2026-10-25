@@ -202,6 +202,75 @@ for (const id of ["route", "delegate", "compact", "turnStop", "retrieval", "skil
 check("decode 后的端点规范化", plugin.normalizeEndpoint("https://x.dev/v1").endsWith("/decisions"));
 check("规范化幂等", plugin.normalizeEndpoint(plugin.normalizeEndpoint("https://x.dev/v1")) === "https://x.dev/v1/decisions");
 
+// ---- provider 接线 -------------------------------------------------------
+//
+// 这一节校验的是「provider 抽象真的接进了 Config/解析层」，而不只是文件存在：
+// 少一个 schema 键，用户在设置页切到 custom 就会得到一次静默失效。
+const providerKeys = [
+  "provider",
+  "customBaseUrl",
+  "customEndpointStyle",
+  "customApiKey",
+  "customApiKeyEnv",
+  "customModel",
+  "customHeaders",
+  "bamboonodeApiKeyEnv",
+  "systemoneApiKeyEnv",
+];
+for (const key of providerKeys) {
+  check(`Config 含 provider 键 ${key}`, Object.hasOwn(defaults, key), `实际 ${String(defaults[key])}`);
+}
+
+check("导出 PROVIDER_IDS", Array.isArray(plugin.PROVIDER_IDS), `实际 ${typeof plugin.PROVIDER_IDS}`);
+check(
+  "provider 预设覆盖 systemone / bamboonode / custom",
+  ["systemone", "bamboonode", "custom"].every((id) =>
+    (plugin.PROVIDER_IDS ?? []).includes(id),
+  ),
+  `实际 ${JSON.stringify(plugin.PROVIDER_IDS)}`,
+);
+check("默认 provider 保持 bamboonode（升级不改变行为）", defaults.provider === "bamboonode", `实际 ${defaults.provider}`);
+
+// 用真实 schema 默认值解析一次：内置 provider 必须给出可请求的端点。
+const defaultProvider = plugin.resolveProvider(defaults);
+check(
+  "默认 provider 解析出 bamboonode 端点",
+  defaultProvider.id === "bamboonode" && defaultProvider.endpoint.endsWith("/decisions"),
+  `实际 ${defaultProvider.id} / ${defaultProvider.endpoint}`,
+);
+
+const systemOneProvider = plugin.resolveProvider({ ...defaults, provider: "systemone" });
+check(
+  "systemone 解析出 /v1/systemone",
+  systemOneProvider.endpoint.endsWith("/systemone"),
+  `实际 ${systemOneProvider.endpoint}`,
+);
+
+// custom 缺地址时必须判为不可用，而不是给出一个猜出来的地址。
+const brokenCustom = plugin.resolveProvider({ ...defaults, provider: "custom", customBaseUrl: "" });
+check("custom 缺 base URL 时 valid=false", brokenCustom.valid === false, `实际 ${brokenCustom.valid}`);
+
+// 落盘前的校验函数必须真的拦住非法输入。
+const rejected = plugin.validateProviderPatch({ provider: "custom", customBaseUrl: "ftp://x.dev" }, defaults);
+check("非法 custom base URL 被拒绝", rejected.ok === false, JSON.stringify(rejected));
+const accepted = plugin.validateProviderPatch(
+  { provider: "custom", customBaseUrl: "https://x.dev/v1" },
+  defaults,
+);
+check("合法 custom base URL 通过校验", accepted.ok === true, JSON.stringify(accepted));
+
+// 请求构造：换 provider 后端点里不得残留别的服务商域名。
+const customProvider = plugin.resolveProvider({
+  ...defaults,
+  provider: "custom",
+  customBaseUrl: "https://gw.example.com/v1",
+});
+check(
+  "custom 请求构造不残留 bamboonode 域名",
+  !customProvider.endpoint.includes("bamboonode"),
+  `实际 ${customProvider.endpoint}`,
+);
+
 console.log("");
 if (failures.length === 0) {
   console.log("全部接线检查通过");

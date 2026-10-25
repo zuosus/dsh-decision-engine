@@ -1,12 +1,19 @@
-# StartLux Decision 配置模板
+# dsh-decision-engine 配置模板
 #
 # 用法：复制到数据目录，按需修改。
-#   mkdir -p ~/.dsh/dsh-startlux-decision
-#   cp startlux.example.yml ~/.dsh/dsh-startlux-decision/startlux.yml
+#   mkdir -p ~/.dsh/dsh-decision-engine
+#   cp startlux.example.yml ~/.dsh/dsh-decision-engine/startlux.yml
+#
+# 文件名刻意仍叫 startlux.yml：老版本就叫这个名字，改名会让已保存的配置
+# （含 API key 与决策点开关）失效。插件会自动读取以下位置，取第一个存在的：
+#   ~/.dsh/dsh-decision-engine/startlux.yml        （首选位置）
+#   ~/.dsh/dsh-startlux-decision/startlux.yml      （上一代；首次启动会自动拷到新目录）
+#   ~/.dsh/plugins/dsh-startlux-decision/startlux.yml
+#   ~/.dsh/plugins/dsh-startlux-guard/startlux.yml
 #
 # 数据目录（插件自动读取）：
-#   ~/.dsh/dsh-startlux-decision/startlux.yml     配置
-#   ~/.dsh/dsh-startlux-decision/telemetry.jsonl  决策记录
+#   <上述目录>/startlux.yml        配置
+#   <上述目录>/telemetry.jsonl     决策记录
 #
 # 改完立即生效：每次工具调用 / 每一步前都会检查 mtime，无需重启 DSH。
 
@@ -21,23 +28,96 @@ enabled: false
 # pointAuthorize 留 auto 时，就沿用这里的 mode（shadow→observe、enforce→enforce）。
 mode: shadow
 
-# 接受三种写法，等价：
+# ============================================================================
+# 服务提供方（provider）
+# ============================================================================
+# 三选一：
+#   bamboonode  内置。StartLux 官方端点 POST /v1/decisions，本插件的原有默认值。
+#   systemone   内置。任意 System One 协议服务 POST /v1/systemone，
+#               默认指向 TypeSafe（https://api.typesafe.ai/v1）。
+#   custom      自己填 base URL，接任何 system-one 风格服务
+#               （自建 llama.cpp / vLLM、企业网关、第三方中转）。
+#
+# 不写这一项 = bamboonode，老配置行为完全不变。
+provider: bamboonode
+
+# ---- bamboonode 预设的地址覆盖 ----------------------------------------------
+# 只在 provider=bamboonode 时生效。老版本唯一的地址字段，继续支持，因此
+# 已有的自建 bamboonode 兼容地址不会因为升级被改回官方。
+# 接受多种写法（等价）：
 #   https://api.bamboonode.dev/v1
 #   https://api.bamboonode.dev/v1/decisions
-#   直接写域名也行，会自动补 https:// 和 /decisions
-baseUrl: https://api.bamboonode.dev/v1/decisions
+#   api.bamboonode.dev/v1          （会补 https://）
+# 末尾斜杠会被规范化，不会拼出 //decisions 或 /v1/v1/decisions。
+baseUrl: https://api.bamboonode.dev/v1
 
-# 模型留空 = 自动（由服务端选当前默认决策模型）。
+# ---- 模型（按 provider 分开存，切换时互不覆盖）------------------------------
+# bamboonode 的模型。留空 = 自动（由服务端选当前默认决策模型），
 # 这样服务商将来换模型名时，本配置不会失效。
 model:
 
-# 通常留空：密钥从 ~/.dsh/.credentials.yaml 统一读取（见 apiKeyEnv）。
-apiKey: ""
+# system one 的模型。留空 = 服务端默认（jev-latest）。
+# 与上面的 model 分开：否则切到 system one 会把 bamboonode 的模型名发过去，
+# 得到 400 model not served。
+systemoneModel: ""
 
-# 去 ~/.dsh/.credentials.yaml 的 refs 段里找这个键名：
+# ---- custom 预设（provider=custom 时才生效）--------------------------------
+# base URL 必填，且必须是 http/https 地址；不带 scheme 会被拒绝（内置预设
+# 允许省略 scheme，custom 不允许——自定义地址必须显式，避免猜错协议）。
+# customBaseUrl: https://api.example.com/v1
+#
+# 端点风格：
+#   auto       地址已带 /decisions 或 /systemone 就原样用，否则按 decisions 拼
+#   decisions  POST <base>/decisions
+#   systemone  POST <base>/systemone
+customEndpointStyle: auto
+#
+# custom 自己的模型（留空 = 服务端默认）。与内置预设的 model 分开存，
+# 这样在两者之间来回切换不会互相覆盖。
+customModel: ""
+# custom 的 key；留空则读 customApiKeyEnv（环境变量或 .credentials.yaml 的 refs）
+customApiKey: ""
+customApiKeyEnv: ""
+# 附加请求头，格式 `名称: 值`，多项用分号分隔。
+# authorization / content-type / host 由插件固定，写了也会被忽略。
+customHeaders: ""
+
+# ============================================================================
+# 密钥
+# ============================================================================
+# 每个 provider 有**自己的** key 名，各自保存各自的 key：
+#
+#   system one -> TYPESAFE_API_KEY
+#   bamboonode -> BAMBOO_API_KEY
+#   custom     -> customApiKeyEnv（没填时用 DECISION_ENGINE_CUSTOM_KEY）
+#
+# 三者互不覆盖，可以同时配好；切换 provider 不会串用别人的 key。
+
+# 密钥存到哪里：
+#   credentials = ~/.dsh/.credentials.yaml 的 refs 段（默认，与其他服务统一托管）
+#   config      = 本文件（自包含，便于随目录备份；注意这里是明文）
+keyStorage: credentials
+
+# 变量名可以覆盖（留空即用上面的默认名）：
+# systemoneApiKeyEnv: ""
+# bamboonodeApiKeyEnv: ""
+# customApiKeyEnv: ""
+
+# 直接写明文 key 也可以（各 provider 一格，互不影响）。
+# 若 keyStorage=credentials，在设置界面粘贴的 key 会写进 .credentials.yaml，
+# 不会落到这里；只有 keyStorage=config 时下面这些字段才会被写入。
+# systemoneApiKey: ""
+# bamboonodeApiKey: ""
+# customApiKey: ""
+
+# 历史字段：老版本的单一 key 槽位，仅对 bamboonode 生效（保留兼容，不建议再用）。
+apiKey: ""
+apiKeyEnv: BAMBOO_API_KEY
+
+# .credentials.yaml 里的形态就是 refs 段：
 #   refs:
 #     BAMBOO_API_KEY: sk-你的key
-apiKeyEnv: BAMBOO_API_KEY
+#     TYPESAFE_API_KEY: sk-另一个key
 
 # 超时预算（毫秒）。超时自动降级放行，连续失败进入冷却。
 timeoutMs: 8000

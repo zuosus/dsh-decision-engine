@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "StartLux Decision",
-    "description": "Four-question risk judgement before every tool call via StartLux, deciding allow, ask or deny. Shadow-first by default, fail-open on any error."
+    "title": "Decision Engine",
+    "description": "Four-question risk judgement before every tool call via a decision model, deciding allow, ask or deny. Works with any system-one style API (system one, bamboonode, or a custom base URL). Shadow-first by default, fail-open on any error."
   }
 }

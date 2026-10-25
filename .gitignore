@@ -8,5 +8,6 @@ telemetry.jsonl.old
 
 # 依赖与系统文件
 node_modules/
+node_modules
 .DS_Store
 *.tgz

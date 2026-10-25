@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "StartLux Decision",
-    "description": "每次工具调用前用 StartLux 做四问风险判断，决定放行、询问或拦截；默认只观察不拦截，任何异常都自动放行。"
+    "title": "Decision Engine",
+    "description": "每次工具调用前用决策模型做四问风险判断，决定放行、询问或拦截；支持 system one / bamboonode / 自定义 base URL，可接任意 system-one 风格服务。默认只观察不拦截，任何异常都自动放行。"
   }
 }

@@ -1,7 +1,7 @@
 {
-  "name": "dsh-startlux-decision",
-  "version": "0.3.0",
-  "description": "StartLux Decision: a cheap judgement layer for DeepSeek Harness — all nine decision points (tool authorization, model routing, delegation, compaction, turn continuation, retrieval, skill pick, session title, COT translation) are implemented and individually switchable.",
+  "name": "dsh-decision-engine",
+  "version": "0.4.0",
+  "description": "dsh-decision-engine: a cheap judgement layer for DeepSeek Harness — all nine decision points (tool authorization, model routing, delegation, compaction, turn continuation, retrieval, skill pick, session title, COT translation) are implemented and individually switchable, and it works against any system-one style API (system one, bamboonode, or a custom base URL).",
   "icon": "./icon.svg",
   "type": "module",
   "main": "lib/index.js",
@@ -10,6 +10,7 @@
     "./client": {
       "default": "./lib/client.js"
     },
+    "./providers": "./lib/providers.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./locale/*.json": "./locale/*.json",
     "./package.json": "./package.json"
@@ -20,17 +21,23 @@
     "README.md",
     "startlux.example.yml",
     "icon.svg",
-    "locale"
+    "locale",
+    "scripts/migrate-profile.mjs"
   ],
   "keywords": [
     "dsh-plugin",
     "deepseek-harness",
+    "decision-engine",
     "startlux",
     "bamboo",
     "bamboo-relay",
     "decisions",
     "system-one",
     "system-1",
+    "typesafe",
+    "jev",
+    "provider",
+    "custom-base-url",
     "tool-approval",
     "risk-gating",
     "model-routing",
@@ -45,12 +52,12 @@
   "author": "zuosus",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/zuosus/dsh-startlux-decision.git"
+    "url": "git+https://github.com/zuosus/dsh-decision-engine.git"
   },
   "bugs": {
-    "url": "https://github.com/zuosus/dsh-startlux-decision/issues"
+    "url": "https://github.com/zuosus/dsh-decision-engine/issues"
   },
-  "homepage": "https://github.com/zuosus/dsh-startlux-decision#readme",
+  "homepage": "https://github.com/zuosus/dsh-decision-engine#readme",
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"

@@ -377,6 +377,8 @@ test("处置结果都带可核对的 reason", () => {
     assert.equal(typeof action.kind, "string", `${id} 缺少 kind`);
     assert.equal(typeof action.reason, "string", `${id} 缺少 reason`);
     assert.ok(action.reason.length > 0, `${id} 的 reason 为空`);
-    assert.ok(action.reason.startsWith("startlux-"), `${id} 的 reason 缺少来源前缀：${action.reason}`);
+    // 前缀是「来源标记」：这样用户从 deny / ask 的 reason 里一眼看出是哪个
+    // 决策点拦的。改名后统一为 decision-engine-。
+    assert.ok(action.reason.startsWith("decision-engine-"), `${id} 的 reason 缺少来源前缀：${action.reason}`);
   }
 });

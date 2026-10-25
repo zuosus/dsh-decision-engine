@@ -1,50 +1,215 @@
-# dsh-startlux-decision
+# dsh-decision-engine
 
-给 DeepSeek Harness 的 System-1 决策守卫，专为 **Bamboo Relay / StartLux** 打造。
-在每次工具调用前问模型四个问题（风险、可逆性、任务相关性、注入嫌疑），据此放行、
-询问或拦截。默认 `shadow`：只记录判断，绝不打断你干活。
+给 DeepSeek Harness 的 System-1 决策守卫：在每次工具调用前问模型四个问题
+（风险、可逆性、任务相关性、注入嫌疑），据此放行、询问或拦截。默认 `shadow`：
+只记录判断，绝不打断你干活。
+
+**它支持所有 system-one 风格 API**，不只是 bamboonode：内置 `system one` 与
+`bamboonode` 两个预设，也可以填任意 `custom` base URL（自建 llama.cpp / vLLM、
+企业网关、第三方中转）。请求路径、鉴权方式与响应结构与 system-one 协议保持一致，
+换 provider 不影响各决策点的解析逻辑。
+
+> **本项目原名 `dsh-startlux-decision`**（更早叫 `dsh-startlux-guard`）。
+> 0.4.0 起更名为 `dsh-decision-engine` 并加入 provider 抽象。
+> 配置文件名仍叫 `startlux.yml`，插件会自动读取旧数据目录，升级不需要重新填 key。
 
 ## 安装
 
 ### 从 npm 安装（推荐）
 
 ```sh
-dsh plugin add dsh-startlux-decision
+dsh plugin add dsh-decision-engine
 ```
 
 或手动装进 profile：
 
 ```sh
 cd ~/.dsh/profiles/desktop
-pnpm add dsh-startlux-decision
+pnpm add dsh-decision-engine
 ```
 
 然后在 profile 的 `package.json` → `dsh.profile.bundles` 里加入
-`"dsh-startlux-decision"`，重启 DSH。
+`"dsh-decision-engine"`，重启 DSH。
 
 ### 本地开发
 
 ```sh
-git clone https://github.com/zuosus/dsh-startlux-decision.git
-cd dsh-startlux-decision
+git clone https://github.com/zuosus/dsh-decision-engine.git
+cd dsh-decision-engine
 # 复制到 profile 的 node_modules，或 pnpm link
 ```
+
+### 从旧名字升级
+
+包名变了，profile 里的两条记录都要改（否则 DSH 找不到插件）：
+
+```jsonc
+// ~/.dsh/profiles/desktop/package.json
+"dsh.profile.bundles": [
+  // "dsh-startlux-decision"   ← 删掉这一项
+  "dsh-decision-engine"        // ← 换成这个
+],
+"dependencies": {
+  // "dsh-startlux-decision": "file:/Users/you/Code/dsh-startlux-decision"  ← 删掉
+  "dsh-decision-engine": "file:/Users/you/Code/dsh-startlux-decision"      // key 必须与包名一致
+}
+```
+
+仓库里带了迁移脚本，不用手改（默认只预览，`--write` 才写入并自动备份）：
+
+```sh
+node scripts/migrate-profile.mjs           # 预览
+node scripts/migrate-profile.mjs --write   # 写入 + 备份 .bak
+cd ~/.dsh/profiles/desktop && pnpm install
+```
+
+然后重启 DSH。**配置不用重填**：插件在启动时会做一次自动迁移，
+把旧目录里的配置与遥测拷到新目录——
+
+| | 路径 |
+|---|---|
+| 新数据目录（迁移目标） | `~/.dsh/dsh-decision-engine/` |
+| 旧数据目录（迁移来源，保留不动） | `~/.dsh/dsh-startlux-decision/` |
+| 更早的位置（仅回退） | `~/.dsh/plugins/dsh-startlux-decision/`、`~/.dsh/plugins/dsh-startlux-guard/` |
+
+迁移规则：
+
+- **只搬一次**：新目录已有 `startlux.yml` 就不再动，绝不覆盖你后来改的值。
+- **只搬两个文件**：`startlux.yml` 与 `telemetry.jsonl`。目录里其它东西
+  （笔记、备份）不碰。
+- **源文件保留**：是拷贝不是移动，搬完旧文件还在，出问题可以对照。
+- **失败即回退**：新目录不可写时继续用旧目录，不会因为搬不动就丢失配置。
+- 迁移发生时启动日志会打一行 `已把旧数据目录的配置迁移到 …`。
 
 ## 配置
 
 ### 插件配置页
 
-**插件 → 已安装 → dsh-startlux-decision → 点进该插件**，配置区（「包含的组件」
-**上方**）会出现 StartLux 卡片，布局与内置 `dsh-rewind-plugin` 一致：
+**插件 → 已安装 → dsh-decision-engine → 点进该插件**，配置区（「包含的组件」
+**上方**）会出现 Decision Engine 卡片，布局与内置 `dsh-rewind-plugin` 一致：
 
+- **服务提供方**下拉：`system one` / `bamboonode` / `custom`，下面一行显示当前生效端点
 - 两个开关：`启用守卫`、`真正拦截`
+- **模型**下拉（来自当前 provider 的 `/v1/models`，含「自动（服务端默认）」）
 - 一个 **API Key 输入框** + `保存` 按钮
-- 一个 `测试端点` 按钮
+- 选 `custom` 时展开四个字段：`Base URL`（必填）、`端点风格`、`附加请求头`、`密钥变量名`
+- 一个 `测试端点` 按钮（回显 provider、实际 POST 的完整地址、HTTP 码、请求 id 与响应体）
 - **决策模型参与点**列表：每个决策点一行，右侧是 `关闭 / 观察 / 生效` 三态
 - `自身 token 预算` 输入框，以及实时的缓存命中率与每个点的 token / 延迟统计
 
-改完点`保存`即写入 `startlux.yml`，**不需要重启**：监听器常驻注册，模式在
-每次调用时现读；预算与缓存参数同样是取值函数而非启动期快照。
+改完点`保存`即写入 `startlux.yml`，**不需要重启**：监听器常驻注册，provider 与
+模式在每次调用时现读；预算与缓存参数同样是取值函数而非启动期快照。
+
+## Provider：接任意 system-one 风格服务
+
+请求形状对所有 provider 完全一致（这也是 system-one 协议本身）：
+
+```http
+POST <base>/decisions        或   POST <base>/systemone
+authorization: Bearer <key>
+content-type: application/json
+
+{ "model": "...", "state": {...}, "questions": {...}, "think_mode": "never" }
+```
+
+响应只需含 `answers`（`model` / `usage` 可选）。因此 provider 只决定三件事：
+**往哪发、用谁的 key、默认哪个模型**。
+
+### 三个选项
+
+| provider | 默认地址 | 端点 | 密钥名 | 默认模型 |
+|---|---|---|---|---|
+| `system one` | `https://api.typesafe.ai/v1` | `/v1/systemone` | `TYPESAFE_API_KEY` | 服务端默认（`jev-latest`） |
+| `bamboonode` | `https://api.bamboonode.dev/v1` | `/v1/decisions` | `BAMBOO_API_KEY` | 服务端默认（`startlux-decision-27b-autothink`） |
+| `custom` | 用户填写（必填） | 按 `端点风格` 拼 | `customApiKeyEnv`（缺省 `DECISION_ENGINE_CUSTOM_KEY`） | `customModel` |
+
+**每个 provider 有各自的 key 名，各自保存各自的 key。** 三者互不覆盖，
+可以同时配好三套凭据；切换 provider 不会串用别人的 key。
+
+不写 `provider` 时等于 `bamboonode`，**老配置行为完全不变**。
+
+模型字段按 provider **分开存**，切换 provider 不会把 A 的模型名发给 B：
+
+| provider | 配置键 | 默认 |
+|---|---|---|
+| `bamboonode` | `model` | 与历史一致（留空即服务端默认） |
+| `system one` | `systemoneModel` | 留空 = 服务端默认（`jev-latest`） |
+| `custom` | `customModel` | 留空 = 服务端默认 |
+
+### custom：填写方式与限制
+
+在设置界面选 `custom` 后需要填：
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| `Base URL` | **是** | 必须是 `http://` 或 `https://` 地址。不支持其它协议（`ftp:` 等会被拒绝），不带 scheme 也会被拒绝——自定义地址必须显式，避免猜错协议。不能含空格、换行或查询串。 |
+| `端点风格` | 否 | `auto`（默认）/ `decisions` / `systemone`。`auto` 在地址已带 `/decisions` 或 `/systemone` 时原样使用。 |
+| `附加请求头` | 否 | 格式 `名称: 值`，多项用分号分隔，如 `X-Tenant: team-a; X-Trace: dsh`。`authorization` / `content-type` / `host` 由插件固定，写了也会被忽略。 |
+| `密钥变量名` | 否 | 填了就从该环境变量或 `~/.dsh/.credentials.yaml` 的 `refs:` 段取 key；也可以直接在 API Key 输入框粘贴。 |
+| `模型` | 否 | 留空 = 由服务端选默认；实测留空比发空串安全（发 `"model": ""` 会被 400）。 |
+
+**地址拼接规则**（`末尾斜杠`一律先去掉，因此 `.../v1/` 与 `.../v1` 等价）：
+
+| 你填的 base URL | 端点风格 | 实际 POST |
+|---|---|---|
+| `https://x.dev` | decisions | `https://x.dev/v1/decisions` |
+| `https://x.dev/v1` | decisions | `https://x.dev/v1/decisions` |
+| `https://x.dev/v1/decisions` | decisions | `https://x.dev/v1/decisions`（不重复） |
+| `https://x.dev/api/v1` | decisions | `https://x.dev/api/v1/decisions` |
+| `https://x.dev/v1` | systemone | `https://x.dev/v1/systemone` |
+| `https://x.dev/v1/systemone` | decisions | `https://x.dev/v1/systemone`（已带端点即原样） |
+
+拼接是幂等的：对结果再拼一次不会变成 `/v1/v1/decisions` 或 `//decisions`。
+
+### 持久化与切换行为
+
+- 所有 provider 的配置**并列**存在 `startlux.yml` 里，互不覆盖：
+  `provider` 记录当前选择，`baseUrl`/`model` 属于内置预设（bamboonode 的
+  `baseUrl` 保留老的覆盖语义），`customBaseUrl`/`customModel`/`customApiKey`/
+  `customApiKeyEnv`/`customHeaders`/`customEndpointStyle` 属于 custom。
+- 切换 provider 只改 `provider` 一个键：**其它 provider 已保存的地址、模型、密钥
+  原样留着**，切回来即恢复。
+- 保存后再次打开配置页按服务端返回的状态回显（不缓存、不推断），custom 的字段
+  除密钥明文外全部回显。
+- 密钥优先级：该 provider 的显式 key（`systemoneApiKey` / `bamboonodeApiKey` /
+  `customApiKey`）> 密钥存储位置上对应的键 > 环境变量。
+- 旧的单一 `apiKey` 字段只对 `bamboonode` 生效（历史兼容）。
+
+### 密钥保存位置
+
+密钥可以放在两个地方，默认 `credentials`：
+
+| `keyStorage` | 写到哪里 | 适合 |
+|---|---|---|
+| `credentials`（默认） | `~/.dsh/.credentials.yaml` 的 `refs:` 段 | 与其他服务（DeepSeek / ModelScope …）统一托管，插件目录不留明文 |
+| `config` | 插件配置目录下的 `startlux.yml` | 希望配置自包含、能随目录整体备份或迁移；注意是**明文** |
+
+在设置界面「密钥保存位置」下拉切换，保存后立即按新位置写入；已有的 key 不会被
+自动搬家（避免"看不到的地方被改动"），需要时重新粘贴一次即可。
+
+写入 `credentials` 的行为约束：
+
+- **只改 `refs:` 段**，`records:`（DSH 的授权记录，含嵌套结构）与注释逐字保留；
+- 键名就是该 provider 自己的名字，所以三套 key 能同时存在、互不覆盖；
+- 传空值等于**删除**该键（清空即撤销，不留空壳行）；
+- 文件权限固定 `600`；
+- 写入失败会整体报错，不会出现"配置说存了、实际没存"。
+
+密钥优先级：显式 key 字段 > 所选存储位置里的对应键 > 环境变量。
+
+### 错误与降级
+
+| 情形 | 表现 |
+|---|---|
+| base URL 非法 / 为空（custom） | 保存直接被拒（HTTP 400 + 具体原因，如「必须以 http:// 或 https:// 开头」），**不会写进 yml** |
+| 密钥缺失 | 不发请求，`no-key` 降级（记录里带该 provider 的变量名） |
+| 鉴权失败（401/403） | `auth-failed` 降级，提示检查该 provider 的 key 是否有效、是否与地址匹配 |
+| 地址错（404/400） | `http-404` / `http-400` 降级，记录里带 `provider`、`endpoint` 与响应体 |
+| provider 配置不可用 | `invalid-base-url` 降级，不打到猜出来的地址上 |
+| 网络失败 / 超时 | `network-error` / `timeout` 降级，随后按阈值进入冷却 |
+
+降级一律 fail-open：放行原行为，并写一条 `telemetry.jsonl`。
+「测试端点」按钮会把完整诊断（provider、实际端点、HTTP 码、请求 id、响应体）直接显示出来。
 
 ## 决策点（参与哪些环节）
 
@@ -131,11 +296,16 @@ cd dsh-startlux-decision
 > 解析器把显式空值保留为 `""`；若整行删掉，键会缺失并回落到内置的硬编码模型名，
 > 「自动」就不生效了。
 
-**列表为何要过滤**：`/v1/models` 返回全部 20 个模型，其中多数是 chat 模型，
-拿去打 `/v1/decisions` 会 400 `model ... is not served by this plugin`。
-本插件按 `supported_endpoint_types` 只保留声明了 `StartLux Decision` /
-`StartLux SystemOne` 的模型。实测 `typesafe/jev-1.14` 虽声明 `jev-decisions`，
-仍被本端点拒绝，因此也排除。
+**列表为何要过滤**：bamboonode 的 `/v1/models` 返回全部 20 个模型，其中多数是
+chat 模型，拿去打 `/v1/decisions` 会 400 `model ... is not served by this plugin`。
+因此对 `bamboonode` 按 `supported_endpoint_types` 只保留声明了
+`StartLux Decision` / `StartLux SystemOne` 的模型。实测 `typesafe/jev-1.14` 虽声明
+`jev-decisions`，仍被该端点拒绝，因此也排除。
+
+对 `system one` / `custom`：自建服务的 `/v1/models` 往往不带
+`supported_endpoint_types`，继续按类型过滤会得到空列表（用户会以为服务没有可用
+模型）。因此这两种 provider 改为「有类型就按类型过滤，没类型就全收」，下拉里也
+仍可手填。
 
 ## 超时与自动回退
 
@@ -180,6 +350,8 @@ AbortSignal.timeout(budget) → 超时 → degrade("timeout") → 钩子 next() 
 | 超时 | `timeout`（附 `budgetMs`） |
 | 返回非 JSON / 非对象 | `invalid-json` / `invalid-response` |
 | 缺 `answers` 字段 | `missing-answers` |
+| provider 配置不可用（如 custom 的 base URL 非法） | `invalid-base-url`（附 `provider` 与原因） |
+| 鉴权被拒（401/403） | `auth-failed`（附 `provider`、`status`、该 provider 的密钥变量名） |
 | 答案形状不符（类型错、缺字段、`choice` 非法、概率越界/NaN） | `answer-shape-mismatch` |
 | 守卫内部抛异常 | 捕获后放行，仅 `logger.warn` |
 | 只读工具 / auto 权限预设 / 被排除工具 | 不判断，直接放行 |
@@ -211,11 +383,32 @@ AbortSignal.timeout(budget) → 超时 → degrade("timeout") → 钩子 next() 
 ### 自动化验收（三条，全部可重复跑）
 
 ```sh
-pnpm test              # 78 项单元测试：纯函数 + 适配器接线 + 降级语义
-pnpm verify:wiring     # 39 项接线检查：用真实 schemastery 加载插件
+pnpm test              # 113 项单元测试：纯函数 + 适配器接线 + providers + 配置往返 + 设置界面渲染
+pnpm verify:wiring     # 接线检查：用真实 schemastery 加载插件
 pnpm verify:endpoint   # 8 个决策点逐个打真实端点，校验题型与答案形状
 pnpm verify            # 前两条一起跑
 ```
+
+四个测试文件各管一层，互不依赖宿主：
+
+| 文件 | 覆盖 |
+|---|---|
+| `test/spec.test.js` | 每个决策点的问法 / 解析 / 处置与阈值边界 |
+| `test/engine.test.js` | 适配器接线、off/observe/enforce 语义、全部降级分支 |
+| `test/providers.test.js` | provider 预设、地址拼接、URL 校验、鉴权与请求构造 |
+| `test/config-file.test.js` | `startlux.yml` 读写往返：保存后再打开的回显、切换不互相覆盖 |
+| `test/client-ui.test.js` | 设置界面渲染：provider 下拉、custom 字段、错误提示 |
+
+`test/providers.test.js` 是 provider 改造的验收用例（不依赖宿主依赖，
+裸仓库可直接跑），覆盖六项硬约束：
+
+1. 内置 `system one` 可用（默认地址 / `/v1/systemone` / 自己的密钥变量名）
+2. 内置 `bamboonode` 行为不变（默认端点、老 `baseUrl` 覆盖、老模型名）
+3. `custom` base URL 可用（含端点风格、请求头、密钥来源优先级）
+4. 非法 URL 被拒绝（缺 scheme、非 http(s)、含空格、带查询串、空值）
+5. 末尾斜杠与端点拼接正确、幂等，不出现 `/v1/v1` 或 `//decisions`
+6. 请求构造不再硬编码 `bamboonode.dev`（含源码级断言：`lib/index.js` 与
+   `lib/client.js` 里不得再出现该域名）
 
 `verify:wiring` 需要 profile 的依赖可解析。仓库里没有 `node_modules` 时先建链接：
 
@@ -226,7 +419,9 @@ ln -s ~/.dsh/profiles/desktop/node_modules node_modules
 它检查的是「宿主到底给不给这个服务」——包括缺 `translator` / `sessionTitle`
 时 `apply()` 不抛、所有监听器都注册上、每个新点默认 `off`（升级不改变行为）。
 
-`verify:endpoint` 要网络与 `BAMBOO_API_KEY`，它逐点校验：
+`verify:endpoint` 要网络与对应 provider 的密钥（`bamboonode` 默认读 `BAMBOO_API_KEY`，
+可用 `DECISION_ENGINE_BASE_URL` + `DECISION_ENGINE_API_KEY` 指向其它
+system-one 服务），它逐点校验：
 端点接受该点的问题集（`choice` 必须有 `criteria`、`score` 必须 2–10 档、
 题型只认三种）、答案能被 `parse()` 解析、`decide()` 产出合法 `kind`。
 **这一步不能省**：题型写错会在运行时 400 并静默降级，光看日志很难发现
@@ -234,13 +429,15 @@ ln -s ~/.dsh/profiles/desktop/node_modules node_modules
 
 ### 手工验证
 
-1. `「测试端点」按钮` → 看到 `HTTP 200` 和 `x-oneapi-request-id`，说明配置与网络都对。
-2. `插件配置页` → 确认 `端点`、`模型`、`密钥 已配置 ✅`；
+1. `「测试端点」按钮` → 看到 `HTTP 200` 和 `x-oneapi-request-id`，说明配置与网络都对；
+   诊断文本第一行就是当前 provider，接着是实际 POST 的完整端点。
+2. `插件配置页` → 确认 `服务提供方`、`生效端点`、`模型`、`密钥 已配置 ✅`；
    决策点列表里每个点都应有 `关闭 / 观察 / 生效` 三态（没有「即将支持」）。
    若某个点显示 `宿主缺服务`，说明宿主没有它依赖的服务（如 `translator`），
    该点无法开启——这不是 bug，是不适用的部署。
 3. 把某个点切到 `观察`，触发一次对应动作 → 看
-   `~/.dsh/dsh-startlux-decision/telemetry.jsonl`：
+   `~/.dsh/dsh-decision-engine/telemetry.jsonl`（首次升级时旧目录的历史记录
+   会被自动拷过来）：
    - `action=degraded, detail=no-key` → key 没读到
    - `detail=http-404` / `http-400` → 地址或模型不对（记录里带 `endpoint` 和 `body`）
    - `detail=answer-shape-mismatch` → 端点返回的答案形状不对（该点的问题集要复核）

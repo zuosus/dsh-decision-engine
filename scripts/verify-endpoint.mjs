@@ -17,32 +17,60 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { POINT_SPECS } from "../lib/points/spec.js";
+import { resolveKeyFor, resolveProvider, PROVIDER_IDS } from "../lib/providers.js";
 
 /*
  * 刻意不从 lib/index.js 导入 normalizeEndpoint / resolveKey：
  * 那个模块 import 了 @deepseek-ai/schemastery（宿主的 peer 依赖），
- * 在没有 DSH node_modules 的裸仓库里无法加载。本脚本只需要「拼 URL」和
- * 「读 key」两件小事，就地实现比拖进一整个宿主依赖干净。
+ * 在没有 DSH node_modules 的裸仓库里无法加载。
+ *
+ * 但也不在这里另写一套地址规则——那正是「脚本打 A、插件打 B」的来源。
+ * providers.js 是零依赖纯模块，直接复用它，脚本与运行期只有一份真相。
  */
 
-/** 把配置里的 baseUrl 规范成完整端点（与 index.js 同规则）。 */
-function normalizeEndpoint(raw) {
-  const text = (raw ?? "").trim();
-  if (text.length === 0) return "https://api.bamboonode.dev/v1/decisions";
-  let value = /^https?:\/\//i.test(text) ? text : `https://${text}`;
-  const noTrailing = value.replace(/\/+$/, "");
-  try {
-    const url = new URL(noTrailing);
-    const path = url.pathname.replace(/\/+$/, "");
-    if (/\/(decisions|systemone)$/i.test(path)) {
-      url.pathname = path;
-      return url.toString();
+/**
+ * 读取真实运行配置（`startlux.yml`），让验收打的就是用户实际在用的端点。
+ *
+ * 支持环境变量覆盖，便于在不改用户配置的前提下对别的服务做验收：
+ *   DECISION_ENGINE_PROVIDER    systemone | bamboonode | custom
+ *   DECISION_ENGINE_BASE_URL    覆盖 base URL（custom 直接生效）
+ *   DECISION_ENGINE_API_KEY     显式 key（优先级最高）
+ *
+ * @returns 已合并的配置对象。
+ */
+function loadConfig() {
+  const candidates = [
+    join(homedir(), ".dsh", "dsh-decision-engine", "startlux.yml"),
+    join(homedir(), ".dsh", "dsh-startlux-decision", "startlux.yml"),
+    join(homedir(), ".dsh", "plugins", "dsh-startlux-decision", "startlux.yml"),
+    join(homedir(), ".dsh", "plugins", "dsh-startlux-guard", "startlux.yml"),
+    join(process.cwd(), "startlux.yml"),
+  ];
+  const config = {};
+  let raw;
+  for (const path of candidates) {
+    try {
+      raw = readFileSync(path, "utf8");
+      break;
+    } catch {
+      /* 继续找下一个 */
     }
-    url.pathname = `${path}/decisions`;
-    return url.toString();
-  } catch {
-    return noTrailing;
   }
+  if (raw === undefined) return config;
+  // 与插件同规则的极简解析：只看 `key: value` 与 `#` 注释。
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0 || trimmed.startsWith("#")) continue;
+    const sep = trimmed.indexOf(":");
+    if (sep <= 0) continue;
+    const key = trimmed.slice(0, sep).trim();
+    let value = trimmed.slice(sep + 1).trim();
+    const hashAt = value.indexOf(" #");
+    if (hashAt >= 0) value = value.slice(0, hashAt).trim();
+    if (value.startsWith('"') && value.endsWith('"') && value.length >= 2) value = value.slice(1, -1);
+    config[key] = value;
+  }
+  return config;
 }
 
 /** 每个决策点一份「现场数据」，用来生成问题集。 */
@@ -103,8 +131,16 @@ const CFG = {
 };
 
 /** 从 ~/.dsh/.credentials.yaml 的 refs 段取 key（不引入 YAML 依赖）。 */
-function credential(ref) {
-  const raw = readFileSync(join(homedir(), ".dsh", ".credentials.yaml"), "utf8");
+function credential(ref, options = {}) {
+  let raw;
+  try {
+    raw = readFileSync(join(homedir(), ".dsh", ".credentials.yaml"), "utf8");
+  } catch (error) {
+    // optional：文件不存在只是「这一路没取到 key」，不是脚本故障——
+    // 后面的环境变量兜底仍然可能成功。
+    if (options.optional === true) return undefined;
+    throw error;
+  }
   let inRefs = false;
   let refsIndent = -1;
   for (const line of raw.split(/\r?\n/)) {
@@ -130,13 +166,47 @@ function credential(ref) {
   return undefined;
 }
 
-const endpoint = normalizeEndpoint("https://api.bamboonode.dev/v1/decisions");
-const key = process.env.BAMBOO_API_KEY || credential("BAMBOO_API_KEY");
+// ---- 解析 provider / 端点 / key：与插件运行期完全同一套逻辑 --------------
+const fileConfig = loadConfig();
+const envProvider = process.env.DECISION_ENGINE_PROVIDER;
+const envBaseUrl = process.env.DECISION_ENGINE_BASE_URL;
 
-if (key === undefined) {
-  console.error("未找到 API key（BAMBOO_API_KEY）：无法做端点验收");
+const cfg = { ...fileConfig };
+if (envProvider !== undefined && PROVIDER_IDS.includes(envProvider)) cfg.provider = envProvider;
+if (envBaseUrl !== undefined && envBaseUrl.length > 0) {
+  // 覆盖地址时一律按 custom 处理，避免内置预设的默认值把它盖回去。
+  cfg.provider = "custom";
+  cfg.customBaseUrl = envBaseUrl;
+}
+if (process.env.DECISION_ENGINE_API_KEY !== undefined) {
+  cfg.provider = cfg.provider === "custom" ? "custom" : cfg.provider;
+  cfg.customApiKey = process.env.DECISION_ENGINE_API_KEY;
+  cfg.apiKey = process.env.DECISION_ENGINE_API_KEY;
+}
+
+const provider = resolveProvider(cfg);
+if (!provider.valid) {
+  console.error(`provider 配置不可用：${provider.error}`);
   process.exit(2);
 }
+
+const endpoint = provider.endpoint;
+const key =
+  (process.env.DECISION_ENGINE_API_KEY ?? "").trim() ||
+  resolveKeyFor(provider, {
+    credentialReader: (ref) => credential(ref, { optional: true }),
+  });
+
+if (key === undefined || key.length === 0) {
+  console.error(
+    `未找到 API key（provider ${provider.id}，变量名 ${provider.apiKeyEnv || "未设置"}）：无法做端点验收`,
+  );
+  process.exit(2);
+}
+
+console.log(`provider: ${provider.label}（${provider.id}）`);
+console.log(`endpoint: ${endpoint}`);
+console.log(`model:    ${provider.model || "自动（服务端默认）"}\n`);
 
 /** 打一次端点，返回 { ok, answers, error }。 */
 async function decide(state, questions) {
