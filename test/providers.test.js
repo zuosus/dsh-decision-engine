@@ -42,8 +42,8 @@ import {
 
 // ---------------------------------------------------------------- 1. 内置预设
 
-test("内置预设齐备：systemone / bamboonode / custom", () => {
-  assert.deepEqual([...PROVIDER_IDS], ["systemone", "bamboonode", "custom"]);
+test("内置预设齐备：systemone / bamboonode / siliconflow / siliconflow-intl / custom", () => {
+  assert.deepEqual([...PROVIDER_IDS], ["systemone", "bamboonode", "siliconflow", "siliconflow-intl", "custom"]);
   for (const id of PROVIDER_IDS) {
     assert.ok(PROVIDER_PRESETS[id] !== undefined, `缺少预设 ${id}`);
   }
@@ -132,9 +132,25 @@ test("providerCatalog 覆盖全部 provider 且带展示信息", () => {
   // 配置文件的哪一格」。缺了它，就只能退回显示凭据变量名——那正是
   // 「keyStorage=config 却显示 BAMBOO_API_KEY」误解的来源。
   const fields = catalog.map((item) => item.keyField);
-  assert.deepEqual(fields, ["systemoneApiKey", "bamboonodeApiKey", "customApiKey"]);
-  // 三个字段必须互不相同：共用一格会导致切换 provider 时互相覆盖。
+  assert.deepEqual(fields, [
+    "systemoneApiKey",
+    "bamboonodeApiKey",
+    "siliconflowApiKey",
+    "siliconflowIntlApiKey",
+    "customApiKey",
+  ]);
+  // 字段必须互不相同：共用一格会导致切换 provider 时互相覆盖。
   assert.equal(new Set(fields).size, fields.length);
+  // 模型字段同理：写回配置靠它定位「哪一格」，撞名就是串台。
+  const modelFields = catalog.map((item) => item.modelField);
+  assert.deepEqual(modelFields, [
+    "systemoneModel",
+    "model",
+    "siliconflowModel",
+    "siliconflowIntlModel",
+    "customModel",
+  ]);
+  assert.equal(new Set(modelFields).size, modelFields.length);
 });
 
 // ------------------------------------------------- 2. bamboonode 行为不变
@@ -553,4 +569,85 @@ test("custom 分支同样归一思考模式", () => {
     thinkMode: "bogus",
   });
   assert.equal(provider.thinkMode, "never");
+});
+
+// --------------------------------------------- 8. 硅基流动（国内站 / 国际站）
+
+test("siliconflow 预设：只认 /systemone，默认模型 Kev-4B，只填 key 即可用", () => {
+  const preset = PROVIDER_PRESETS.siliconflow;
+  assert.equal(preset.baseUrl, "https://api.siliconflow.cn/v1");
+  assert.equal(preset.endpointStyle, "systemone");
+  assert.equal(preset.defaultModel, "Kev-4B");
+  assert.equal(preset.apiKeyEnv, "SILICONFLOW_API_KEY");
+  // 该端点把 model 列为**必填**（实测省略或空串都回 400
+  // `Model field is required.`），所以预设必须带默认模型——否则
+  //「只填一个 API key 就能用」这条承诺落空。
+  assert.equal(preset.requiresModel, true);
+  // 官方只支持这两个决策模型；/v1/models 却会一并返回 98 个模型且不带
+  // supported_endpoint_types，按这份清单筛才不会在下拉里放「选了就 400」的项。
+  assert.deepEqual(preset.knownModels, ["Kev-4B", "SemIf"]);
+});
+
+test("siliconflow 解析出 /v1/systemone，模型留空时回落预设默认", () => {
+  const provider = resolveProvider({ provider: "siliconflow" });
+  assert.equal(provider.id, "siliconflow");
+  assert.equal(provider.valid, true);
+  assert.equal(provider.endpoint, "https://api.siliconflow.cn/v1/systemone");
+  assert.equal(provider.apiKeyEnv, "SILICONFLOW_API_KEY");
+  // 留空 = 用预设默认：绝不能发「省略 model」的请求（那是一次必 400）。
+  assert.equal(provider.model, "Kev-4B");
+  // 显式指定只是「首选」：404 时仍留一条退路（见 DEC-002）。
+  assert.deepEqual(provider.candidates, [
+    "https://api.siliconflow.cn/v1/systemone",
+    "https://api.siliconflow.cn/v1/decisions",
+  ]);
+});
+
+test("siliconflow 显式填模型时以填的为准（换 SemIf 不被预设顶掉）", () => {
+  const provider = resolveProvider({ provider: "siliconflow", siliconflowModel: "SemIf" });
+  assert.equal(provider.model, "SemIf");
+  // 填过的值原样发出去，回显也应是它（而不是预设默认）。
+  assert.equal(buildRequestBody(provider, { state: {}, questions: {} }).model, "SemIf");
+});
+
+test("siliconflow-intl 是另一套账号：地址、key、字段名都不与国内站共用", () => {
+  const cn = resolveProvider({ provider: "siliconflow" });
+  const intl = resolveProvider({ provider: "siliconflow-intl" });
+  assert.equal(intl.endpoint, "https://api.siliconflow.com/v1/systemone");
+  assert.equal(intl.apiKeyEnv, "SILICONFLOW_INTL_API_KEY");
+  assert.equal(intl.model, "Kev-4B");
+  // 两站是两套账号：key 互不通用，字段名共用一格就是「切过去拿错 key → 401」，
+  // 而用户根本看不出是拿错了还是 key 失效了。
+  assert.notEqual(intl.apiKeyEnv, cn.apiKeyEnv);
+  assert.notEqual(intl.preset.keyField, cn.preset.keyField);
+  assert.notEqual(intl.preset.modelField, cn.preset.modelField);
+});
+
+test("requiresModel 只对声明了的预设生效：其它 provider 留空仍省略字段", () => {
+  // bamboonode / system one 省略 model 时服务端会回填默认模型，保留省略语义
+  // 才能在服务商给模型改名时配置不失效（见 config.example.yml）。
+  assert.equal(resolveProvider({ provider: "bamboonode", model: "" }).model, "");
+  assert.equal(resolveProvider({ provider: "systemone" }).model, "");
+  assert.equal("model" in buildRequestBody(resolveProvider({ provider: "systemone" }), { state: {}, questions: {} }), false);
+});
+
+test("五个 provider 各读各的 key，同时配好也互不串用", () => {
+  const credentials = {
+    TYPESAFE_API_KEY: "key-typesafe",
+    BAMBOO_API_KEY: "key-bamboo",
+    SILICONFLOW_API_KEY: "key-sf-cn",
+    SILICONFLOW_INTL_API_KEY: "key-sf-intl",
+    DECISION_ENGINE_CUSTOM_KEY: "key-custom",
+  };
+  const reader = (ref) => credentials[ref];
+  for (const [id, expected] of [
+    ["systemone", "key-typesafe"],
+    ["bamboonode", "key-bamboo"],
+    ["siliconflow", "key-sf-cn"],
+    ["siliconflow-intl", "key-sf-intl"],
+    ["custom", "key-custom"],
+  ]) {
+    const cfg = { provider: id, customBaseUrl: "https://gw.example.com/v1" };
+    assert.equal(resolveKeyFor(resolveProvider(cfg), { credentialReader: reader, env: {} }), expected, id);
+  }
 });

@@ -19,6 +19,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
+// provider 清单与字段名的唯一真源在 providers.js（服务端下发给界面）。
+// 测试直接引用它，避免「测试抄一份清单、漏了新预设也照样绿」。
+import { PROVIDER_IDS, PROVIDER_PRESETS, providerCatalog } from "../lib/providers.js";
+
 /** 每次加载都要拿到一份新的模块实例，否则 factory 只会跑第一次。 */
 let loadSeq = 0;
 
@@ -154,11 +158,9 @@ function stateWith(over) {
     providerLabel: "bamboonode",
     providerValid: true,
     providerError: "",
-    providerCatalog: [
-      { id: "systemone", label: "system one", baseUrl: "https://api.typesafe.ai/v1", hint: "System One 协议" },
-      { id: "bamboonode", label: "bamboonode", baseUrl: "https://api.bamboonode.dev/v1", hint: "StartLux 官方端点" },
-      { id: "custom", label: "custom", baseUrl: "", hint: "任意 system-one 风格服务" },
-    ],
+    // provider 清单直接用服务端那张表（providers.js 的 providerCatalog()）：
+    // 界面按它渲染，测试若另抄一份就测不出「清单漏了新预设」。
+    providerCatalog: providerCatalog(),
     baseUrl: "https://api.bamboonode.dev/v1/decisions",
     rawBaseUrl: "https://api.bamboonode.dev/v1",
     customBaseUrl: "",
@@ -170,6 +172,15 @@ function stateWith(over) {
     model: "自动（服务端默认）",
     rawModel: "",
     rawSystemoneModel: "",
+    // 服务端按「字段名」下发的模型原值（见 lib/providers.js 的 modelField）。
+    // 这张表决定「模型框写回 config.yml 的哪一格」，新增预设时前端自动跟上。
+    rawModels: {
+      model: "",
+      systemoneModel: "",
+      siliconflowModel: "",
+      siliconflowIntlModel: "",
+      customModel: "",
+    },
     thinkMode: "never",
     timeoutMs: 8000,
     keyConfigured: true,
@@ -311,6 +322,107 @@ test("粘贴 API Key 后失焦即提交，且只带 key 那一格", async () => 
   assert.equal(Object.hasOwn(body, "customApiKey"), false, "不该写其它 provider 的 key 字段");
 });
 
+test("硅基流动：粘贴 key 写进它自己那一格（字段名来自服务端 providerCatalog）", async () => {
+  const preset = PROVIDER_PRESETS.siliconflow;
+  const { tree } = await render(
+    stateWith({
+      provider: "siliconflow",
+      providerLabel: "硅基流动",
+      baseUrl: "https://api.siliconflow.cn/v1/systemone",
+    }),
+  );
+  const keyInput = findNode(tree, (node) => node.type === "input" && node.props.type === "password");
+  assert.ok(keyInput !== undefined && keyInput !== null, "没有找到 API Key 输入框");
+
+  const stub = stubFetch();
+  try {
+    keyInput.props.onChange({ target: { value: "sk-sf-1234567890" } });
+    keyInput.props.onBlur();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  } finally {
+    stub.restore();
+  }
+
+  const configCall = stub.calls.find((item) => item.url.endsWith("/api/decision-engine/config"));
+  assert.ok(configCall !== undefined, "失焦后应自动提交密钥");
+  const body = JSON.parse(configCall.init.body);
+  assert.equal(
+    body[preset.keyField],
+    "sk-sf-1234567890",
+    `key 应写进 ${preset.keyField}，实际：${configCall.init.body}`,
+  );
+  // 别家的格子一个都不许写：这是「切 provider 不串 key」的最低保证。
+  for (const other of PROVIDER_IDS) {
+    if (other === "siliconflow") continue;
+    assert.equal(
+      Object.hasOwn(body, PROVIDER_PRESETS[other].keyField),
+      false,
+      `不该写 ${other} 的 key 字段 ${PROVIDER_PRESETS[other].keyField}`,
+    );
+  }
+});
+
+test("硅基流动：改模型写进它自己那一格，且「留空」被说成预设默认", async () => {
+  const preset = PROVIDER_PRESETS.siliconflow;
+  const { text, controls } = await render(
+    stateWith({
+      provider: "siliconflow",
+      providerLabel: "硅基流动",
+      baseUrl: "https://api.siliconflow.cn/v1/systemone",
+    }),
+  );
+  // 该端点 model 必填（实测省略回 400），所以「留空」不能说成「服务端默认」。
+  assert.ok(
+    text.includes(`留空 = 用预设默认 ${preset.defaultModel}`),
+    `模型栏应说明留空的含义，实际文案：\n${text.slice(0, 700)}`,
+  );
+
+  const modelSelect = controls.find((node) => node.type === "select" && node.props.value === "");
+  assert.ok(modelSelect !== undefined, "没有找到模型下拉（当前值应为空 = 走预设默认）");
+
+  const stub = stubFetch();
+  try {
+    modelSelect.props.onChange({ target: { value: "SemIf" } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  } finally {
+    stub.restore();
+  }
+
+  const configCall = stub.calls.find((item) => item.url.endsWith("/api/decision-engine/config"));
+  assert.ok(configCall !== undefined, "改模型应自动落盘");
+  const body = JSON.parse(configCall.init.body);
+  assert.equal(
+    body[preset.modelField],
+    "SemIf",
+    `模型应写进 ${preset.modelField}，实际：${configCall.init.body}`,
+  );
+  // 只写当前 provider 的模型格：A 的模型名不能被写进 B 的格子。
+  assert.equal(Object.hasOwn(body, "model"), false, "不该写 bamboonode 的模型字段");
+  assert.equal(Object.hasOwn(body, "customModel"), false, "不该写 custom 的模型字段");
+});
+
+test("服务端没给 provider 字段映射时绝不猜格子：宁可延后也不写", async () => {
+  // 模拟「status 还没回来」：catalog 为空 → 前端不知道模型与 key 该写哪一格。
+  // 猜一个名字就会把 siliconflow 的 key 存进 bamboonode 的格子——正是
+  // 「填了 key 仍说没配 key」的来源。
+  const { tree } = await render(
+    stateWith({ provider: "siliconflow", providerCatalog: [] }),
+  );
+  const keyInput = findNode(tree, (node) => node.type === "input" && node.props.type === "password");
+
+  const stub = stubFetch();
+  try {
+    keyInput.props.onChange({ target: { value: "sk-test-1234567890" } });
+    keyInput.props.onBlur();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  } finally {
+    stub.restore();
+  }
+
+  const configCall = stub.calls.find((item) => item.url.endsWith("/api/decision-engine/config"));
+  assert.equal(configCall, undefined, "字段映射缺失时不该发 /config（宁可延后也不猜着写）");
+});
+
 test("provider 下拉包含全部预设，默认 bamboonode", async () => {
   const { controls } = await render(stateWith({}));
   const providerSelect = controls.find((node) => node.type === "select" && node.props.value === "bamboonode");
@@ -318,7 +430,8 @@ test("provider 下拉包含全部预设，默认 bamboonode", async () => {
   const options = providerSelect.children
     .filter((child) => child !== null && typeof child === "object" && child.type === "option")
     .map((child) => child.props.value);
-  assert.deepEqual(options, ["systemone", "bamboonode", "custom"]);
+  // 下拉必须与 providers.js 的预设清单完全一致：多一个少一个都是漏改。
+  assert.deepEqual(options, [...PROVIDER_IDS]);
 });
 
 test("选 system one 时下拉回显它、且不出现 custom 专属字段", async () => {
@@ -592,4 +705,30 @@ test("存到插件配置时提示的是字段名，而不是凭据变量名", as
     false,
     "不应再出现「存到插件配置的 BAMBOO_API_KEY」这种自相矛盾的文案",
   );
+});
+
+test("client.js 不引用未定义的 setXxx（防重构留下悬空调用）", () => {
+  // 背景：移除「自身 token 预算」时留下一处 `setBudgetDraft(null)`，而那个
+  // state 已经删掉——保存决策点会抛 ReferenceError，界面上只显示「未保存」。
+  // 语法检查抓不到（运行时才炸），渲染测试也未必走到那一支，所以静态比对：
+  // 每个 setXxx( 调用都必须有对应的 `const [x, setXxx] = useState(...)`
+  // 或 `const setXxx = ...`。
+  const source = readFileSync(new URL("../lib/client.js", import.meta.url), "utf8");
+  // 先剥注释：注释里会提到 setDirty 这类「本该有」的名字，比对时要排除。
+  const code = source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  const declared = new Set();
+  for (const match of code.matchAll(/const\s+\[[A-Za-z_$][\w$]*,\s*(set[A-Za-z_$][\w$]*)\]\s*=/g)) {
+    declared.add(match[1]);
+  }
+  for (const match of code.matchAll(/const\s+(set[A-Za-z_$][\w$]*)\s*=/g)) {
+    declared.add(match[1]);
+  }
+  // 全局 setter 不在本文件声明，但可以调用。
+  const globals = new Set(["setTimeout", "setInterval", "setImmediate"]);
+  const dangling = new Set();
+  for (const match of code.matchAll(/(^|[^.\w$])(set[A-Za-z_$][\w$]*)\s*\(/gm)) {
+    const name = match[2];
+    if (!declared.has(name) && !globals.has(name)) dangling.add(name);
+  }
+  assert.deepEqual([...dangling], [], `client.js 引用了未定义的 setter：${[...dangling].join(", ")}`);
 });

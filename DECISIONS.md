@@ -2,6 +2,77 @@
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
 
+## DEC-004 硅基流动两个站点做成「只粘一个 key」的预设（2026-10-25）
+
+**背景**：用户要求新增两个 pre-configured provider——硅基流动
+（`https://api.siliconflow.cn/v1`）与 Silicon Flow（`https://api.siliconflow.com/v1`），
+模型 kev-4b、url path `/systemone`，**只提供一个 API key 就能用**。
+
+接入前对两个站点做了实测（真实 key 打真实端点，2026-10-25）：
+
+| 探测 | 结果 |
+|---|---|
+| `cn/v1/systemone` + `kev-4b` | **200**，回 `{"model":"kev-4b",...}` |
+| 同上 + `Kev-4B` / `Kev-4b` | 200（模型名大小写不敏感） |
+| 同上 + **省略 model** | **400** `{"code":20013,"message":"Model field is required."}` |
+| 同上 + `model: ""` | 400 同上 |
+| 同上 + `deepseek-ai/DeepSeek-V4.1-Flash` | 400 `{"code":20012,"message":"Model does not exist."}` |
+| `cn/v1/decisions` | 404 `Not Found` |
+| `com/v1/systemone`（假 key） | 401 `Token is invalid.`（= 路径存在） |
+| `com/v1/decisions`（假 key） | 404 |
+| `GET cn/v1/models` | 98 条（含 `Kev-4B`、`SemIf`），**无一条**带 `supported_endpoint_types` |
+
+**决策**：
+
+1. 新增 `siliconflow`（国内站）/ `siliconflow-intl`（国际站）两个预设，地址、
+   路径（`/systemone`）、默认模型全部预置，**用户只粘一个 API key**。
+   两站是两套账号：地址、key、模型字段各占一格，互不共用。
+2. 预设新增 `requiresModel: true` 标记：这类端点把 model 列为必填，**留空时
+   回落到预设默认 `Kev-4B`**，而不是沿用「留空 = 省略字段」。省略字段在它们
+   那里是一次注定的 400，而守卫 fail-open——症状正是静默失效。
+   其余 provider 保留省略语义（服务端回填默认模型，服务商改名不失效）。
+3. 预设新增 `knownModels` 白名单：`/v1/models` 会返回 98 个模型且不带
+   `supported_endpoint_types`，全收等于给用户 96 个「选了就 400」的选项；
+   按白名单筛，下拉只列 `Kev-4B` / `SemIf`。
+4. provider 的三个字段名（`modelField` / `keyField` / `keyEnvField`）**由预设表
+   下发**（`providerCatalog` + status 的 `rawModels`），前端不再按 provider 写
+   if/else——新增预设只改 providers.js 一处。服务端没下发映射时**整笔延后并
+   说明原因**：宁可不写也不猜格子，猜错就是把 A 的 key 存进 B 的格子。
+5. `persistKeys` / 变量名校验 / PUT 允许写入的键全部改为**按预设表生成**：
+   漏掉一个 provider 的后果不是报错，而是它的 key 会绕过凭据文件、以明文
+   落进 config.yml。
+6. 「测试端点」的请求 id 兼容 `x-siliconcloud-trace-id`（SiliconFlow 用它，
+   不是 bamboonode 的 `x-oneapi-request-id`）。
+
+**模型名**：用户写的是 `kev-4b`，服务端 `/v1/models` 的规范写法是 `Kev-4B`
+（两份官方文档自己也一写 `Kev-4b`、一写 `Kev-4B`）。三种大小写实测都 200
+（模型名大小写不敏感），预设取 `Kev-4B`——与 `/v1/models` 的 id 一致，
+模型下拉里才是同一条；否则会出现「kev-4b（当前值）」与「Kev-4B」两条重复项。
+
+**约束与取舍**：
+
+1. **requiresModel 只对声明了的预设生效**：bamboonode / system one 留空仍省略
+   字段，否则服务商给模型改名时本配置会失效。
+2. **knownModels 是白名单**：服务商将来新增决策模型要改预设表。取「漏掉新
+   模型（仍可在 config.yml 手填）」，好过「96 个选了就失败的下拉」。
+3. **两站各占一格**：省的只是几行配置，换来的却是「切过去拿错 key」这种用户
+   无法自查的故障。
+
+**验证**：
+- `test/providers.test.js`：两个预设的地址 / 端点 / 默认模型 / key 隔离、
+  `requiresModel` 只对声明者生效、五个 provider 各读各的 key。
+- `test/client-ui.test.js`：硅基流动的 key 与模型各写自己那一格、别家一格不写；
+  「留空」文案说成预设默认；服务端没给字段映射时不发 `/config`。
+- `test/save-path.test.js`：五个 provider 的 key 分别落进五个 refs 键。
+- `scripts/verify-wiring.mjs`：每个预设的三个字段名都在 Config 里、
+  siliconflow 解析出 `/v1/systemone` 且留空时带默认模型。
+- 真实端点：上表全部为实测（`.com` 一项用假 key 探路径，未占用其额度）。
+- `node --test test/`：199 项全通过；`node scripts/verify-wiring.mjs` 全通过。
+
+**顺带**：README / config.example.yml 补齐五个 provider 的表、model 字段表
+与两条官方 API 文档链接；`package.json` 描述同步。
+
+
 ## DEC-003 去掉「自身 token 预算」功能（2026-10-25）
 
 **背景**：插件原本有一道自身用量护栏——`budgetTokens`（默认每小时 40 万）

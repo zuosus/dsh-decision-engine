@@ -36,14 +36,20 @@ mode: shadow
 # ============================================================================
 # 服务提供方（provider）
 # ============================================================================
-# 三选一：
-#   bamboonode  内置。StartLux 官方端点 POST /v1/decisions，本插件的原有默认值。
-#   systemone   内置。任意 System One 协议服务 POST /v1/systemone，
-#               默认指向 TypeSafe（https://api.typesafe.ai/v1）。
-#   custom      自己填 base URL，接任何 system-one 风格服务
-#               （自建 llama.cpp / vLLM、企业网关、第三方中转）。
+# 五选一：
+#   bamboonode        内置。StartLux 官方端点 POST /v1/decisions，本插件的原有默认值。
+#   systemone         内置。任意 System One 协议服务 POST /v1/systemone，
+#                     默认指向 TypeSafe（https://api.typesafe.ai/v1）。
+#   siliconflow       内置。硅基流动（国内站）https://api.siliconflow.cn/v1/systemone
+#   siliconflow-intl  内置。Silicon Flow 国际站 https://api.siliconflow.com/v1/systemone
+#                     （与国内站是两套账号，key 互不通用）
+#   custom            自己填 base URL，接任何 system-one 风格服务
+#                     （自建 llama.cpp / vLLM、企业网关、第三方中转）。
 #
 # 不写这一项 = bamboonode，老配置行为完全不变。
+#
+# siliconflow / siliconflow-intl 是「开箱即用」的：地址、路径、默认模型都已
+# 预置，只要粘一个 API key 就能跑（详见下方「密钥」一节）。
 provider: bamboonode
 
 # ---- bamboonode 预设的地址覆盖 ----------------------------------------------
@@ -65,6 +71,16 @@ model:
 # 与上面的 model 分开：否则切到 system one 会把 bamboonode 的模型名发过去，
 # 得到 400 model not served。
 systemoneModel: ""
+
+# 硅基流动 / Silicon Flow 的模型。**留空 = 用预设默认 Kev-4B**——
+# 这两个端点把 model 列为必填（实测省略或空串都回 400
+# "Model field is required."），所以这里的「留空」不是「让服务端挑」，
+# 而是用预设默认。想换模型就填 SemIf（官方目前只支持这两个决策模型）。
+#
+# 你写的 kev-4b 与 Kev-4B 是同一个模型：实测该端点对大小写不敏感
+#（三种写法都 200），/v1/models 里的规范写法是 Kev-4B。
+siliconflowModel: ""
+siliconflowIntlModel: ""
 
 # ---- custom 预设（provider=custom 时才生效）--------------------------------
 # base URL 必填，且必须是 http/https 地址；不带 scheme 会被拒绝（内置预设
@@ -99,11 +115,15 @@ customHeaders: ""
 # ============================================================================
 # 每个 provider 有**自己的** key 名，各自保存各自的 key：
 #
-#   system one -> TYPESAFE_API_KEY
-#   bamboonode -> BAMBOO_API_KEY
-#   custom     -> customApiKeyEnv（没填时用 DECISION_ENGINE_CUSTOM_KEY）
+#   system one          -> TYPESAFE_API_KEY
+#   bamboonode          -> BAMBOO_API_KEY
+#   硅基流动（国内站）   -> SILICONFLOW_API_KEY
+#   Silicon Flow 国际站 -> SILICONFLOW_INTL_API_KEY
+#   custom              -> customApiKeyEnv（没填时用 DECISION_ENGINE_CUSTOM_KEY）
 #
-# 三者互不覆盖，可以同时配好；切换 provider 不会串用别人的 key。
+# 五者互不覆盖，可以同时配好；切换 provider 不会串用别人的 key。
+# 两个 SiliconFlow 站点是**两套账号**，key 不通用，因此各占一格——
+# 共用一格的话，切过去就会拿错 key 得到 401，而用户看不出是拿错了还是失效了。
 
 # 密钥存到哪里：
 #   credentials = ~/.dsh/.credentials.yaml 的 refs 段（默认，与其他服务统一托管）
@@ -113,6 +133,8 @@ keyStorage: credentials
 # 变量名可以覆盖（留空即用上面的默认名）：
 # systemoneApiKeyEnv: ""
 # bamboonodeApiKeyEnv: ""
+# siliconflowApiKeyEnv: ""
+# siliconflowIntlApiKeyEnv: ""
 # customApiKeyEnv: ""
 
 # 直接写明文 key 也可以（各 provider 一格，互不影响）。
@@ -120,12 +142,16 @@ keyStorage: credentials
 # 不会落到这里；只有 keyStorage=config 时下面这些字段才会被写入。
 # systemoneApiKey: ""
 # bamboonodeApiKey: ""
+# siliconflowApiKey: ""
+# siliconflowIntlApiKey: ""
 # customApiKey: ""
 
 # .credentials.yaml 里的形态就是 refs 段：
 #   refs:
 #     BAMBOO_API_KEY: sk-你的key
 #     TYPESAFE_API_KEY: sk-另一个key
+#     SILICONFLOW_API_KEY: sk-国内站的key
+#     SILICONFLOW_INTL_API_KEY: sk-国际站的key
 
 # 超时预算（毫秒）。超时自动降级放行，连续失败进入冷却。
 timeoutMs: 8000

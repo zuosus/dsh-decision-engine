@@ -208,23 +208,32 @@ check("规范化幂等", plugin.normalizeEndpoint(plugin.normalizeEndpoint("http
 // 少一个 schema 键，用户在设置页切到 custom 就会得到一次静默失效。
 const providerKeys = [
   "provider",
+  "baseUrl",
   "customBaseUrl",
   "customEndpointStyle",
-  "customApiKey",
-  "customApiKeyEnv",
-  "customModel",
   "customHeaders",
-  "bamboonodeApiKeyEnv",
-  "systemoneApiKeyEnv",
+  "keyStorage",
+  // 各 provider 的三格（模型 / 显式 key / 密钥变量名）**由预设表生成**：
+  // 少一个 schema 键，用户在设置页改的那一项就会静默不生效。
+  ...(plugin.PROVIDER_PRESETS
+    ? Object.values(plugin.PROVIDER_PRESETS).flatMap((preset) => [
+        preset.modelField,
+        preset.keyField,
+        preset.keyEnvField,
+      ])
+    : []),
 ];
 for (const key of providerKeys) {
   check(`Config 含 provider 键 ${key}`, Object.hasOwn(defaults, key), `实际 ${String(defaults[key])}`);
 }
 
 check("导出 PROVIDER_IDS", Array.isArray(plugin.PROVIDER_IDS), `实际 ${typeof plugin.PROVIDER_IDS}`);
+// 预设表导出缺失要立刻失败：上面的字段清单靠它生成，用 `?? []` 兜底会让
+// 整轮字段检查静默跳过——检查脚本自己静默失败比没有检查更危险。
+check("导出 PROVIDER_PRESETS", typeof plugin.PROVIDER_PRESETS === "object", `实际 ${typeof plugin.PROVIDER_PRESETS}`);
 check(
-  "provider 预设覆盖 systemone / bamboonode / custom",
-  ["systemone", "bamboonode", "custom"].every((id) =>
+  "provider 预设覆盖五家（systemone / bamboonode / siliconflow / siliconflow-intl / custom）",
+  ["systemone", "bamboonode", "siliconflow", "siliconflow-intl", "custom"].every((id) =>
     (plugin.PROVIDER_IDS ?? []).includes(id),
   ),
   `实际 ${JSON.stringify(plugin.PROVIDER_IDS)}`,
@@ -245,6 +254,23 @@ check(
   systemOneProvider.endpoint.endsWith("/systemone"),
   `实际 ${systemOneProvider.endpoint}`,
 );
+
+// 硅基流动两个站点：只认 /systemone，且把 model 列为必填（实测省略或空串
+// 都回 400 `Model field is required.`）。因此「留空」必须回落到预设默认，
+// 否则「只填一个 API key 就能用」这条承诺落空，守卫还会静默失效。
+for (const id of ["siliconflow", "siliconflow-intl"]) {
+  const provider = plugin.resolveProvider({ ...defaults, provider: id });
+  check(
+    `${id} 解析出 /v1/systemone 且留空时带默认模型`,
+    provider.endpoint.endsWith("/systemone") && provider.model.length > 0,
+    `实际 ${provider.endpoint} / model=${JSON.stringify(provider.model)}`,
+  );
+  check(
+    `${id} 的候选端点仍是「首选 + 404 回退」`,
+    Array.isArray(provider.candidates) && provider.candidates.length === 2,
+    `实际 ${JSON.stringify(provider.candidates)}`,
+  );
+}
 
 // custom 缺地址时必须判为不可用，而不是给出一个猜出来的地址。
 const brokenCustom = plugin.resolveProvider({ ...defaults, provider: "custom", customBaseUrl: "" });

@@ -131,16 +131,26 @@ content-type: application/json
 响应只需含 `answers`（`model` / `usage` 可选）。因此 provider 只决定三件事：
 **往哪发、用谁的 key、默认哪个模型**。
 
-### 三个选项
+### 五个选项
 
 | provider | 默认地址 | 端点 | 密钥名 | 默认模型 |
 |---|---|---|---|---|
 | `system one` | `https://api.typesafe.ai/v1` | `/v1/systemone` | `TYPESAFE_API_KEY` | 服务端默认（`jev-latest`） |
 | `bamboonode` | `https://api.bamboonode.dev/v1` | `/v1/decisions` | `BAMBOO_API_KEY` | 服务端默认（`startlux-decision-27b-autothink`） |
+| `siliconflow`（硅基流动，国内站） | `https://api.siliconflow.cn/v1` | `/v1/systemone` | `SILICONFLOW_API_KEY` | `Kev-4B`（可改 `SemIf`） |
+| `siliconflow-intl`（Silicon Flow，国际站） | `https://api.siliconflow.com/v1` | `/v1/systemone` | `SILICONFLOW_INTL_API_KEY` | `Kev-4B`（可改 `SemIf`） |
 | `custom` | 用户填写（必填） | 按 `端点风格` 拼 | `customApiKeyEnv`（缺省 `DECISION_ENGINE_CUSTOM_KEY`） | `customModel` |
 
-**每个 provider 有各自的 key 名，各自保存各自的 key。** 三者互不覆盖，
-可以同时配好三套凭据；切换 provider 不会串用别人的 key。
+> 硅基流动两个站点的接入文档：
+> [国内站 api-docs.siliconflow.cn](https://api-docs.siliconflow.cn/docs/api/systemone-post) ·
+> [国际站 docs.siliconflow.com](https://docs.siliconflow.com/en/api-reference/systemone/create-systemone)
+
+**开箱即用**：`siliconflow` / `siliconflow-intl` 只需要粘一个 API key——地址、
+路径（`/systemone`）、默认模型（`Kev-4B`）都已预置。两个站点是**两套账号**，
+key 互不通用，所以各占一格。
+
+**每个 provider 有各自的 key 名，各自保存各自的 key。** 五者互不覆盖，
+可以同时配好五套凭据；切换 provider 不会串用别人的 key。
 
 不写 `provider` 时等于 `bamboonode`，**老配置行为完全不变**。
 
@@ -150,7 +160,19 @@ content-type: application/json
 |---|---|---|
 | `bamboonode` | `model` | 与历史一致（留空即服务端默认） |
 | `system one` | `systemoneModel` | 留空 = 服务端默认（`jev-latest`） |
+| `siliconflow` | `siliconflowModel` | 留空 = 预设默认 `Kev-4B` |
+| `siliconflow-intl` | `siliconflowIntlModel` | 留空 = 预设默认 `Kev-4B` |
 | `custom` | `customModel` | 留空 = 服务端默认 |
+
+> ⚠️ 两个 SiliconFlow 端点把 `model` 列为**必填**（实测省略或空串都回
+> `400 {"code":20013,"message":"Model field is required."}`），所以它们的
+> 「留空」不是「让服务端挑」，而是用预设默认 `Kev-4B`；想换模型填 `SemIf`。
+> 官方目前只支持这两个决策模型，界面上的模型下拉也只列这两个——
+> `/v1/models` 会返回 98 个模型，但 chat 模型打到 `/systemone` 会
+> `400 Model does not exist.`，列出来就是「选了就失败」。
+>
+> 模型名**大小写不敏感**：`kev-4b` / `Kev-4b` / `Kev-4B` 实测都 200，
+> 配置里三种写法等价。
 
 ### custom：填写方式与限制
 
@@ -213,7 +235,8 @@ content-type: application/json
 - 保存后再次打开配置页按服务端返回的状态回显（不缓存、不推断），custom 的字段
   除密钥明文外全部回显。
 - 密钥优先级：该 provider 的显式 key（`systemoneApiKey` / `bamboonodeApiKey` /
-  `customApiKey`）> 密钥存储位置上对应的键 > 环境变量。
+  `siliconflowApiKey` / `siliconflowIntlApiKey` / `customApiKey`）>
+  密钥存储位置上对应的键 > 环境变量。
 - 旧的单一 `apiKey` 字段只对 `bamboonode` 生效（历史兼容）。
 
 ### 密钥保存位置
@@ -231,7 +254,7 @@ content-type: application/json
 写入 `credentials` 的行为约束：
 
 - **只改 `refs:` 段**，`records:`（DSH 的授权记录，含嵌套结构）与注释逐字保留；
-- 键名就是该 provider 自己的名字，所以三套 key 能同时存在、互不覆盖；
+- 键名就是该 provider 自己的名字，所以五套 key 能同时存在、互不覆盖；
 - 传空值等于**删除**该键（清空即撤销，不留空壳行）；
 - 文件权限固定 `600`；
 - 写入失败会整体报错，不会出现"配置说存了、实际没存"。
@@ -345,6 +368,12 @@ chat 模型，拿去打 `/v1/decisions` 会 400 `model ... is not served by this
 `supported_endpoint_types`，继续按类型过滤会得到空列表（用户会以为服务没有可用
 模型）。因此这两种 provider 改为「有类型就按类型过滤，没类型就全收」，下拉里也
 仍可手填。
+
+对 `siliconflow` / `siliconflow-intl`：它们的 `/v1/models` 返回 **98 个**模型、
+**没有一条**带 `supported_endpoint_types`，而决策端点只认 `Kev-4B` / `SemIf`
+（chat 模型打过去是 400 `Model does not exist.`）。类型过滤拿不到任何线索，
+全收又等于「96 个选了就失败的选项」，因此按预设里的 `knownModels` 白名单筛，
+下拉里只列这两个。
 
 ## 超时与自动回退
 
