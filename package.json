@@ -1,6 +1,6 @@
 {
   "name": "dsh-decision-engine",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "dsh-decision-engine: a cheap judgement layer for DeepSeek Harness — all nine decision points (tool authorization, model routing, delegation, compaction, turn continuation, retrieval, skill pick, session title, COT translation) are implemented and individually switchable, and it works against any system-one style API (system one, bamboonode, or a custom base URL).",
   "icon": "./icon.svg",
   "type": "module",
@@ -19,7 +19,7 @@
     "lib",
     "cordis.patch.yml",
     "README.md",
-    "startlux.example.yml",
+    "config.example.yml",
     "icon.svg",
     "locale",
     "scripts/migrate-profile.mjs"

@@ -23,13 +23,16 @@ import { readFileSync } from "node:fs";
 
 import {
   DEFAULT_PROVIDER,
+  DEFAULT_THINK_MODE,
   ENDPOINT_STYLES,
   PROVIDER_IDS,
   PROVIDER_PRESETS,
+  THINK_MODES,
   buildEndpoint,
   buildHeaders,
   buildRequestBody,
   normalizeBaseUrl,
+  normalizeThinkMode,
   parseCustomHeaders,
   providerCatalog,
   resolveKeyFor,
@@ -497,4 +500,50 @@ test("自定义请求头不会覆盖鉴权与内容类型", () => {
 test("customHeaders 支持换行分隔并忽略无效行", () => {
   const headers = parseCustomHeaders("X-A: 1\nX-B: 2\n坏了\n: 空名\nX-C:");
   assert.deepEqual(headers, { "X-A": "1", "X-B": "2" });
+});
+// --------------------------------------------------- 7. 思考模式（thinkMode）
+
+test("思考模式只有三档，默认 never", () => {
+  assert.deepEqual(THINK_MODES, ["never", "auto", "always"]);
+  assert.equal(DEFAULT_THINK_MODE, "never");
+});
+
+test("三个合法思考模式原样透传到 think_mode", () => {
+  const questions = { q: { type: "noul", instructions: "x" } };
+  for (const mode of THINK_MODES) {
+    const provider = resolveProvider({ provider: "bamboonode", thinkMode: mode });
+    assert.equal(provider.thinkMode, mode);
+    const body = buildRequestBody(provider, { state: {}, questions, thinkMode: mode });
+    assert.equal(body.think_mode, mode);
+  }
+});
+
+test("非法思考模式归一为 never，不会原样发给服务端", () => {
+  // 配置来自自研 YAML 子集解析器，绕过 Schemastery 校验，必须在取值处兜住。
+  for (const bad of ["sometimes", "NEVER", "Always", "true", "", "  ", 123, null, undefined]) {
+    assert.equal(normalizeThinkMode(bad), "never", `非法值 ${JSON.stringify(bad)} 应回退 never`);
+  }
+});
+
+test("空串不会被透传为 think_mode（?? 兜不住空串的老 bug）", () => {
+  const questions = { q: { type: "noul", instructions: "x" } };
+  // parseConfigText 对 `thinkMode:` 会解析成 ""，这是「显式空值」的既定语义。
+  const provider = resolveProvider({ provider: "bamboonode", thinkMode: "" });
+  const body = buildRequestBody(provider, { state: {}, questions, thinkMode: "" });
+  assert.equal(body.think_mode, "never");
+  assert.notEqual(body.think_mode, "");
+});
+
+test("thinkMode 缺失时回退 never", () => {
+  const provider = resolveProvider({ provider: "bamboonode" });
+  assert.equal(provider.thinkMode, "never");
+});
+
+test("custom 分支同样归一思考模式", () => {
+  const provider = resolveProvider({
+    provider: "custom",
+    customBaseUrl: "https://gw.example.com/v1",
+    thinkMode: "bogus",
+  });
+  assert.equal(provider.thinkMode, "never");
 });

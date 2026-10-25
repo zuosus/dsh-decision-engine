@@ -29,7 +29,7 @@ import { resolveKeyFor, resolveProvider, PROVIDER_IDS } from "../lib/providers.j
  */
 
 /**
- * 读取真实运行配置（`startlux.yml`），让验收打的就是用户实际在用的端点。
+ * 读取真实运行配置（`config.yml`），让验收打的就是用户实际在用的端点。
  *
  * 支持环境变量覆盖，便于在不改用户配置的前提下对别的服务做验收：
  *   DECISION_ENGINE_PROVIDER    systemone | bamboonode | custom
@@ -39,11 +39,14 @@ import { resolveKeyFor, resolveProvider, PROVIDER_IDS } from "../lib/providers.j
  * @returns 已合并的配置对象。
  */
 function loadConfig() {
+  // 顺序与插件保持一致：新名字在前，旧名字只做回退（升级后旧文件可能还在）。
   const candidates = [
+    join(homedir(), ".dsh", "dsh-decision-engine", "config.yml"),
     join(homedir(), ".dsh", "dsh-decision-engine", "startlux.yml"),
     join(homedir(), ".dsh", "dsh-startlux-decision", "startlux.yml"),
     join(homedir(), ".dsh", "plugins", "dsh-startlux-decision", "startlux.yml"),
     join(homedir(), ".dsh", "plugins", "dsh-startlux-guard", "startlux.yml"),
+    join(process.cwd(), "config.yml"),
     join(process.cwd(), "startlux.yml"),
   ];
   const config = {};

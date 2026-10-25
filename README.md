@@ -4,14 +4,17 @@
 （风险、可逆性、任务相关性、注入嫌疑），据此放行、询问或拦截。默认 `shadow`：
 只记录判断，绝不打断你干活。
 
-**它支持所有 system-one 风格 API**，不只是 bamboonode：内置 `system one` 与
+**它支持所有 system-one 风格 API**：内置 `system one` 与
 `bamboonode` 两个预设，也可以填任意 `custom` base URL（自建 llama.cpp / vLLM、
 企业网关、第三方中转）。请求路径、鉴权方式与响应结构与 system-one 协议保持一致，
 换 provider 不影响各决策点的解析逻辑。
 
 > **本项目原名 `dsh-startlux-decision`**（更早叫 `dsh-startlux-guard`）。
 > 0.4.0 起更名为 `dsh-decision-engine` 并加入 provider 抽象。
-> 配置文件名仍叫 `startlux.yml`，插件会自动读取旧数据目录，升级不需要重新填 key。
+>
+> **0.5.0 起配置文件名从 `startlux.yml` 改为 `config.yml`**——本插件已不是
+> 只服务 startlux 一家，名字里再挂某个服务商只会误导。旧文件会被**自动改名
+> 迁移**，升级不需要重新填 key；迁移失败时仍会回退读取旧文件名。
 
 ## 安装
 
@@ -39,22 +42,6 @@ cd dsh-decision-engine
 # 复制到 profile 的 node_modules，或 pnpm link
 ```
 
-### 从旧名字升级
-
-包名变了，profile 里的两条记录都要改（否则 DSH 找不到插件）：
-
-```jsonc
-// ~/.dsh/profiles/desktop/package.json
-"dsh.profile.bundles": [
-  // "dsh-startlux-decision"   ← 删掉这一项
-  "dsh-decision-engine"        // ← 换成这个
-],
-"dependencies": {
-  // "dsh-startlux-decision": "file:/Users/you/Code/dsh-startlux-decision"  ← 删掉
-  "dsh-decision-engine": "file:/Users/you/Code/dsh-startlux-decision"      // key 必须与包名一致
-}
-```
-
 仓库里带了迁移脚本，不用手改（默认只预览，`--write` 才写入并自动备份）：
 
 ```sh
@@ -68,18 +55,16 @@ cd ~/.dsh/profiles/desktop && pnpm install
 
 | | 路径 |
 |---|---|
-| 新数据目录（迁移目标） | `~/.dsh/dsh-decision-engine/` |
-| 旧数据目录（迁移来源，保留不动） | `~/.dsh/dsh-startlux-decision/` |
-| 更早的位置（仅回退） | `~/.dsh/plugins/dsh-startlux-decision/`、`~/.dsh/plugins/dsh-startlux-guard/` |
+| 数据目录（迁移目标） | `~/.dsh/dsh-decision-engine/` |
 
 迁移规则：
 
-- **只搬一次**：新目录已有 `startlux.yml` 就不再动，绝不覆盖你后来改的值。
-- **只搬两个文件**：`startlux.yml` 与 `telemetry.jsonl`。目录里其它东西
-  （笔记、备份）不碰。
-- **源文件保留**：是拷贝不是移动，搬完旧文件还在，出问题可以对照。
-- **失败即回退**：新目录不可写时继续用旧目录，不会因为搬不动就丢失配置。
-- 迁移发生时启动日志会打一行 `已把旧数据目录的配置迁移到 …`。
+- **只搬一次**：新目录已有 `config.yml` 就不再动，绝不覆盖你后来改的值。
+- **配置改名**：新目录里的旧名 `startlux.yml` 会被 `rename` 成 `config.yml`
+  （rename 失败则拷贝）；跨目录迁移是**拷贝**，源文件保留，出问题可对照。
+- **只搬两个文件**：配置文件与 `telemetry.jsonl`。目录里其它东西
+  （笔记、备份）一概不碰。
+- **权限 600**：配置里可能有明文 key，迁移后仍保持只有你可读。
 
 ## 配置
 
@@ -90,6 +75,7 @@ cd ~/.dsh/profiles/desktop && pnpm install
 
 - **服务提供方**下拉：`system one` / `bamboonode` / `custom`，下面一行显示当前生效端点
 - 两个开关：`启用守卫`、`真正拦截`
+- **思考模式**下拉：`never` / `auto` / `always`（见下文「省 token 的手段」里的取舍）
 - **模型**下拉（来自当前 provider 的 `/v1/models`，含「自动（服务端默认）」）
 - 一个 **API Key 输入框** + `保存` 按钮
 - 选 `custom` 时展开四个字段：`Base URL`（必填）、`端点风格`、`附加请求头`、`密钥变量名`
@@ -97,7 +83,7 @@ cd ~/.dsh/profiles/desktop && pnpm install
 - **决策模型参与点**列表：每个决策点一行，右侧是 `关闭 / 观察 / 生效` 三态
 - `自身 token 预算` 输入框，以及实时的缓存命中率与每个点的 token / 延迟统计
 
-改完点`保存`即写入 `startlux.yml`，**不需要重启**：监听器常驻注册，provider 与
+改完点`保存`即写入 `config.yml`，**不需要重启**：监听器常驻注册，provider 与
 模式在每次调用时现读；预算与缓存参数同样是取值函数而非启动期快照。
 
 ## Provider：接任意 system-one 风格服务
@@ -163,7 +149,7 @@ content-type: application/json
 
 ### 持久化与切换行为
 
-- 所有 provider 的配置**并列**存在 `startlux.yml` 里，互不覆盖：
+- 所有 provider 的配置**并列**存在 `config.yml` 里，互不覆盖：
   `provider` 记录当前选择，`baseUrl`/`model` 属于内置预设（bamboonode 的
   `baseUrl` 保留老的覆盖语义），`customBaseUrl`/`customModel`/`customApiKey`/
   `customApiKeyEnv`/`customHeaders`/`customEndpointStyle` 属于 custom。
@@ -182,7 +168,7 @@ content-type: application/json
 | `keyStorage` | 写到哪里 | 适合 |
 |---|---|---|
 | `credentials`（默认） | `~/.dsh/.credentials.yaml` 的 `refs:` 段 | 与其他服务（DeepSeek / ModelScope …）统一托管，插件目录不留明文 |
-| `config` | 插件配置目录下的 `startlux.yml` | 希望配置自包含、能随目录整体备份或迁移；注意是**明文** |
+| `config` | 插件配置目录下的 `config.yml` | 希望配置自包含、能随目录整体备份或迁移；注意是**明文** |
 
 在设置界面「密钥保存位置」下拉切换，保存后立即按新位置写入；已有的 key 不会被
 自动搬家（避免"看不到的地方被改动"），需要时重新粘贴一次即可。
@@ -283,7 +269,7 @@ content-type: application/json
 
 配置页的「模型」是**下拉框**，由服务商实时提供，另有「自动（服务端默认）」选项。
 
-**默认就是「自动」**（`startlux.yml` 里 `model:` 留空）：插件**不发送该字段**，
+**默认就是「自动」**（`config.yml` 里 `model:` 留空）：插件**不发送该字段**，
 服务端用它当前的默认决策模型。实测省略 `model` 返回 200，响应里回填实际使用的模型名：
 
 ```json
@@ -292,7 +278,7 @@ content-type: application/json
 
 这样即便服务商将来更换模型名，留空配置也不会因此 400。
 
-> 注意：`startlux.yml` 里的 `model:` **必须写出来但留空**（`model:` 后面不跟值）。
+> 注意：`config.yml` 里的 `model:` **必须写出来但留空**（`model:` 后面不跟值）。
 > 解析器把显式空值保留为 `""`；若整行删掉，键会缺失并回落到内置的硬编码模型名，
 > 「自动」就不生效了。
 
@@ -370,8 +356,18 @@ AbortSignal.timeout(budget) → 超时 → degrade("timeout") → 钩子 next() 
     于是**实测 309 次调用命中 0 次**——等于缓存完全没工作。
     现在 4 条同类 `node -e '...'` 变体只需 1 次真实请求（命中率 60%），
     而 `rm -rf` 不会复用任何缓存裁决。
-- **`thinkMode: never`**：实测主要省**延迟**（约 1.9s vs 7.2s）；输入 token 基本不变
-  （该端点 `output_tokens` 恒为 0，思考开销未计入计量）。
+- **`thinkMode` 默认 `never`**：实测主要省**延迟**（约 1.9s vs 7.2s）；输入 token 基本不变
+  （该端点 `output_tokens` 恒为 0，思考开销未计入计量）。三档可在配置页「思考模式」
+  下拉切换，或手改 `config.yml`：
+
+  | 值 | 行为 | 适用 |
+  |---|---|---|
+  | `never` | 不思考。默认值 | 热路径首选，不想拖慢每次工具调用 |
+  | `auto` | 仅在模型自己判断需要时思考 | 折中 |
+  | `always` | 总是思考 | 高风险场景、排查误判时临时使用；每次约多等 5s |
+
+  非法值（如 `thinkMode: sometimes`）会被归一成 `never`，不会被原样发给服务端：
+  配置来自自研 YAML 子集解析器，绕过了 Schemastery 校验，因此取值必须在这里兜。
 - **只读工具直接放行**：`read`/`grep`/`glob`/`todo_write` 等不发请求。
 - **state 截断**：`args` 走头尾摘要，`recent` 只带最近 4 条、每条 240 字符。
 - **失败冷却**：连续 3 次失败进入 60s 冷却，避免对着故障端点烧钱。
@@ -396,7 +392,7 @@ pnpm verify            # 前两条一起跑
 | `test/spec.test.js` | 每个决策点的问法 / 解析 / 处置与阈值边界 |
 | `test/engine.test.js` | 适配器接线、off/observe/enforce 语义、全部降级分支 |
 | `test/providers.test.js` | provider 预设、地址拼接、URL 校验、鉴权与请求构造 |
-| `test/config-file.test.js` | `startlux.yml` 读写往返：保存后再打开的回显、切换不互相覆盖 |
+| `test/config-file.test.js` | `config.yml` 读写往返：保存后再打开的回显、切换不互相覆盖 |
 | `test/client-ui.test.js` | 设置界面渲染：provider 下拉、custom 字段、错误提示 |
 
 `test/providers.test.js` 是 provider 改造的验收用例（不依赖宿主依赖，
@@ -459,7 +455,7 @@ system-one 服务），它逐点校验：
 
 ### 其余八个决策点
 
-全部阈值都在 `startlux.yml` 里可覆盖，默认值按实测校准（见上文「阈值是实测
+全部阈值都在 `config.yml` 里可覆盖，默认值按实测校准（见上文「阈值是实测
 校准的」）。下表列出「改动它会怎样」：
 
 | 键 | 默认 | 调高会怎样 | 调低会怎样 |

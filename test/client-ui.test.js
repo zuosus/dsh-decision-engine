@@ -275,3 +275,41 @@ test("生效端点始终可见（避免界面显示与实际请求不一致）",
   );
   assert.ok(text.includes("https://gw.example.com/v1/systemone"), "没有显示生效端点");
 });
+test("思考模式下拉存在，回显当前值且提供全部三档", async () => {
+  const { controls, text } = await render(
+    stateWith({ thinkMode: "auto", thinkModes: ["never", "auto", "always"] }),
+  );
+  assert.ok(text.includes("思考模式"), "界面上没有「思考模式」这一项");
+  const select = controls.find((node) => node.type === "select" && node.props.value === "auto");
+  assert.ok(select !== undefined, "没有找到思考模式下拉（或当前值不是 auto）");
+  const options = select.children
+    .filter((child) => child !== null && typeof child === "object" && child.type === "option")
+    .map((child) => child.props.value);
+  assert.deepEqual(options, ["never", "auto", "always"], "三档必须齐全，否则用户无法切到 always");
+});
+
+test("思考模式选项由服务端下发，不在前端硬编码", async () => {
+  // 服务端若只给两档（例如未来改动），前端应照办而不是自己补一个 always。
+  const { controls } = await render(stateWith({ thinkMode: "never", thinkModes: ["never", "auto"] }));
+  const select = controls.find((node) => node.type === "select" && node.props.value === "never");
+  assert.ok(select !== undefined);
+  const options = select.children
+    .filter((child) => child !== null && typeof child === "object" && child.type === "option")
+    .map((child) => child.props.value);
+  assert.deepEqual(options, ["never", "auto"]);
+});
+
+test("选 always 时提示延迟代价", async () => {
+  const { text } = await render(stateWith({ thinkMode: "always" }));
+  assert.ok(text.includes("多等"), "选 always 时应提示额外的延迟代价");
+});
+
+test("状态未加载时思考模式下拉仍有兜底选项", async () => {
+  const { controls } = await render(null);
+  const select = controls.find((node) => node.type === "select" && node.props.value === "never");
+  assert.ok(select !== undefined, "status 未返回时思考模式下拉不应消失");
+  const options = select.children
+    .filter((child) => child !== null && typeof child === "object" && child.type === "option")
+    .map((child) => child.props.value);
+  assert.deepEqual(options, ["never", "auto", "always"]);
+});

@@ -99,4 +99,4 @@ await copyFile(profilePath, backup);
 await writeFile(profilePath, next, "utf8");
 console.log(`\n已写入。原文件备份在：${backup}`);
 console.log("接着执行：cd " + join(profilePath, "..") + " && pnpm install");
-console.log("然后重启 DSH。配置（startlux.yml）不需要重填，插件会自动读取旧数据目录。");
+console.log("然后重启 DSH。配置（config.yml，旧名 startlux.yml 会被自动迁移）不需要重填。");

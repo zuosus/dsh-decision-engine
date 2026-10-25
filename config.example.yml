@@ -2,17 +2,22 @@
 #
 # 用法：复制到数据目录，按需修改。
 #   mkdir -p ~/.dsh/dsh-decision-engine
-#   cp startlux.example.yml ~/.dsh/dsh-decision-engine/startlux.yml
+#   cp config.example.yml ~/.dsh/dsh-decision-engine/config.yml
 #
-# 文件名刻意仍叫 startlux.yml：老版本就叫这个名字，改名会让已保存的配置
-# （含 API key 与决策点开关）失效。插件会自动读取以下位置，取第一个存在的：
-#   ~/.dsh/dsh-decision-engine/startlux.yml        （首选位置）
-#   ~/.dsh/dsh-startlux-decision/startlux.yml      （上一代；首次启动会自动拷到新目录）
+# 文件名是 config.yml：本插件早已不是「只服务 startlux 一家」的插件，
+# 而是任意 system-one 风格服务（system one / bamboonode / custom）的决策层，
+# 名字里再挂某个服务商只会误导。旧名 startlux.yml 仍会被自动读取并迁移，
+# 升级不需要重新填 key。
+#
+# 插件按以下顺序找配置，取第一个存在的：
+#   ~/.dsh/dsh-decision-engine/config.yml          （首选位置）
+#   ~/.dsh/dsh-decision-engine/startlux.yml        （旧名，首次启动自动改名）
+#   ~/.dsh/dsh-startlux-decision/startlux.yml      （上一代数据目录；自动拷到新目录）
 #   ~/.dsh/plugins/dsh-startlux-decision/startlux.yml
 #   ~/.dsh/plugins/dsh-startlux-guard/startlux.yml
 #
 # 数据目录（插件自动读取）：
-#   <上述目录>/startlux.yml        配置
+#   <上述目录>/config.yml          配置
 #   <上述目录>/telemetry.jsonl     决策记录
 #
 # 改完立即生效：每次工具调用 / 每一步前都会检查 mtime，无需重启 DSH。
@@ -110,10 +115,6 @@ keyStorage: credentials
 # bamboonodeApiKey: ""
 # customApiKey: ""
 
-# 历史字段：老版本的单一 key 槽位，仅对 bamboonode 生效（保留兼容，不建议再用）。
-apiKey: ""
-apiKeyEnv: BAMBOO_API_KEY
-
 # .credentials.yaml 里的形态就是 refs 段：
 #   refs:
 #     BAMBOO_API_KEY: sk-你的key
@@ -122,7 +123,11 @@ apiKeyEnv: BAMBOO_API_KEY
 # 超时预算（毫秒）。超时自动降级放行，连续失败进入冷却。
 timeoutMs: 8000
 
-# never = 不思考，最省 token（默认）；auto = 仅在不确定时思考
+# 思考模式（startlux 的 think_mode），三档：
+#   never  不思考——最省延迟（实测约 1.9s vs 7.2s），默认值，热路径首选
+#   auto   仅在模型自己判断需要时思考——折中
+#   always 总是思考——判断更充分，但每次工具调用约多等 5 秒
+# 该端点 output_tokens 恒为 0，思考开销不计入计量，所以省的主要是延迟。
 thinkMode: never
 
 # ============================================================================
