@@ -13,11 +13,11 @@
  */
 
 import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { POINT_SPECS } from "../lib/points/spec.js";
 import { resolveKeyFor, resolveProvider, PROVIDER_IDS } from "../lib/providers.js";
+import { resolveDshHome } from "../lib/home-paths.js";
 
 /*
  * 刻意不从 lib/index.js 导入 normalizeEndpoint / resolveKey：
@@ -40,12 +40,15 @@ import { resolveKeyFor, resolveProvider, PROVIDER_IDS } from "../lib/providers.j
  */
 function loadConfig() {
   // 顺序与插件保持一致：新名字在前，旧名字只做回退（升级后旧文件可能还在）。
+  // 家目录交给 home-paths.js 解析，与插件本体完全同一套规则
+  // （否则脚本可能去 ~/.dsh 找、而插件实际读的是 $DSH_HOME）。
+  const home = resolveDshHome();
   const candidates = [
-    join(homedir(), ".dsh", "dsh-decision-engine", "config.yml"),
-    join(homedir(), ".dsh", "dsh-decision-engine", "startlux.yml"),
-    join(homedir(), ".dsh", "dsh-startlux-decision", "startlux.yml"),
-    join(homedir(), ".dsh", "plugins", "dsh-startlux-decision", "startlux.yml"),
-    join(homedir(), ".dsh", "plugins", "dsh-startlux-guard", "startlux.yml"),
+    join(home, "dsh-decision-engine", "config.yml"),
+    join(home, "dsh-decision-engine", "startlux.yml"),
+    join(home, "dsh-startlux-decision", "startlux.yml"),
+    join(home, "plugins", "dsh-startlux-decision", "startlux.yml"),
+    join(home, "plugins", "dsh-startlux-guard", "startlux.yml"),
     join(process.cwd(), "config.yml"),
     join(process.cwd(), "startlux.yml"),
   ];
@@ -137,7 +140,7 @@ const CFG = {
 function credential(ref, options = {}) {
   let raw;
   try {
-    raw = readFileSync(join(homedir(), ".dsh", ".credentials.yaml"), "utf8");
+    raw = readFileSync(join(resolveDshHome(), ".credentials.yaml"), "utf8");
   } catch (error) {
     // optional：文件不存在只是「这一路没取到 key」，不是脚本故障——
     // 后面的环境变量兜底仍然可能成功。

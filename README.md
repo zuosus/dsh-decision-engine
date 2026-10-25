@@ -66,6 +66,29 @@ cd ~/.dsh/profiles/desktop && pnpm install
   （笔记、备份）一概不碰。
 - **权限 600**：配置里可能有明文 key，迁移后仍保持只有你可读。
 
+### 数据目录解析规则（跨平台）
+
+数据目录是 **`$DSH_HOME/dsh-decision-engine/`**，`~/.dsh` 只是 `DSH_HOME`
+未设置时的默认值。解析顺序与宿主 `@deepseek-ai/dsh-home-paths` 完全一致：
+
+| 优先级 | 来源 |
+|---|---|
+| 1 | 显式配置的路径（本插件暂无此入口） |
+| 2 | 环境变量 `$DSH_HOME` |
+| 3 | 操作系统家目录下的 `~/.dsh` |
+
+细节（都由 `lib/home-paths.js` 统一处理）：
+
+- **空白值等于未设置**：`DSH_HOME=""` 或纯空白会回退 `~/.dsh`，绝不会把数据
+  目录解析到当前工作目录。
+- **支持波浪号**：`DSH_HOME=~/myhome` 会展开；`~\`（Windows 形式）同样支持。
+- **相对路径会被规范化成绝对路径**，否则落盘位置会随进程工作目录漂移。
+
+**Windows 说明**：`~/.dsh` 里的 `.dsh` 只是**目录名**，不是路径分隔符——
+Windows 允许点开头的目录。真正与平台相关的是分隔符与家目录位置，二者分别由
+`node:path` 与 `node:os` 处理，所以 Windows 上实际路径是
+`C:\Users\<你的用户名>\.dsh\dsh-decision-engine\config.yml`。
+
 ## 配置
 
 ### 插件配置页
