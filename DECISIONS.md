@@ -2,6 +2,55 @@
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
 
+## DEC-005 授权决策禁用同类复用软缓存；软缓存改为显式启用（2026-10-26）
+
+**背景**：插件市场评审意见（2026-10）：
+
+> The authorization soft cache can reuse a low-risk result for different tool
+> arguments. Please bind authorization caching to the full call/context, or
+> disable soft reuse for this check.
+
+软缓存（soft 层）的键是「工具名 + 命令族 + 风险标记」的归一化签名，刻意丢弃
+参数内容，目的是让 `node -e '...'` 这类重复调试命中缓存。旧实现以为安全，
+理由是「只缓存低风险放行 + 风险标记完全一致才复用」，但该论证不成立：
+**缓存层自己不判断风险，它只存第一次调用的裁决**。`rm -rf /tmp/x` 被合理放行
+后，`rm -rf /Users/chi/xx` 与它风险标记完全一致（碰撞条件而非保护）、族名相同，
+于是后者**原样继承放行**，决策模型根本不会看到这条命令。软键也不含 cwd 与
+会话摘要，不同目录、不同会话同样互串。
+
+**决策**：
+
+1. **授权（authorize）永久禁用软缓存**：守卫不再传 `signatureText` /
+   `softCacheable`，裁决只写精确键（完整 state + 问题集一致才复用）。
+2. **软缓存整体翻成 fail-closed**：`classify` 只在调用方显式传
+   `softCacheable: true` 时才建软键；旧版「传回调函数判定是否可缓存」的
+   形式废除——没声明就启用等于把复用决策藏进了默认行为。
+3. **全部决策点不再传 `signatureText`**：spec.build 的签名字段移除，engine
+   透传通道移除。软层默认休眠，唯一保留的出口是显式声明 `softCacheable: true`
+   的调用方（当前内置决策点无使用）。
+4. 精确层语义不变，仍是默认且唯一默认开启的层。
+
+**顺带修正**：
+
+- retrieval / skillPick 此前误传 `softCacheable`（效果与代码注释
+  「skip 永不复用」相反：skip 裁决同样进软层），已随 fail-closed 一并移除；
+- DEC-003 里「已由双层缓存（精确命中 + 同类复用）挡掉」按 append-only 规则
+  原样保留——「同类复用」现已默认关闭，该句以本条目为准。
+
+**约束与取舍**：
+
+1. **命中率回退可接受**：authorize 的重复调试命令从「同类命中」退回每次真发
+   （约 1.9k token/次）。安全决策的缓存要么绑定完整调用上下文，要么不做；
+   省 token 的职责由只读白名单、route 的步数闸/路由闸等不依赖归一化复用的
+   机制继续承担。
+2. **保留 `softKey` 实现与显式出口**：非安全决策点未来可在声明后使用，
+   出口必须显式、可评审、有测试钉住，而不是藏在默认行为里。
+
+**验证**：`test/cache-regression.test.js`（9 项）：评审场景（同族不同参数
+不复用）、authorize 不写软键、精确复用仍有效、cwd/recent 失配、fail-closed
+两条、显式出口、decideGuard 语义不变、spec 不再传签名。全套
+`node --test test/` 209/209，`verify-wiring` 通过。
+
 ## DEC-004 硅基流动两个站点做成「只粘一个 key」的预设（2026-10-25）
 
 **背景**：用户要求新增两个 pre-configured provider——硅基流动
