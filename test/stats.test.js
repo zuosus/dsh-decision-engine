@@ -29,7 +29,7 @@ import {
   resolveRange,
   sortRows,
 } from "../lib/stats.js";
-import { StatsStore, backfillFromTelemetry, legacyModeOf, inferLegacyProvider, providerOfTelemetryEntry, providerByEndpoint, defaultModelOf } from "../lib/stats-store.js";
+import { StatsStore, backfillFromTelemetry, legacyModeOf, inferLegacyProvider, providerOfTelemetryEntry, providerByEndpoint, defaultModelOf, inferLegacyPoint } from "../lib/stats-store.js";
 import { estimateRequestTokens, estimateTextTokens, scaleTokensByChars } from "../lib/tokenizer.js";
 
 /** 本地时间的一天（用于构造固定「现在」）。 */
@@ -1276,6 +1276,73 @@ test("迁移：按时间戳与遥测对上，补回真实记录里 unknown 的 p
     const records = await store.read();
     assert.equal(records[0].provider, "bamboonode");
     assert.equal(records[0].model, "startlux-decision-27b-autothink", "补回 provider 后落到默认模型");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+// ------------------------------------------- 决策点（point）归因
+
+test("inferLegacyPoint：tag 与决策点是一对一，不是猜", () => {
+  // 新遥测自带 point：直接用，tag 不参与。
+  assert.equal(inferLegacyPoint("guard", "retrieval"), "retrieval");
+  // 老遥测没有 point：guard 是授权守卫专用 tag。
+  assert.equal(inferLegacyPoint("guard"), "authorize");
+  // 适配器异常出口统一用 adapter/点id。
+  assert.equal(inferLegacyPoint("adapter/title"), "title");
+  // 引擎写的 tag 就是决策点 id 本身。
+  assert.equal(inferLegacyPoint("delegate"), "delegate");
+  assert.equal(inferLegacyPoint("turnStop"), "turnStop");
+  assert.equal(inferLegacyPoint("retrieval"), "retrieval");
+  // 未登记的 tag 不能想当然当成决策点。
+  assert.equal(inferLegacyPoint("mystery"), "unknown");
+  assert.equal(inferLegacyPoint(""), "unknown");
+  assert.equal(inferLegacyPoint(undefined), "unknown");
+});
+
+test("回填：老遥测没有 point 时按 tag 反推，不再落进「决策点 unknown」", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "de-stats-"));
+  try {
+    await writeFile(
+      join(dir, "telemetry.jsonl"),
+      [
+        // 老遥测：只有 tag=guard，没有 point。
+        JSON.stringify({ ts: "2026-10-23T06:30:46.613Z", tag: "guard", mode: "shadow", action: "delegate", detail: "delegate", latencyMs: 640, inputTokens: 2000 }),
+        // 新遥测：自带 point。
+        JSON.stringify({ ts: "2026-10-23T06:31:00.000Z", point: "retrieval", tag: "retrieval", mode: "observe", action: "delegate", detail: "delegate", latencyMs: 100, inputTokens: 50 }),
+      ].join("\n"),
+      "utf8",
+    );
+    const rows = await backfillFromTelemetry({ dir });
+    assert.equal(rows[0].point, "authorize", "老遥测按 tag=guard 反推为 authorize");
+    assert.equal(rows[1].point, "retrieval", "新遥测直接用自带 point");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("迁移：老回填行的 point=unknown 按时间戳与遥测对上后补回", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "de-stats-"));
+  try {
+    await writeFile(
+      join(dir, "telemetry.jsonl"),
+      [
+        JSON.stringify({ ts: "2026-10-23T06:30:46.613Z", tag: "guard", mode: "shadow", action: "delegate", detail: "delegate", latencyMs: 640 }),
+      ].join("\n"),
+      "utf8",
+    );
+    await writeFile(
+      join(dir, "stats.jsonl"),
+      [
+        JSON.stringify({ ts: "2026-10-23T06:30:46.613Z", provider: "bamboonode", model: "startlux-decision-27b-autothink", point: "unknown", action: "delegate", detail: "delegate", inputTokens: 2000, outputTokens: 0, durationMs: 640, baseInputTokens: 2000, baseOutputTokens: 0, baseDurationMs: 640, inputSource: "api", outputSource: "unknown", estimated: true }),
+      ].join("\n"),
+      "utf8",
+    );
+    const store = new StatsStore({ dir });
+    const repaired = await store.repairLegacyProviderOnce();
+    assert.equal(repaired, 1, "补回 point 算一次改动");
+    const records = await store.read();
+    assert.equal(records[0].point, "authorize", "老回填行的 point 补回为 authorize");
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

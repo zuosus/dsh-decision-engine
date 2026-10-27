@@ -2,6 +2,42 @@
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
 
+## DEC-014 决策点（point）的老记录归因：tag 与决策点本是一对一（2026-10-27）
+
+**背景**：DEC-013 之后，统计页「按决策点」表里又出现一个 `unknown`。实测现网
+stats.jsonl：377 条 `point=unknown`，全部 `estimated: true`（回填行），时间
+集中在 2026-10-23 上午。
+
+**根因**：遥测的 `point` 字段是 2026-10-23 13:33 才开始写的——更早的 428 条
+老遥测只有 `tag`，没有 `point`。回填时 `entry.point` 缺失只能记 "unknown"。
+但老遥测的 `tag` 与决策点是**确定的一对一**，不是猜：
+
+- `guard` → authorize（授权守卫专用 tag，实测 2113 条全部如此）
+- `adapter/X` → X（适配器异常出口统一用 `adapter/点id` 做 tag）
+- 其余 tag 就是决策点 id 本身（engine.js 写 `tag: id`：delegate / turnStop /
+  retrieval / skillPick / cotTranslate）
+
+**决策**：
+
+1. **回填按 tag 反推**（新增 `inferLegacyPoint(tag, point)`）：新遥测自带
+   point 直接用；老遥测按上表反推；未登记的 tag 必须与决策点注册表
+   （`DECISION_POINTS`）核对，对不上留 unknown——与 provider 反推同一个
+   纪律：宁可 unknown，不猜一个不存在的决策点。
+
+2. **迁移补回已落盘的 point**：`telemetryProviderIndex` 扩展为
+   `telemetryIndex`（时间戳 → provider / point 双索引），迁移对
+   `point=unknown` 的行按时间戳与遥测对上后补回。377/377 全部精确命中。
+
+**效果**：现网 377 条 `point=unknown` 全部归位（authorize 2381 / delegate 85 /
+turnStop 40 / retrieval 31 / skillPick 9），残留 0。
+
+**注意**：与 DEC-013 的 provider 归因不同，point 没有对应「遥测写入点补字段」
+的根治项——新遥测从 2026-10-23 13:33 起就**已经**带 point，此条只涉及更老的
+历史数据。本条新增的反推仅服务回填，不碰新数据路径。
+
+**改动文件**：`lib/stats-store.js`（`inferLegacyPoint`、`telemetryIndex`、回填
+与迁移接入，引入 `DECISION_POINTS`）、`test/stats.test.js`（新增 3 项测试）。
+
 ## DEC-013 根治「未知（历史）」：遥测必须自带 provider（2026-10-27）
 
 **背景**：DEC-011 / DEC-012 修的是**存量数据**（把已经落盘的 unknown 补回
