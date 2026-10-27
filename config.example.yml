@@ -18,7 +18,12 @@
 #
 # 数据目录（插件自动读取）：
 #   <上述目录>/config.yml          配置
-#   <上述目录>/telemetry.jsonl     决策记录
+#   <上述目录>/telemetry.jsonl     决策记录（人读的流水账）
+#   <上述目录>/stats.jsonl         统计记录（配置页「统计与对比」读它）
+#
+# stats.jsonl 记的是按 provider × model 分开的 token 与耗时，用于统计与
+# 节省量对比；telemetry.jsonl 不含 provider 与 output token，满足不了统计
+# 所需，因此两者分开存。两者都是追加写的 JSON Lines，可直接 tail 查看。
 #
 # 改完立即生效：每次工具调用 / 每一步前都会检查 mtime，无需重启 DSH。
 
@@ -253,3 +258,6 @@ pointCotTranslate: off
 # guardReadOnlyTools: [read, grep, glob, todo_write]
 # guardDenyConfidence: 0.85
 # guardIrreversibleCeiling: 0.2
+# 低风险且可能不可逆的调用，只有当「服务于当前任务」的概率低于此线才升级
+# 人工确认；设 0 可整体停用该分支，设 1 恢复旧行为（只看不可逆分数）。
+# guardTaskRelevanceFloor: 0.5

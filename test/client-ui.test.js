@@ -27,17 +27,57 @@ import { PROVIDER_IDS, PROVIDER_PRESETS, providerCatalog } from "../lib/provider
 let loadSeq = 0;
 
 /**
- * 渲染配置页。
+ * 渲染插件信息页。
  *
  * @param status - 第 0 个 useState（status）要返回的值；null 表示「状态未加载」。
- * @returns `{ text, controls }`：全部文本，以及 input/select 节点。
+ * @param options.slots - `{ 槽位序号: 值 }`，覆盖对应 useState 的返回值。
+ * @returns `{ text, controls, tree }`：全部文本、input/select 节点、渲染树。
+ *
+ * React 的 useState 只能按**调用顺序**注入，所以这里用槽位表注入。
+ * 当前组件的 useState 顺序（改动这个顺序时同步改这里）：
+ *
+ *   0 status        1 keyInputs     2 busy       3 msg
+ *   4 loading       5 draftState    6 providerDraftState
+ *   7 storageDraft  8 providerError 9 models     10 modelsState
+ *   11 decisions    12 pointsDraft  13 stats     14 statsError
+ *   15 statsFilter  16 tab          17 statsMeta    18 saveState
+ *
+ * 槽位对错了的表现很具体：比如把统计结果注到 `tab` 上，配置页会照常渲染
+ * 而统计页不出来——测试会失败，而不是静默通过。
  */
-async function render(status) {
+const SLOTS = {
+  status: 0,
+  decisions: 11,
+  stats: 13,
+  statsError: 14,
+  statsFilter: 15,
+  tab: 16,
+  statsMeta: 17,
+};
+
+/**
+ * 一份决策点清单（服务端 /decisions 下发的形状）。
+ *
+ * 统计页的裁决分账表靠它显示决策点的**中文名**：没有它，
+ * pointLabels 为空，界面会退回显示裸 id（authorize / retrieval）。
+ */
+const decisionsFixture = {
+  points: [
+    { id: "authorize", label: "工具授权", mode: "enforce", available: true, mounted: true },
+    { id: "retrieval", label: "检索必要性", mode: "enforce", available: true, mounted: true },
+  ],
+  modes: ["off", "observe", "enforce"],
+  cache: { size: 0, exactHits: 0, softHits: 0, stores: 0, hitRate: 0 },
+};
+
+async function render(status, options = {}) {
   const source = readFileSync(new URL("../lib/client.js", import.meta.url), "utf8");
   // 加一段唯一注释再转 data URL：内容是变量 → 模块标识不同 → factory 会重新执行。
   loadSeq += 1;
   const unique = `\n// test-instance-${loadSeq}\n`;
   const dataUrl = `data:text/javascript;base64,${Buffer.from(source + unique, "utf8").toString("base64")}`;
+
+  const slots = { [SLOTS.status]: status, ...(options.slots ?? {}) };
 
   let stateIndex = 0;
   const reactStub = {
@@ -47,7 +87,7 @@ async function render(status) {
     useState(initial) {
       const index = stateIndex;
       stateIndex += 1;
-      if (index === 0) return [status, () => {}];
+      if (Object.hasOwn(slots, index)) return [slots[index], () => {}];
       return [typeof initial === "function" ? initial() : initial, () => {}];
     },
     useCallback(fn) {
@@ -731,4 +771,367 @@ test("client.js 不引用未定义的 setXxx（防重构留下悬空调用）", 
     if (!declared.has(name) && !globals.has(name)) dangling.add(name);
   }
   assert.deepEqual([...dangling], [], `client.js 引用了未定义的 setter：${[...dangling].join(", ")}`);
+});
+
+// ---------------------------------------------------------------- 统计与对比
+
+/** 一份服务端返回的统计结果。 */
+function statsWith(over) {
+  return {
+    range: { preset: "today", label: "当日", start: "", end: "", valid: true, error: "" },
+    totals: {
+      requests: 12,
+      cached: 4,
+      degraded: 0,
+      inputTokens: 24000,
+      outputTokens: 3600,
+      totalTokens: 27600,
+      durationMs: 15000,
+      observeRequests: 8,
+      observeInputTokens: 16000,
+      observeOutputTokens: 2400,
+      observeDurationMs: 10000,
+      observeBaseInputTokens: 40000,
+      observeBaseOutputTokens: 3600,
+      observeBaseDurationMs: 22000,
+      savedInputTokens: 16000,
+      savedOutputTokens: 0,
+      savedTotalTokens: 16000,
+      savedDurationMs: 7000,
+      savedRatio: 0.5797,
+      savedTimeRatio: 0.3181,
+      avgDurationMs: 1250,
+    },
+    rows: [
+      {
+        provider: "bamboonode",
+        model: "startlux-decision-27b-autothink",
+        requests: 8,
+        cached: 4,
+        inputTokens: 16000,
+        outputTokens: 2400,
+        durationMs: 10000,
+        avgDurationMs: 1250,
+        observeRequests: 8,
+        observeInputTokens: 16000,
+        observeOutputTokens: 2400,
+        observeDurationMs: 10000,
+        savedInputTokens: 12000,
+        savedOutputTokens: 0,
+        savedDurationMs: 5000,
+        savedRatio: 0.6,
+      },
+      {
+        provider: "siliconflow",
+        model: "Kev-4B",
+        requests: 4,
+        cached: 0,
+        inputTokens: 8000,
+        outputTokens: 1200,
+        durationMs: 5000,
+        avgDurationMs: 1250,
+        observeRequests: 4,
+        observeInputTokens: 8000,
+        observeOutputTokens: 1200,
+        observeDurationMs: 5000,
+        savedInputTokens: 4000,
+        savedOutputTokens: 0,
+        savedDurationMs: 2000,
+        savedRatio: 0.33,
+      },
+    ],
+    byProvider: [],
+    byPoint: [],
+    recordCount: 12,
+    /**
+     * 节省量的来源说明。节省量只由观察模式的记录贡献，所以服务端必须
+     * 把「有多少条记录参与了节省」一起下发，界面才能解释「节省为 0」。
+     */
+    savings: {
+      observeRequests: 8,
+      totalRequests: 12,
+      byMode: { observe: 8, enforce: 4, off: 0, unknown: 0 },
+      unavailable: false,
+    },
+    presets: ["today", "week", "month", "year", "custom"],
+    labels: { today: "当日", week: "本周", month: "本月", year: "本年", custom: "自定义" },
+    legacy: { included: false, count: 0, note: "" },
+    ...over,
+  };
+}
+
+test("页面拆成两个 tab：配置 / 统计与对比", async () => {
+  // 统计从配置页里搬出来单独成一页：一张十来列的对比表挤在表单末尾，
+  // 既看不清，也让本来就长的配置页更难用。
+  const { text, tree } = await render(stateWith({}));
+  assert.ok(hasButtonLabeled(tree, "配置"), "缺少「配置」tab");
+  assert.ok(hasButtonLabeled(tree, "统计与对比"), "缺少「统计与对比」tab");
+  // 默认停在配置页：统计页不该在用户没打开时就去读整个统计文件。
+  assert.equal(
+    text.includes("用量统计与对比"),
+    false,
+    "默认 tab 应是配置，不该直接渲染统计页",
+  );
+  assert.ok(text.includes("服务提供方"), "配置 tab 应照常渲染表单");
+});
+
+test("统计：区间预设由服务端下发，前端不硬编码清单", async () => {
+  const { text, tree } = await render(stateWith({}), {
+    slots: { [SLOTS.tab]: "stats", [SLOTS.stats]: statsWith({}) },
+  });
+  assert.ok(text.includes("用量统计与对比"), "统计 tab 应渲染整页");
+  // 五个预设都要有按钮，标签取自服务端下发的 labels（不是前端抄的一份）。
+  for (const label of ["当日", "本周", "本月", "本年", "自定义"]) {
+    assert.ok(
+      hasButtonLabeled(tree, label),
+      `缺少预设按钮「${label}」，实际：\n${text.slice(0, 700)}`,
+    );
+  }
+  // 服务端没下发 presets 时不能凭空长出一批按钮（避免两份清单漂移）。
+  const { tree: bare } = await render(stateWith({}), {
+    slots: { [SLOTS.tab]: "stats", [SLOTS.stats]: statsWith({ presets: [] }) },
+  });
+  assert.equal(hasButtonLabeled(bare, "本周"), false, "预设清单只能来自服务端");
+});
+
+test("统计：把预设解析成的真实区间显示出来", async () => {
+  // 「本周」到底是哪几天，跨月/跨年时用户无从核对——所以实际边界要写出来。
+  const { text } = await render(stateWith({}), {
+    slots: {
+      [SLOTS.tab]: "stats",
+      [SLOTS.stats]: statsWith({
+        range: {
+          preset: "week",
+          label: "本周",
+          start: "2026-10-26T00:00:00.000Z",
+          end: "2026-11-02T00:00:00.000Z",
+          valid: true,
+        },
+      }),
+    },
+  });
+  assert.ok(
+    text.includes("实际区间"),
+    `应显示实际区间，实际：\n${text.slice(0, 900)}`,
+  );
+});
+
+test("统计：自定义范围要填全起止才发请求", async () => {
+  // 没填完时服务端只会回「需要合法的起止时间」，那是没填完而不是出错，
+  // 显示成失败会误导。
+  const { text } = await render(stateWith({}), {
+    slots: {
+      [SLOTS.tab]: "stats",
+      [SLOTS.stats]: null,
+      [SLOTS.statsFilter]: { preset: "custom", start: "2026-10-20T08:00", end: "", sort: "inputTokens", dir: "desc" },
+    },
+  });
+  assert.ok(
+    text.includes("请填写完整的起止时间"),
+    `应提示填全起止，实际：\n${text.slice(0, 900)}`,
+  );
+});
+
+test("统计：横向对比表按 provider × model 列出，节省量另有对比表", async () => {
+  const { text } = await render(stateWith({}), {
+    slots: { [SLOTS.tab]: "stats", [SLOTS.stats]: statsWith({}) },
+  });
+  assert.ok(text.includes("bamboonode"), "对比表应列出 provider");
+  assert.ok(text.includes("Kev-4B"), "对比表应列出 model");
+  assert.ok(text.includes("provider / model"), "应有一列说明这是 provider/model 组合");
+  assert.ok(text.includes("横向对比"), "应有「横向对比」一节");
+  assert.ok(text.includes("节省量对比"), "应有「节省量对比」一节");
+  // 数字带千分位分组：同一个值在两个地方显示成两种写法最难核对。
+  assert.ok(
+    text.includes("16,000"),
+    `应显示节省的 input token（分组后），实际：\n${text.slice(0, 900)}`,
+  );
+  // 耗时按量级换单位（totals.durationMs = 15000 → 「15s」），
+  // 而不是甩一个「15000ms」；超过一分钟才换成 m/s。
+  assert.ok(
+    text.includes("15s"),
+    `总耗时应按量级可读化，实际：\n${text.slice(0, 900)}`,
+  );
+});
+
+test("统计：说明基线口径（用户必须知道「省了多少」相对什么算）", async () => {
+  const { text } = await render(stateWith({}), { slots: { [SLOTS.tab]: "stats", [SLOTS.stats]: statsWith({}) } });
+  assert.ok(
+    text.includes("基线 = 不启用本插件的缓存与上下文压缩时"),
+    `应说明基线口径，实际：\n${text.slice(0, 1200)}`,
+  );
+});
+
+test("统计：节省量一节写明只统计「观察」模式", async () => {
+  // 用户明确要求：UI 要说明「节省」只在观察模式下才有意义。
+  // 提示必须紧贴数字看得到的地方，不能只塞在脚注里。
+  const { text } = await render(stateWith({}), { slots: { [SLOTS.tab]: "stats", [SLOTS.stats]: statsWith({}) } });
+  assert.ok(
+    text.includes("节省量只统计"),
+    `应说明节省量只统计观察模式，实际：\n${text.slice(0, 1400)}`,
+  );
+  assert.ok(
+    text.includes("观察"),
+    `应出现「观察」二字，实际：\n${text.slice(0, 1400)}`,
+  );
+  // 汇总卡片的标题也要带上来源标记：读者看卡片时不一定往下读。
+  assert.ok(
+    text.includes("（观察）"),
+    `汇总卡片应标注「（观察）」，实际：\n${text.slice(0, 1400)}`,
+  );
+  // 节省量那一节的标题同样要标。
+  assert.ok(
+    text.includes("节省量对比（观察模式"),
+    `节省量对比一节标题应标注观察模式，实际：\n${text.slice(0, 1400)}`,
+  );
+  // 口径脚注里解释「为什么只有观察模式算数」。
+  assert.ok(
+    text.includes("普通 LLM 路径并没有真的发生"),
+    `脚注应解释生效模式为何不计入，实际：\n${text.slice(0, 1400)}`,
+  );
+});
+
+test("统计：没有观察模式的记录时说明「节省为 0」不等于「没省」", async () => {
+  // 「省了 0」与「没有可比对的数据」是两件事：前者说明观察模式下确实
+  // 没省，后者说明这段时间根本没在观察模式跑。界面上必须区分，否则
+  // 用户会得出完全错误的结论。
+  const { text } = await render(stateWith({}), {
+    slots: {
+      [SLOTS.tab]: "stats",
+      [SLOTS.stats]: statsWith({
+        savings: {
+          observeRequests: 0,
+          totalRequests: 12,
+          byMode: { observe: 0, enforce: 12, off: 0, unknown: 0 },
+          unavailable: true,
+        },
+      }),
+    },
+  });
+  assert.ok(
+    text.includes("没有一条来自观察模式"),
+    `应说明本区间没有观察模式的记录，实际：\n${text.slice(0, 1600)}`,
+  );
+  assert.ok(
+    text.includes("不是「一点也没省」"),
+    `应区分「没有可比数据」与「没省」，实际：\n${text.slice(0, 1600)}`,
+  );
+});
+
+test("统计：按模式分账，说明节省量的来源", async () => {
+  // 用户要能看出「节省量是从多少条记录算出来的」。
+  const { text } = await render(stateWith({}), { slots: { [SLOTS.tab]: "stats", [SLOTS.stats]: statsWith({}) } });
+  assert.ok(
+    text.includes("按模式分账"),
+    `应给出按模式的分账，实际：\n${text.slice(0, 1600)}`,
+  );
+  assert.ok(
+    text.includes("观察"),
+    `分账里应出现「观察」，实际：\n${text.slice(0, 1600)}`,
+  );
+});
+
+test("统计：含历史推算数据时明确标注", async () => {
+  // 统计结果由 /stats 单独下发，不在 status 里——通过 useState 槽位注入。
+  const { text: legacyText } = await render(stateWith({}), {
+    slots: { [SLOTS.tab]: "stats", [SLOTS.stats]: statsWith({ legacy: { included: true, count: 42, note: "含推算" } }) },
+  });
+  assert.ok(
+    legacyText.includes("由旧遥测推算的历史记录"),
+    `应标注历史推算数据，实际：\n${legacyText.slice(0, 1400)}`,
+  );
+});
+
+test("统计：区间内无数据时说明原因，而不是显示一排空值", async () => {
+  const { text } = await render(stateWith({}), {
+    slots: { [SLOTS.tab]: "stats", [SLOTS.stats]: statsWith({ rows: [], totals: { requests: 0 } }) },
+  });
+  assert.ok(
+    text.includes("该时间范围内没有统计记录"),
+    `应说明没有记录，实际：\n${text.slice(0, 1400)}`,
+  );
+});
+
+// ------------------------------------------------------- 裁决统计（allow/ask/reject）
+
+/** 一份带裁决统计的服务端返回。 */
+function outcomesWith(over = {}) {
+  return statsWith({
+    outcomes: {
+      allow: 120,
+      ask: 8,
+      reject: 3,
+      none: 5,
+      decided: 131,
+      total: 136,
+      byPoint: [
+        { point: "authorize", allow: 100, ask: 8, reject: 3, none: 2 },
+        { point: "retrieval", allow: 20, ask: 0, reject: 0, none: 3 },
+      ],
+      otherVerdicts: [],
+      otherVerdictCount: 0,
+      ...over,
+    },
+  });
+}
+
+test("统计：裁决统计单列一节，显示 allow / ask / reject 三格", async () => {
+  const { text } = await render(stateWith({}), {
+    slots: { [SLOTS.tab]: "stats", [SLOTS.stats]: outcomesWith({}) },
+  });
+  assert.ok(
+    text.includes("裁决统计"),
+    `应有「裁决统计」一节，实际：\n${text.slice(0, 1600)}`,
+  );
+  assert.ok(text.includes("放行 allow"), "应有「放行」格");
+  assert.ok(text.includes("询问 ask"), "应有「询问」格");
+  assert.ok(text.includes("拦截 reject"), "应有「拦截」格");
+  assert.ok(text.includes("120"), "应显示放行次数");
+  assert.ok(text.includes("8"), "应显示询问次数");
+  assert.ok(text.includes("3"), "应显示拦截次数");
+});
+
+test("统计：裁决统计按决策点分账", async () => {
+  const { text } = await render(stateWith({}), {
+    slots: {
+      [SLOTS.tab]: "stats",
+      [SLOTS.stats]: outcomesWith({}),
+      [SLOTS.decisions]: decisionsFixture,
+    },
+  });
+  // 决策点用中文名（服务端下发的 pointLabels），不是裸 id。
+  assert.ok(
+    text.includes("工具授权"),
+    `裁决分账表应列出决策点中文名，实际：\n${text.slice(0, 2000)}`,
+  );
+  assert.ok(text.includes("检索必要性"), "应列出全部有裁决的决策点");
+});
+
+test("统计：未归类的裁决必须显式提示（否则数字只是悄悄偏小）", async () => {
+  const { text } = await render(stateWith({}), {
+    slots: {
+      [SLOTS.tab]: "stats",
+      [SLOTS.stats]: outcomesWith({
+        otherVerdicts: [{ verdict: "authorize/newKind", count: 4 }],
+        otherVerdictCount: 4,
+      }),
+    },
+  });
+  assert.ok(
+    text.includes("未归类"),
+    `未登记的裁决应显式提示，实际：\n${text.slice(0, 2000)}`,
+  );
+  assert.ok(text.includes("authorize/newKind"), "应指出是哪个裁决未登记");
+});
+
+test("统计：没有裁决数据时不渲染裁决一节（而不是显示一排零）", async () => {
+  // 服务端还没给 outcomes 时，渲染一张全零的表会让人以为
+  // 「一次都没拦过」——而真实情况可能是根本没数据。
+  const { text } = await render(stateWith({}), {
+    slots: { [SLOTS.tab]: "stats", [SLOTS.stats]: statsWith({}) },
+  });
+  assert.ok(
+    !text.includes("裁决统计"),
+    `没有 outcomes 时不该渲染裁决一节，实际：\n${text.slice(0, 1600)}`,
+  );
 });

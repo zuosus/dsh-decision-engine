@@ -64,6 +64,8 @@ const baseCfg = (over = {}) => ({
 function makeRunner({ modes = {}, classify, cfg = baseCfg() } = {}) {
   const entries = [];
   const calls = [];
+  /** 引擎交给统计层的裁决记录。 */
+  const decisions = [];
   const client = {
     async classify(call) {
       calls.push(call);
@@ -78,8 +80,10 @@ function makeRunner({ modes = {}, classify, cfg = baseCfg() } = {}) {
     modeOf: (current, id) => modes[id] ?? "off",
     log: async (entry) => entries.push(entry),
     specOf: (id) => POINT_SPECS[id],
+    // 裁决统计：引擎在拿到裁决后把它交给这里（见 DEC-008）。
+    recordDecision: (options) => decisions.push(options),
   });
-  return { runner, entries, calls, client, cfg };
+  return { runner, entries, calls, client, cfg, decisions };
 }
 
 /** 造一个最小的 ctx，记录注册的监听器。 */
@@ -185,10 +189,78 @@ test("答案形状不符时降级且不改行为，并留痕", async () => {
   assert.equal(entries[0].detail, "answer-shape-mismatch");
 });
 
+test("遥测带 provider：它是回填历史统计时唯一可靠的归因来源", async () => {
+  // 遥测若不带 provider，回填时只能按模型名猜——猜不上就是「未知（历史）」。
+  const { runner, entries } = makeRunner({
+    modes: { retrieval: "observe" },
+    classify: () => ({
+      answers: { covered: { type: "noul", noul: 0.95 }, would_add: { type: "noul", noul: 0.05 } },
+      model: "startlux-decision-27b-autothink",
+      provider: "bamboonode",
+      latencyMs: 12,
+      cached: false,
+    }),
+  });
+  await runner.ask("retrieval", { tool: "web_search", query: "x" });
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].provider, "bamboonode", "遥测必须自带 provider");
+});
+
+test("遥测带 provider：答案形状不符的降级记录也带", async () => {
+  const { runner, entries } = makeRunner({
+    modes: { retrieval: "enforce" },
+    classify: () => ({
+      answers: { covered: { type: "noul", noul: 0.9 } },
+      model: "startlux-decision-27b-autothink",
+      provider: "bamboonode",
+      latencyMs: 3,
+      cached: false,
+    }),
+  });
+  await runner.ask("retrieval", { tool: "web_search", query: "x" });
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].detail, "answer-shape-mismatch");
+  assert.equal(entries[0].provider, "bamboonode", "降级遥测也要带 provider");
+});
+
 test("缺少规格实现时按不介入处理，不抛", async () => {
   const { runner } = makeRunner({ modes: { unknownPoint: "enforce" } });
   const result = await runner.ask("unknownPoint", {});
   assert.equal(result.degraded, "no-spec");
+});
+
+// ------------------------------------------------------------ 裁决统计
+
+test("引擎把裁决交给统计层（否则统计里永远没有 allow/ask/reject）", async () => {
+  // 裁决是 spec.decide() 的产物，而 decide() 要等答案回来才跑得出来。
+  // 因此统计**不能**在 classify() 里写——必须由拿到裁决的一方写。
+  // （真实踩过的坑：stats.jsonl 里 132 条实时记录的 action 是空串。）
+  const { runner, decisions } = makeRunner({
+    modes: { retrieval: "enforce" },
+    classify: () => ({
+      answers: { covered: { type: "noul", noul: 0.95 }, would_add: { type: "noul", noul: 0.05 } },
+      model: "m",
+      latencyMs: 12,
+      cached: false,
+      statsFacts: { point: "retrieval", provider: "p", model: "m", inputTokens: 100, durationMs: 12 },
+    }),
+  });
+  await runner.ask("retrieval", { tool: "web_search", query: "x" });
+  assert.equal(decisions.length, 1, "裁决必须交给统计层");
+  assert.equal(decisions[0].action, "skip", "裁决词要原样传下去");
+  assert.equal(decisions[0].facts.inputTokens, 100, "消耗那一半也要一起传");
+  assert.equal(decisions[0].degraded, undefined, "这不是降级");
+});
+
+test("答案形状不符时统计记「未裁决」，不伪造成放行", async () => {
+  const { runner, decisions } = makeRunner({
+    modes: { retrieval: "enforce" },
+    classify: () => ({ answers: { covered: { type: "noul", noul: 0.9 } }, model: "m", latencyMs: 3, cached: false }),
+  });
+  await runner.ask("retrieval", { tool: "web_search", query: "x" });
+  assert.equal(decisions.length, 1, "消耗仍要记：这次决策确实花过时间");
+  assert.equal(decisions[0].degraded, true);
+  assert.equal(decisions[0].action, "degraded");
 });
 
 test("build 抛异常时按不介入处理", async () => {

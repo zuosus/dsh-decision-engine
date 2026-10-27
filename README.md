@@ -933,13 +933,366 @@ executed.
 - **Observe by default**: new decision points run in `observe` first, switching
   to `enforce` only once their judgments match human review.
 
+## 统计与对比 / Statistics and comparison
+
+插件设置页分成两个 tab：**配置** 与 **统计与对比**。统计单独成页（而不是挤在
+配置表单末尾当一小块）——它有自己的整页宽度，因为要回答的是「钱花在哪」与
+「比不开插件省了多少」，这两件事都需要一张十来列的对比表才看得清。
+
+统计页回答两个问题：**钱花在哪**，以及 **不开这个插件本该花多少**。
+
+页面结构：时间范围 → 汇总指标 → **横向对比**（provider × model 的实际消耗）
+→ **节省量对比**（观察模式：基线 → 实际）→ **按决策点分账** → 口径脚注。
+
+### 时间范围 / Time range
+
+| 预设 | 区间 |
+|---|---|
+| 当日 | 今天 00:00 → 明天 00:00 |
+| 本周 | 本周一 00:00 → 下周一 00:00（周日整天都在里面） |
+| 本月 | 本月 1 日 00:00 → 下月 1 日 00:00 |
+| 本年 | 本年 1 月 1 日 00:00 → 次年 1 月 1 日 00:00 |
+| 自定义 | 精确到分钟的起止时刻 |
+
+区间一律**左闭右开**（`[start, end)`）。相邻区间（本月 → 本年）因此不会在
+边界上重复计入同一条记录，而闭区间会。「自定义」的结束时刻按**含该整分钟**
+处理：填 `17:45` 表示到 17:45:59.999 为止。
+
+「本周」从**周一**开始（ISO 习惯），不是周日。
+
+界面上会把预设**解析成的真实边界**写出来（「实际区间：10-26 08:00 →
+11-02 08:00」），否则「本周」到底是哪几天，跨月跨年时用户无从核对。
+
+### 维度与指标 / Dimensions and metrics
+
+按 **provider × model** 独立统计。每一组给出：
+
+- **input token 总量**：累加周期内每次请求的实际输入 token。
+  优先采用 API 返回的 `usage.input_tokens`；服务方不报时用内置估算器
+  （见下）。**output token** 同样统计——省不省钱要看两头，只看输入会
+  高估收益。
+- **耗时总量与平均耗时**：每次请求从发起至完整响应的端到端毫秒数。
+  缓存命中的那次**耗时为 0**（确实没发请求），它省下的时间单独计入
+  「省时间」。
+  **平均耗时按「真实请求」算，不含缓存命中**——命中那次根本没有这段
+  过程，算进分母会让这个数字随命中率升高而变好看，读的人会以为请求变快了，
+  而它其实说的是「我们有多久没发请求」。
+
+### 节省量的基线口径 / What the savings are measured against
+
+**节省量只统计「观察」模式的记录。**
+
+这不是取舍，是口径问题：节省量是一个**反事实**（counterfactual）数字，
+它回答的是「如果采用决策模型，这次能少花多少」。而反事实只有在**两种路径
+跑在同一份数据上**时才成立——这正是观察模式的定义：
+
+| 模式 | 普通 LLM 路径 | 节省量 |
+|---|---|---|
+| **观察**（observe） | **真的跑了**，同一批工作 | ✅ 有实测意义 |
+| 生效（enforce） | **没发生**，决策已落地 | ❌ 只能是事后估算 |
+
+观察模式下决策模型只记录、不改变行为，于是同一批工作既有「普通 LLM 实际
+怎么跑的」（真实数据），也有「决策模型说本该怎么跑」（记录下来的裁决）——
+两边比的是同一批活，结论才成立。
+
+生效模式下普通 LLM 路径根本没有发生，「省了多少」只能是事后估算。把两种
+模式的数字混在同一张表里，读者看到的是一个漂亮的节省量，却不知道它是实测
+对比还是估算模型算出来的——这是统计里最难自查的一类偏差。因此界面上
+**明确标注**：汇总卡片与节省量对比表的标题都带「（观察）」，页面顶部有
+一条常驻提示，页脚还有一份按模式的分账（观察 / 生效 / 关闭 / 未知）。
+
+> **「省了 0」与「没有可比对的数据」是两件事。**
+> 若所选区间里一条观察模式的记录都没有（`savings.unavailable`），界面会
+> 明确写出「现在是节省量 0 是『没有可比对的数据』，不是『一点也没省』」，
+> 并提示把相关决策点切到「观察」。
+
+**基线 = 不启用本插件的缓存与上下文压缩时，同样的工作本应消耗的 token 与时间。**
+节省量一律**相对基线**计算（比例的分母是基线，不是实际值）。
+
+本插件只有两类可归因的优化：
+
+1. **结果缓存**：缓存命中时一次请求根本没发出去 → 基线 = 原本那次完整请求
+   的开销，实际 = 0。缓存里存的就是上一次真实请求的结果，所以基线直接
+   取它——省下的正是「本来要再付一次」的那份。
+2. **上下文截断**：`state` 被裁到 `maxStateChars` 之内 → 基线 = 未截断时的
+   input token。
+
+**刻意不把「思考模式」算进节省**：`think_mode` 是用户自己的配置，不是插件的
+优化；把它算进来会让节省量随配置摆动，数字失去意义。
+
+没有可归因的优化时，节省量是 **0**（不是负数，也不是某个假想的数）。
+
+**历史记录**：老遥测用 `shadow` / `enforce` 两值，其中 `shadow` 就是现在的
+`observe`，回填时会正确映射——老遥测里那 205 条 `shadow` 记录正是唯一有
+实测意义的观察样本，丢掉它们等于把历史里唯一可信的节省量一并抹掉。没有
+`mode` 字段的老记录一律归为「未知模式」，**不计入**节省量：无法证明它是在
+观察模式下产生的，就不能把它的「省下的量」当成实测展示。
+
+**升级时的一次性迁移**：引入 `mode` 之前写下的 `stats.jsonl` 记录没有这个
+字段。插件会在启动时**按时间戳**从老遥测里找回每条记录当时的模式并补上
+（实测 2416 条全部对上、无一歧义），否则用户升级后会看到历史节省量凭空
+变成 0。匹配不上的记录保持「未知模式」不计入——宁可少算，不可猜。原文件
+在改写前会先备份为 `stats.jsonl.mode-backup`。
+
+### 横向对比 / Side-by-side comparison
+
+统计页给两张表：
+
+- **横向对比（provider × model）**：实际消耗——次数、input、output、总耗时、
+  均耗时、命中缓存。这张表统计**全部模式**的记录——它回答的是「钱花在哪」。
+- **节省量对比（观察模式：基线 → 实际）**：同一批组合，把基线与实际并排放开，
+  省下多少直接可读。这张表**只统计观察模式**的记录，且「实际」三列显示的
+  也是观察模式那部分的实际消耗——它们必须与旁边的「省」列同源，否则读者
+  会拿生效模式的消耗去减观察模式的节省，得出一个毫无意义的数。
+
+两张表共用一份排序：点击表头换排序字段，再点换升降序。可排序的指标有
+input / output / 耗时 / 均耗时 / 次数 / 省 input / 省 output / 省耗时 /
+节省比例。
+
+此外还有一张**按决策点分账**表：同一个 provider/model 上，哪个决策点在
+花钱一目了然。
+
+### 裁决统计（allow / ask / reject）/ Verdict statistics
+
+用量统计回答「钱花在哪」，**裁决统计**回答另一个问题：「决策模型到底
+放行了多少、惊动了用户多少次、拦下了多少次」。两个问题都要看，所以分成
+两块，而不是合成一张表。
+
+三格的含义按**对待办的用户动作做了什么**划分：
+
+| 分类 | 含义 |
+|---|---|
+| **放行 allow** | 动作照常进行——不打断用户，也不拦下任何东西 |
+| **询问 ask** | 动作被升级到人工确认（用户会被打断） |
+| **拦截 reject** | 动作被拦下，不执行 |
+
+界面上给三格计数 + 一张**按决策点分账**的表（哪个点在拦、在问，一目了然）。
+
+**为什么不能只看裁决词**：九个决策点各有自己的裁决词（`delegate` / `ask` /
+`deny` / `skip` / `redirect` / `inline` / `switch` …），而**同一个词在不同
+点上含义可能相反**：
+
+- `retrieval.skip` 拦下了一次检索（→ 拦截）
+- `cotTranslate.skip` 只是没翻译一句话（→ 放行）
+
+只按词统一映射，会把「不翻译」算成「拦截」——得到的「拦截次数」毫无意义。
+因此映射表按 **(决策点, 裁决词)** 定义，集中在一处（`lib/outcomes.js`），
+新增决策点或新增裁决词时在那里登记。
+
+**「未裁决」是第四格，但不是第四种裁决**：降级（超时、鉴权失败、端点 404）
+时插件根本没改变任何行为，把它算成「放行」会虚增放行次数，算成「拦截」
+会虚增拦截次数。它单列一格。
+
+**未登记的裁决会被显式提示**：新增裁决词忘了登记时，数字只会**偏小**——
+看着仍然合理，是最难自查的一类错。界面上会直接写出「有 N 条裁决未归类」
+并指出是哪一个。
+
+**与用量统计是两套口径，互不换算**：一次降级没有裁决却花了等待时间；一次
+缓存命中的裁决照常计入却没花任何 token。
+
+### 数据存在哪 / Where the data lives
+
+统计写在 **`~/.dsh/dsh-decision-engine/stats.jsonl`**（独立于
+`telemetry.jsonl`），一行一条 JSON，字段：
+
+```json
+{"ts":"…","provider":"bamboonode","model":"startlux-decision-27b-autothink",
+ "point":"authorize","mode":"observe","action":"delegate","cached":false,
+ "inputTokens":449,"outputTokens":77,"durationMs":4777,"baseInputTokens":449,
+ "baseOutputTokens":77,"baseDurationMs":4777,
+ "inputSource":"api","outputSource":"api"}
+```
+
+`mode` 记的是这个决策点**此刻的三态模式**（`observe` / `enforce` / `off`），
+它决定这条记录是否计入节省量——只有 `observe` 计入（见上文「节省量的基线
+口径」）。没有这个字段的老记录归为「未知模式」，不计入节省量。
+
+`action` 记的是这次决策的**裁决词**（`delegate` / `ask` / `deny` / `skip` …），
+按上文的映射表就能分出 allow / ask / reject。它在**拿到裁决之后**才写进
+统计记录——裁决是 `spec.decide()` 的产物，而 `decide()` 要等决策模型的答案
+回来才跑得出来，所以统计不能写在发请求的那一步。
+
+**为什么不用 `telemetry.jsonl`**：它的字段覆盖不了统计所需——没有 provider
+（只有 model，同一模型在两个 provider 上跑就分不开）、没有 output token、
+没有基线，且耗时口径与缓存命中的 0 混在一起。遥测是给人读的流水账，
+统计是给机器读的结构化度量，两者各管各的。
+
+**写入是异步的**：决策路径上的额外开销只有一次入队 + 一次 JSON 序列化，
+不等磁盘。写盘失败只记一条警告，绝不影响主功能。
+
+**升级后立刻有历史可看**：插件**启动时**会把旧 `telemetry.jsonl` 里的历史
+回填进 `stats.jsonl`，**只做一次**（靠同目录的 `stats.backfilled` 标记记住）。
+
+回填必须落盘，而不是每次查询现算：现算的话历史只在「统计文件为空」时才有
+数据——而统计文件在插件跑起来后第一笔新请求就会被创建，于是用户刚升级就
+发现「以前一个月的记录不见了」。落盘之后历史与新记录同处一个文件，随时间
+范围一起被统计到。
+
+老遥测**没有 provider**，但模型名往往能反推出服务商（startlux 系 → bamboonode，
+Kev/SemIf 系 → 硅基流动），降级记录还能靠 `extra.endpoint` 的主机名定位（只认
+内置预设的地址，自建地址不猜）；四条路都走不通的仍显示「未知（历史）」。老遥测
+还**没有 output token**，所以回填的记录会在界面上明确标注「由旧遥测推算」，其
+耗时基线取同组真实请求的均值——不会把推算值混充成实测值。
+
+**新写的遥测一律自带 `provider`**，回填不再需要猜：统计的归因源头是遥测，
+遥测不记 provider，回填就无据可依，只能记 unknown，界面上便是整块
+「未知（历史）」——降级记录尤其如此（它们没拿到任何答案，本就没有 model，
+连按模型名反推都做不到）。所以降级**也要**记 provider 与 model：失败发生在
+哪个服务商上是事实，藏起来会让「按 provider 对比」看不见谁在超时。
+
+老遥测在缓存命中时记的 `inputTokens` 是**被复用的那次真实请求**的计数
+（`classify` 直接返回缓存对象），而那次命中其实一个 token 都没花。回填时
+必须把它映射成「基线」而不是「实际消耗」——否则节省量会算出负数。
+
+### token 估算 / Token estimation
+
+API 不返回 `usage` 时（自建 llama.cpp / vLLM 这类服务通常不返回），用内置
+的零依赖估算器兜底：
+
+```
+tokens ≈ 90 + 中日韩字符数 + 其它字符数 / 3
+```
+
+系数来自实测标定（2026-10-27，真实 key 打真实端点，14 组不同长度与语种的
+请求体），平均相对误差约 6%。固定开销 90 对应 JSON 脚手架与服务端的对话
+模板，与用户数据无关。
+
+不引第三方 tokenizer：`tiktoken` / `js-tiktoken` 都是几百 KB 的依赖，
+而本插件的硬约束是**零运行时依赖**。真实数字始终优先取 API 返回值。
+
+- **Statistics and comparison**: the settings page is split into two tabs —
+  **配置 (Config)** and **统计与对比 (Statistics)**. The statistics tab gets
+  its own full-width page rather than a small block at the bottom of the form:
+  answering "where does the money go" and "how much would this have cost
+  without the plugin" needs a comparison table with a dozen columns.
+
+  Time ranges: today (00:00–24:00), this week (Mon–Sun), this month, this
+  year, or a custom start/end precise to the minute. Ranges are half-open
+  `[start, end)`, so adjacent ranges never double-count a record at the
+  boundary. The resolved boundaries are shown on the page ("实际区间: …"),
+  because "this week" is ambiguous near a month or year boundary.
+
+  Dimensions: **provider × model**, independently. Each group reports total
+  input tokens, total output tokens, total duration, and average duration.
+  The **average is over real requests only** — a cache hit never left, so
+  counting it in the denominator would make the number look better as the
+  hit rate rises (it would then be reporting "how long since we called",
+  not "how long a call takes").
+
+  Two tables: **横向对比** (actual consumption per provider × model) and
+  **节省量对比** (baseline vs actual, side by side), plus a per-decision-point
+  breakdown. Clicking a header re-sorts both.
+
+  **Savings count only records produced in `observe` mode.** This is a
+  calibration rule, not a preference: savings are a *counterfactual* ("what
+  would this have cost if the decision model had been adopted"), and a
+  counterfactual only holds when both paths ran on the same work. That is
+  exactly what observe mode is — the decision model records but does not
+  change behaviour, so the same batch of work has both the plain-LLM actual
+  consumption and the decision model's "here is what should have happened".
+  In enforce mode the plain-LLM path never happened, so "how much was
+  saved" can only be estimated after the fact. Mixing the two would show a
+  handsome savings figure whose provenance (measured comparison vs.
+  estimate) the reader cannot tell — the hardest kind of statistical bias to
+  spot and to explain. The UI therefore labels it: the summary cards and the
+  savings table are titled "(观察)", a banner at the top of the page states
+  the rule, and the footnote breaks the range down by mode (observe /
+  enforce / off / unknown).
+
+  Note the distinction the UI makes explicit: **"saved 0" and "no
+  comparable data" are different facts.** When a range contains no observe
+  record at all (`savings.unavailable`), the page says so rather than
+  showing a zero that would read as "nothing was saved".
+
+  The **baseline** is "what the same work would have cost without this
+  plugin's caching and context truncation". Savings are always measured
+  against the baseline (the ratio's denominator is the baseline, not the
+  actual). Only two optimizations are attributable: a cache hit (the request
+  never left — baseline = the full request it replaced) and context
+  truncation (baseline = the untruncated input tokens). `think_mode` is
+  deliberately **excluded**: it is the user's configuration, not the plugin's
+  optimization, so including it would make the savings number swing with
+  settings. With no attributable optimization the saving is exactly 0.
+
+  Legacy records are handled rather than dropped: the old telemetry's
+  `shadow`/`enforce` pair maps onto `observe`/`enforce`, so the 205 historic
+  `shadow` rows — the only genuinely observed samples — keep contributing
+  real savings. Records with no `mode` field at all become "unknown" and are
+  **excluded** from savings: there is no way to prove they were produced in
+  observe mode, and an unprovable number must not be presented as measured.
+
+  A second block, **裁决统计** (verdict statistics), answers a different
+  question: how many verdicts did the decision model actually produce, and
+  what did they do to the user's work? Three classes, defined by *what
+  happened to the pending user action*:
+
+  | Class | Meaning |
+  |---|---|
+  | **allow** | The action proceeds — nobody is interrupted, nothing is blocked |
+  | **ask** | The action is escalated to a human confirmation |
+  | **reject** | The action is blocked and does not run |
+
+  It shows the three counts plus a per-decision-point breakdown (which point
+  asks, which point blocks).
+
+  The mapping cannot key on the verdict word alone. Each point has its own
+  vocabulary (`delegate` / `ask` / `deny` / `skip` / `redirect` / `inline` /
+  `switch` …) and **the same word can mean opposite things on different
+  points**: `retrieval.skip` blocks a search (→ reject) while
+  `cotTranslate.skip` merely skips translating a sentence (→ allow). Mapping
+  by word alone would count "did not translate" as "blocked", making the
+  rejection count meaningless. The mapping table is therefore keyed by
+  **(decision point, verdict word)** and lives in one place
+  (`lib/outcomes.js`); a new point or a new verdict word must be registered
+  there.
+
+  A fourth column, **未裁决** ("no verdict"), is not a fourth kind of verdict:
+  when the plugin degrades (timeout, auth failure, endpoint 404) it changed
+  nothing at all, so counting that as an allow inflates the allow count and
+  counting it as a rejection inflates the rejection count. It gets its own
+  column.
+
+  Unregistered verdicts are surfaced explicitly. Forgetting to register a
+  new verdict word only makes the numbers *smaller* — they still look
+  plausible, which is the hardest kind of error to notice. The UI states
+  "N verdicts unclassified" and names them.
+
+  Verdict statistics and usage statistics are **two separate measures and do
+  not convert into each other**: a degradation has no verdict but still cost
+  waiting time, while a cache hit has a real verdict but cost no tokens.
+
+  Data lives in **`~/.dsh/dsh-decision-engine/stats.jsonl`** (separate from
+  `telemetry.jsonl`, whose fields cannot satisfy these needs — it has no
+  provider, no output tokens, and no baseline). Writes are asynchronous and
+  never block the decision path; a failed write only logs a warning.
+
+  The `action` field holds the verdict word (`delegate` / `ask` / `deny` /
+  `skip` …), which is what the allow / ask / reject mapping reads. It is
+  written **after** the verdict exists: a verdict is the product of
+  `spec.decide()`, and `decide()` can only run once the model's answers come
+  back — so the statistics record cannot be written at the moment the request
+  goes out.
+
+  At **startup** the plugin backfills old `telemetry.jsonl` history into the
+  stats file, **exactly once** (a `stats.backfilled` marker remembers it).
+  The backfill must be persisted rather than recomputed per query: recomputed,
+  history would only exist while the stats file was empty — and the first new
+  request creates it, so a user who just upgraded would watch their month of
+  history vanish. Backfilled rows are explicitly labelled as *derived*, since
+  the old records lack provider and output tokens.
+
+  When the API reports no `usage` (self-hosted llama.cpp / vLLM usually
+  don't), a zero-dependency estimator fills in:
+  `tokens ≈ 90 + CJK chars + other chars / 3`, calibrated against 14 real
+  requests (~6% mean error). Real API values always win.
+
 ## 验证链路 / Verification
 
 ### 自动化验收（三条，全部可重复跑）/ Automated acceptance (three scripts, all repeatable)
 
 ```sh
-pnpm test              # 209 项单元测试：纯函数 + 适配器接线 + providers + 配置往返 + 设置界面渲染 + 缓存回归
-                       # 209 unit tests: pure functions + adapter wiring + providers + config round-trip + settings UI rendering + cache regressions
+pnpm test              # 285 项单元测试：纯函数 + 适配器接线 + providers + 配置往返 + 设置界面渲染 + 缓存回归 + 统计与对比 + 裁决分账
+                       # 285 unit tests: pure functions + adapter wiring + providers + config round-trip + settings UI rendering + cache regressions + verdict accounting
 pnpm verify:wiring     # 接线检查：用真实 schemastery 加载插件 / wiring check: loads the plugin with the real schemastery
 pnpm verify:endpoint   # 8 个决策点逐个打真实端点，校验题型与答案形状 / hits the real endpoint once per decision point, validating question shape and answer parsing
 pnpm verify            # 前两条一起跑 / runs the first two together
@@ -1068,6 +1421,7 @@ point has never actually worked".
 | `guardDenyConfidence` | 0.85 | 高风险 + 高置信 + 不可逆 → `deny` |
 | `guardIrreversibleDenyFloor` | 0.5 | 判定不可逆的门槛 |
 | `guardIrreversibleCeiling` | 0.2 | 低风险但不可逆 → 升级询问 |
+| `guardTaskRelevanceFloor` | 0.5 | 任务相关性否决线：低风险分支仅在 taskP 低于此值时才询问；设 0 停用该分支，设 1 恢复「只看不可逆」的旧行为 |
 | `guardConfidenceMin` | 0.6 | 中风险置信下限，低于则放行 |
 | `guardInjectionAskThreshold` | 0.8 | 注入嫌疑 → 升级询问 |
 
@@ -1076,6 +1430,7 @@ point has never actually worked".
 | `guardDenyConfidence` | 0.85 | high risk + high confidence + irreversible → `deny` |
 | `guardIrreversibleDenyFloor` | 0.5 | the bar for calling something irreversible |
 | `guardIrreversibleCeiling` | 0.2 | low risk but irreversible → escalate to ask |
+| `guardTaskRelevanceFloor` | 0.5 | task-relevance veto: the low-risk branch escalates only when taskP is below this; `0` disables the branch, `1` restores the old "irreversible-only" behavior |
 | `guardConfidenceMin` | 0.6 | confidence floor for medium risk; below it passes |
 | `guardInjectionAskThreshold` | 0.8 | injection suspicion → escalate to ask |
 
