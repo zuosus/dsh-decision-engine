@@ -13,3 +13,8 @@ node_modules/
 node_modules
 .DS_Store
 *.tgz
+
+# 站点构建产物与部署凭据
+site/dist/
+site/worker/
+site/.env*
