@@ -1,5 +1,7 @@
 # dsh-decision-engine
 
+[website](https://dsh.zuos.us/dsh-decision-engine/)
+
 给 DeepSeek Harness 的 System-1 决策守卫：在每次工具调用前问模型四个问题
 （风险、可逆性、任务相关性、注入嫌疑），据此放行、询问或拦截。默认 `shadow`：
 只记录判断，绝不打断你干活。
@@ -9,13 +11,11 @@ model four questions (risk, reversibility, task relevance, injection suspicion)
 and allows, asks, or blocks accordingly. Defaults to `shadow`: judgments are only
 recorded and never interrupt your work.
 
-**它支持所有 system-one 风格 API**：内置 `system one` 与
-`bamboonode` 两个预设，也可以填任意 `custom` base URL（自建 llama.cpp / vLLM、
+**它支持所有 system-one 风格 API**：内置多个预设，也可以填任意 `custom` base URL（自建 llama.cpp / vLLM、
 企业网关、第三方中转）。请求路径、鉴权方式与响应结构与 system-one 协议保持一致，
 换 provider 不影响各决策点的解析逻辑。
 
-**It works with any system-one style API**: built-in presets for `system one` and
-`bamboonode`, or any `custom` base URL (self-hosted llama.cpp / vLLM, corporate
+**It works with any system-one style API**: built-in presets for multiple presets, or any `custom` base URL (self-hosted llama.cpp / vLLM, corporate
 gateways, third-party relays). Request path, auth and response shape follow the
 system-one protocol, so switching providers never changes how answers are parsed
 at any decision point.
@@ -1082,7 +1082,7 @@ executed.
 **升级时的一次性迁移**：引入 `mode` 之前写下的 `stats.jsonl` 记录没有这个
 字段。插件会在启动时**按时间戳**从老遥测里找回每条记录当时的模式并补上
 （实测 2416 条全部对上、无一歧义），否则用户升级后会看到历史节省量凭空
-变成 0。匹配不上的记录保持「未知模式」不计入——宁可少算，不可猜。原文件
+变成 0。匹配不上的记录��持「未知模式」不计入——宁可少算，不可猜。原文件
 在改写前会先备份为 `stats.jsonl.mode-backup`。
 
 ### 横向对比 / Side-by-side comparison
