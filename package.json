@@ -1,6 +1,6 @@
 {
   "name": "dsh-decision-engine",
-  "version": "0.8.1",
+  "version": "0.9.0",
   "description": "dsh-decision-engine: a cheap judgement layer for DeepSeek Harness — all nine decision points (tool authorization, model routing, delegation, compaction, turn continuation, retrieval, skill pick, session title, COT translation) are implemented and individually switchable, and it works against any system-one style API (system one, bamboonode, SiliconFlow / Silicon Flow, or a custom base URL).",
   "icon": "./icon.svg",
   "type": "module",
@@ -70,15 +70,17 @@
       "inject": [
         "@deepseek-ai/dsh-client-ui-commands",
         "@deepseek-ai/dsh-client-ui-plugin-manager",
-        "@deepseek-ai/dsh-client-ui-renderer"
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-chat"
       ]
     }
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "*",
-    "@deepseek-ai/schemastery": "*"
-  },
-  "scripts": {
+    "@deepseek-ai/schemastery": "*",
+    "@deepseek-ai/dsh-session": "*"
+  },  "scripts": {
     "test": "node --test test/",
     "verify:endpoint": "node scripts/verify-endpoint.mjs",
     "verify:wiring": "node scripts/verify-wiring.mjs",

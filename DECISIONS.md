@@ -2,6 +2,109 @@
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
 
+## DEC-015 降级错误显示在消息尾部：走会话事件而不是轮询 HTTP（2026-10-28）
+
+**背景**：本插件全程 fail-open——端点挂了、地址错了、key 没配，一切照常放行。
+这对「不打断用户」是对的，对「用户能修」是错的：实测现网 telemetry.jsonl 里
+392 条 `action: "degraded"`（timeout 165 / network-error 96 / cooldown 62 /
+http-500 21 / http-400 18 / http-429 12 / http-404 8 / no-key 6 /
+adapter-error 2 / auth-failed 1 / http-502 1），**用户在聊天窗口里一条都看不见**，
+只会觉得「这个插件好像没生效」。宿主日志（`logger.warn`）能看见，但那是另一个界面。
+
+**决策**：把「这一轮坏了什么」显示在**对应那条消息的尾部**（DSH 的
+`conversation.chat.turnTail` 槽位，与内置 token 统计同一处）。
+
+**为什么走会话事件，而不是轮询自己的 HTTP 接口**（这是本条的核心）：
+
+界面上「错误属于哪一轮」这个信息**只有会话知道**。轮询 `/api/decision-engine/log`
+拿到的是「最近 N 条错误」，配上当前轮次就会把三天前的故障挂到今天的新消息下面
+——**那比不显示更糟**：用户会照着一条假线索去排查。
+
+会话事件自带 `turn`，且由客户端的 conversation 索引**按轮次自动归位**：
+同轮事件折进同一个上下文，`turnTail` 组件从 `owner.turn.data.get(kind)` 取
+「这一轮的错误列表」。附带好处是会话重放时错误跟着重放，翻历史时那轮的故障
+仍在原处，而不是混进「现在的错误列表」。
+
+**宿主的事件词表是封闭的，必须走 `appendPluginRecord`**：
+
+`Session.append(type, …)` 的 `type` 限定在 `SessionEventMap`（宿主自带词表）里。
+不在表里的事件类型，持久化读路径**拒绝解释**（`SessionFormatUnsupportedMigrationError`）
+——它无法判断「跳过这条会不会重建出一个错的会话」，宁可报错也不静默丢事件。
+后果是：**用户升级 DSH 后会话打不开**。
+
+宿主为 out-of-repo 插件留的官方出口是 `appendPluginRecord(session, type, data)`
+（`@deepseek-ai/dsh-session` 导出），它写的事件自带 `ignorable` 标记：不认识的
+读者保留并跳过，且永不进模型可见 surface。类型名必须是 `plugin:` 加小写斜杠
+分段，所以取名 `plugin:decision-engine/error`。
+
+**`dsh-session` 用动态 import，不在顶层 import**：它是宿主自带包（app 的
+dependency，经 installation scope 提供给 profile），**不是能单独安装的 npm 包**。
+顶层 import 一旦解析不到，整个插件都加载不了——配置页与九个决策点全赔进去。
+而错误尾部只是增强，所以延迟到真要发错误时才取，取不到只记一条 warn。
+peerDependencies 里声明它（`"*"`），让依赖关系显式可见。
+
+**conversation Definition 必须匹配 `turn/start` 作为 `start` 角色**：
+
+对话层要求每个上下文先有一个 start 匹配，之后才收 update 匹配
+（`acceptMatch`: `received an update before its start Match` 会**抛错**）。
+只匹配我们自己的错误事件（全是 update）会直接撞上这条。所以 `match()` 同时认
+`turn/start`（role: start，id 用轮次号）与错误事件（role: update，同一个 id）。
+与 DSH 自带 `trajectoryAssistantDefinition`（以 `step/start` 为起点）同一套写法。
+
+**一条错误归到具体轮次，靠三条腿**：
+
+1. `agent/pre-step` / `agent/request` / `agent/turn-stopping` 载荷自带 `payload.turn`；
+2. `tools/pre-execute` **没有** turn，从会话日志反查最近的 `turn/start`
+   （新增 `currentTurnOf(session)`）；
+3. 宿主 turn 号与客户端 `TurnLocation.turn` **同源**——都来自同一个
+   `turn/start` 事件的 `data.turn`（`dsh-agent-loop` 先 append 事件、再把同一个
+   `turn` 传给 pre-step），实测会话日志第一轮就是 `"turn":1`。
+
+**降级必须报具体原因，不是笼统的「降级了」**：`classify()` 只返回 `null`，
+原因（auth-failed / timeout / http-404…）只在 `degrade()` 里知道。所以给
+`classify` 加了 `onDegraded` 回调。不同原因的修复动作完全不同（鉴权失败改 key、
+404 改端点风格、超时改 timeoutMs），混成一行会让人去改错的字段。
+
+**测试发现并修掉一个真 bug**：`onDegraded` 抛异常会顺着 `classify` 的调用栈
+冒出去，把一次**本来只是降级的决策变成崩溃**。改为经 `noteDegraded` 走（它自己
+吞异常）。「报告问题」的通路绝不能反过来成为新的故障点——这与整个插件的
+fail-open 前提是同一条纪律。
+
+**一轮同一分类只显示一行**：一轮里可能连续降级好几次（每个决策点各一次），
+逐条渲染会在消息尾部堆出四五行几乎一样的红字，反而看不清「这一轮到底坏在哪」。
+`http-429` 单列成「触发限流」（等一会儿就好，与改地址/改 key 是不同动作）。
+
+**思维链翻译点的错误刻意不显示**：`translator.translate(spec, signal)` 的签名里
+既没有 session 也没有 turn，归不到具体轮次。硬凑一个（比如取「当前打开的会话」）
+就会把错误挂到**别的**消息下面——同上，那比不显示更糟。它仍进遥测。
+
+**客户端 bundle 内联了一份逻辑，与 `lib/client-errors.js` 是两份**：客户端 bundle
+是独立加载单元（`window.__ModuleLoader__`），它的 `require()` 只认已注册模块
+（react 等），拿不到同目录兄弟文件。所以分类表/决策点名/事件类型这三样必须两侧
+一致——`test/client-errors.test.js` 里有 4 道一致性闸盯着，防止悄悄跑偏。
+
+**槽位用 `id` 不用 `key`**：`conversation.chat.turnTail` 是 list 型槽位，`id` 是
+「在自己那格加一个条目」，复用别人的 id 才会顶掉它；用 `key` 属于 keyed 槽位的写法。
+组件没有内容时返回 `null`——这是槽位约定（「entries without content return null」），
+正常轮次完全看不到这一段。
+
+**效果**：降级从「只进日志」变成「挂在出事那条消息的尾部」。356 项测试通过
+（新增 47 项：归一化、账本、轮次反查、分类归并、发布器容错、Definition 折叠、
+槽位注册与渲染、两份实现一致性、降级回调）。
+
+**注意**：本条不改变任何决策行为——发布通路全程只读，回调抛异常、宿主没有该
+扩展位、取不到 `appendPluginRecord`，都只影响「看不看得见」，不影响放行还是拦截。
+
+**改动文件**：新增 `lib/errors.js`（归一化 + 账本 + `currentTurnOf`）、
+`lib/publish.js`（分类归并 + 发布器 + 动态取 `appendPluginRecord`）、
+`lib/client-errors.js`（客户端纯逻辑，供测试与 bundle 对照）、
+`lib/engine.js`（`noteDegraded` + 给 classify 传 `onDegraded`）、
+`lib/index.js`（发布器接线、各降级点与适配器异常上报、guard 的 `answer-shape-mismatch`）、
+`lib/adapters/*.js`（传 `turn` / `session`）、`lib/client.js`（turnTail 槽位 +
+Definition + 渲染）、`package.json`（client inject 加 ui-chat / ui-conversation，
+peerDependencies 加 dsh-session）、新增 `test/client-errors.test.js`、
+`test/error-tail-render.test.js`，扩 `test/engine.test.js`。
+
 ## DEC-014 决策点（point）的老记录归因：tag 与决策点本是一对一（2026-10-27）
 
 **背景**：DEC-013 之后，统计页「按决策点」表里又出现一个 `unknown`。实测现网

@@ -60,17 +60,24 @@ const baseCfg = (over = {}) => ({
  * 造一个 runner。
  * @param modes - id → 模式。
  * @param classify - 替换 client.classify 的实现。
+ * @param onDegraded - 降级回调（收集错误可见化通路的调用）。
  */
-function makeRunner({ modes = {}, classify, cfg = baseCfg() } = {}) {
+function makeRunner({ modes = {}, classify, cfg = baseCfg(), onDegraded } = {}) {
   const entries = [];
   const calls = [];
   /** 引擎交给统计层的裁决记录。 */
   const decisions = [];
+  /** 降级回调收到的信息（错误可见化通路）。 */
+  const degradations = [];
   const client = {
     async classify(call) {
       calls.push(call);
-      if (classify === undefined) return null;
-      return classify(call);
+      const result = classify === undefined ? null : await classify(call);
+      // 假 client 返回 null = 端点降级：把**具体**原因报上去
+      // （而不是笼统的「降级了」），这正是错误可见化通路要的。
+      // 真实的 client 在 degrade() 里做同一件事。
+      if (result === null) call.onDegraded?.("auth-failed", { hint: "key 不对" });
+      return result;
     },
   };
   const runner = createDecisionRunner({
@@ -82,8 +89,16 @@ function makeRunner({ modes = {}, classify, cfg = baseCfg() } = {}) {
     specOf: (id) => POINT_SPECS[id],
     // 裁决统计：引擎在拿到裁决后把它交给这里（见 DEC-008）。
     recordDecision: (options) => decisions.push(options),
+    ...(onDegraded === undefined
+      ? {}
+      : {
+          onDegraded: (info) => {
+            degradations.push(info);
+            onDegraded(info);
+          },
+        }),
   });
-  return { runner, entries, calls, client, cfg, decisions };
+  return { runner, entries, calls, client, cfg, decisions, degradations };
 }
 
 /** 造一个最小的 ctx，记录注册的监听器。 */
@@ -826,4 +841,66 @@ test("翻译：卸载时恢复原方法", async () => {
   assert.equal(typeof disposer, "function");
   disposer();
   assert.equal(translator.translate, original, "卸载后必须恢复原方法");
+});
+
+// ---------------------------------------------------- 错误可见化（降级回调）
+
+test("降级回调：端点降级时把**具体**原因报上去（不是笼统的「降级了」）", async () => {
+  const { runner, degradations } = makeRunner({
+    modes: { route: "enforce" },
+    classify: () => null,
+    onDegraded: () => {},
+  });
+  await runner.ask("route", { turn: 3, step: 1, current: {}, recent: "" }, { turn: 3 });
+  assert.equal(degradations.length, 1, "降级应报一次");
+  assert.equal(degradations[0].reason, "auth-failed", "应报出具体原因");
+  assert.equal(degradations[0].point, "route");
+});
+
+test("降级回调：带上轮次（否则错误挂不到具体那条消息上）", async () => {
+  const { runner, degradations } = makeRunner({
+    modes: { retrieval: "enforce" },
+    classify: () => null,
+    onDegraded: () => {},
+  });
+  const session = { id: "s1" };
+  await runner.ask(
+    "retrieval",
+    { tool: "web_search", query: "q", recent: "" },
+    { tool: "web_search", turn: 5, session },
+  );
+  assert.equal(degradations.length, 1);
+  assert.equal(degradations[0].turn, 5, "轮次必须传下去");
+  assert.equal(degradations[0].tool, "web_search", "工具名也要传下去");
+  assert.equal(degradations[0].session, session, "会话必须传下去（错误要落到出错的那个会话）");
+});
+
+test("降级回调：降级回调抛异常不影响决策（报告通路不能反过来弄坏决策）", async () => {
+  const { runner, entries } = makeRunner({
+    modes: { route: "enforce" },
+    classify: () => null,
+    onDegraded: () => {
+      throw new Error("报告通路炸了");
+    },
+  });
+  // 不抛即通过：决策仍按 fail-open 继续。
+  const result = await runner.ask("route", { turn: 1, step: 1, current: {}, recent: "" }, { turn: 1 });
+  assert.equal(result.degraded, "classify");
+});
+
+test("降级回调：没有给回调时也不该报错（单元测试的假 client 没有这条通路）", async () => {
+  const { runner } = makeRunner({ modes: { route: "enforce" }, classify: () => null });
+  const result = await runner.ask("route", { turn: 1, step: 1, current: {}, recent: "" }, { turn: 1 });
+  assert.equal(result.degraded, "classify");
+});
+
+test("降级回调：答案形状不符也算一次降级（模型回了，但回的不是能用的东西）", async () => {
+  const { runner, degradations } = makeRunner({
+    modes: { route: "enforce" },
+    classify: () => ({ answers: { totally: "unexpected" }, model: "m", latencyMs: 1, cached: false }),
+    onDegraded: () => {},
+  });
+  await runner.ask("route", { turn: 2, step: 1, current: {}, recent: "" }, { turn: 2 });
+  assert.equal(degradations.length, 1);
+  assert.equal(degradations[0].reason, "answer-shape-mismatch");
 });

@@ -551,6 +551,57 @@ line is written to `telemetry.jsonl`. The `Test endpoint` button shows the full
 diagnosis (provider, actual endpoint, HTTP code, request id, response body)
 directly.
 
+### 错误显示在消息尾部 / Errors shown at the tail of the message
+
+降级如果只写进日志，用户在聊天窗口里什么都看不到——插件「像是没生效」。
+所以本插件会把**这一轮**出的问题，直接显示在**对应那条消息的末尾**
+（就像内置的 token 统计那样挂在消息尾部）。
+
+The degradation is not only logged: it is shown **at the tail of the message it
+belongs to**, the same place the host's own token statistics sit.
+
+```
+┌─────────────────────────────────────────┐
+│ 助手消息正文……                          │
+├─────────────────────────────────────────┤
+│ 决策  工具授权  鉴权被拒            bash │  ← 这一轮出的问题
+└─────────────────────────────────────────┘
+```
+
+**它怎么知道属于哪一轮？** 靠会话事件。每一次降级，宿主往会话里写一条
+`plugin:decision-engine/error` 记录（带 `turn`），客户端的 conversation
+Definition 把它折进「这一轮的错误」，再由 `conversation.chat.turnTail`
+槽位渲染出来。
+
+为什么不用轮询 HTTP 接口：只有会话事件带 `turn`——前端据此才知道该把错误
+挂在哪条消息下面。轮询拿到的是「最近 N 条错误」，配上当前轮次就会把三天前
+的故障挂到今天的新消息下面。
+
+**这一轮同一类错误只显示一行。** 一轮里可能连续降级好几次（每个决策点各一次），
+逐条渲染会在消息尾部堆出四五行几乎一样的红字，反而看不清「这一轮到底坏在哪」。
+
+**看不到错误的三种情况**（宁可少显示，也不挂错消息）：
+
+| 情形 | 为什么看不到 |
+|---|---|
+| 思维链翻译门槛出错 | 翻译链路没有会话上下文，归不到具体轮次 |
+| 读不到当前轮次 | 宁可只进日志，也不把错误挂到**别的**消息下面 |
+| 宿主没有该扩展位 | 老版本 DSH 没有消息尾部这个位置可挂 |
+
+**错误永远不进模型可见的上下文。** 它们是给人看的注解，不是给模型看的。
+
+### Errors in the message tail (English)
+
+Each degradation is written into the session as a `plugin:decision-engine/error`
+record carrying its `turn`, folded by a conversation Definition into "the errors
+of this turn", and rendered by the `conversation.chat.turnTail` slot. That is why
+the error lands on the message it belongs to instead of on "whatever failed
+recently" — only a session event carries the turn number the UI needs.
+
+One line per error kind per turn (a turn can degrade several times; showing all
+of them would bury the actual problem). Errors never enter the model's visible
+context: they are annotations for humans.
+
 ## 决策点（参与哪些环节）/ Decision points (which stages it joins)
 
 这个插件的定位不是「工具调用风险闸门」，而是**一个便宜的判断层**：用一次
