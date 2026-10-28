@@ -1,0 +1,25 @@
+// dsh-worker 的 Wrangler 配置。
+//
+// Workers Builds 的 Root directory 设为 `site`，所以这个文件必须在 site/ 下，
+// 且 `main` 相对于本文件解析。
+//
+// `name` 必须与 Cloudflare 后台的 Worker 名一致（dsh-worker）——
+// Workers Builds 会用 `WRANGLER_CI_OVERRIDE_NAME` 覆盖它，但保持一致更省心。
+//
+// `main` 指向 make-bundle.mjs 生成的产物：整个站点被 gzip + base64 嵌进
+// 一段自包含 Worker 脚本（见 site/README.md「为什么是『把文件嵌进 Worker』」）。
+// 所以 build 命令必须先生成 worker/bundle.js，再由 deploy 命令上传。
+{
+  "name": "dsh-worker",
+  "main": "worker/bundle.js",
+  "account_id": "48bfaa4269a02470c2d6529a56b05f23",
+  "compatibility_date": "2026-10-26",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true
+    }
+  }
+}

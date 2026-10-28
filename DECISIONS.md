@@ -2,6 +2,80 @@
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
 
+## DEC-016 站点自动部署：Root directory 指向 site/，站点自成一个包（2026-10-28）
+
+**背景**：站点（`site/` → `dsh.zuos.us`）一直只有手动部署一条路——本地跑
+`node site/deploy.mjs` 直接调 Cloudflare API 上传 Worker 脚本并挂域名。
+2026-10-27 把 `dsh-worker` 连到本仓库的 `main` 分支，想让它推送即部署，
+结果**连续 4 次构建全部失败**，错误是：
+
+```
+Cloning repository...
+Failed: root directory not found
+```
+
+这不是构建失败，是**构建根本没开始**——Workers Builds 连仓库都拿到了，
+但找不到配置里指定的 Root directory。
+
+**根因**：`site/` 在 2026-10-27 才进仓库（提交 `4ef171f`），而 Workers Builds
+的 Root directory 是在连接时（建站初、仓库还没有 `site/` 的时候）设的，
+指向一个当时不存在的路径。四次失败的构建正好对应 `site/` 进仓库之后的
+四个提交（`755fd28a` / `d1ea5c3e` / `8dd4e7c4` / `f7c2ac94`），
+更早的提交根本没有 check run——因为那时 Root directory 还不存在，
+Cloudflare 直接跳过，不触发构建。
+
+**决策**：不动 Cloudflare 后台的 Root directory（改成 `/` 也有坑，见下），
+而是**把 `site/` 补成一个自足的 Wrangler 项目**：新增 `site/wrangler.jsonc`
+与 `site/package.json`（+ 锁文件），让 Root directory 指向 `site` 后
+一切自洽。
+
+**为什么 Root directory 不能指向仓库根**——这是本条最容易被忽略的点：
+
+仓库根的 `package.json` 声明了三个宿主自带包的 peerDependency：
+
+```json
+"peerDependencies": {
+  "@deepseek-ai/cordis": "*",
+  "@deepseek-ai/schemastery": "*",
+  "@deepseek-ai/dsh-session": "*"
+}
+```
+
+这些包在 npm 上确实存在（`@deepseek-ai/dsh-session@0.0.1-rc.1`），
+但它自己又依赖 `@deepseek-ai/dsh-type-meta@^0.0.1-rc.1`——
+**这个包不在公共 registry 上**（实测 `npm install` 在仓库根 404 失败：
+`npm error 404 Not Found - GET .../@deepseek-ai%2fdsh-type-meta`）。
+这些包是**宿主 DSH 自带**的，由 DSH 注入运行时，插件仓库从来不需要、
+也不应该去装它们。Workers Builds 的自动依赖安装会在 Root directory
+（及其仓库根）跑 `npm ci`，Root directory 指向仓库根就必然 404。
+
+`site/` 有自己干净的 `package.json`（只依赖 wrangler），装它不碰那些包，
+问题消失。
+
+**为什么 `site/package-lock.json` 要入库**：Workers Builds 用 `npm ci`
+装依赖。没有锁文件时它会退回 `npm install`，每次构建解析出的 wrangler
+版本可能不同（`^4.154.0` 会随上游发版漂移），构建就不再可复现。
+锁文件让「同一份源码 → 同一个 bundle」成立。
+
+**验证**（在干净 clone 上跑，等价于 CI）：
+
+```
+npm ci                 → exit 0
+npm run build          → worker/bundle.js (27.9 KB)
+npx wrangler deploy --dry-run → Total Upload: 28.23 KiB
+```
+
+且 CI 生成的 `worker/bundle.js` 与当前线上那份 **sha256 完全一致**
+（`538e83f7…`）——说明构建是确定性的，接上自动部署后线上内容不会变。
+
+**保留手动路径**：`site/deploy.mjs` 仍然能用。它走的是裸 API 上传
+（不需要 wrangler），适合「不想装依赖只想推一把」的场景。
+两条路产出的是同一份 `worker/bundle.js`，行为一致。
+
+**顺带记一笔**：本次诊断暴露了本机 MCP 的 Cloudflare token 缺
+`workers-ci.read` 权限，读不到构建配置，只能靠 GitHub check run 的时间戳
+与提交对应关系反推（详见 `docs/lessons/cloudflare-builds-root-directory.md`）。
+
 ## DEC-015 降级错误显示在消息尾部：走会话事件而不是轮询 HTTP（2026-10-28）
 
 **背景**：本插件全程 fail-open——端点挂了、地址错了、key 没配，一切照常放行。
