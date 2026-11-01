@@ -107,6 +107,14 @@ async function loadBundle(options = {}) {
       if (typeof cleanup === "function") effectCleanups.push(cleanup);
     },
     useMemo: (fn) => fn(),
+    // 轮次数据的订阅口：宿主给的是 useSyncExternalStore 形状
+    // （subscribe / getSnapshot）。桩里照着实现：读一次当前值，订阅记下来。
+    useSyncExternalStore(subscribe, getSnapshot) {
+      const snapshot = typeof getSnapshot === "function" ? getSnapshot() : undefined;
+      const unsubscribe = typeof subscribe === "function" ? subscribe(() => {}) : undefined;
+      if (typeof unsubscribe === "function") effectCleanups.push(unsubscribe);
+      return snapshot;
+    },
   };
 
   const slots = [];
@@ -482,6 +490,46 @@ test("读取端：按宿主契约读——get() 返回值本身，不是一层�
   );
   // 取到的是值里的其它字段时，不该被误当成记录列表。
   assert.deepEqual(judgementsOfTurn({ turn: { data: { get: () => ({ turn: 3 }) } } }), []);
+});
+
+test("计数器：订阅轮次数据——晚到的记录也会把计数刷新出来", async () => {
+  const { entry, dictionaries } = await judgementSlot();
+  const t = translateWith(dictionaries);
+  // 宿主形状的轮次数据存取口：get 返回值本身，source 是订阅口。
+  let value = { entries: [] };
+  const listeners = new Set();
+  const owner = {
+    turn: {
+      turn: 7,
+      data: {
+        get: () => value,
+        source: () => ({
+          getSnapshot: () => value,
+          subscribe: (listener) => {
+            listeners.add(listener);
+            return () => listeners.delete(listener);
+          },
+        }),
+      },
+    },
+    seq: 1,
+    openFile() {},
+    t,
+  };
+  // 先渲染：还没有记录 → 不占位。
+  const before = deepRender(entry.component(owner));
+  assert.equal(collectText(before).join("\n").includes("次判断"), false, "没有记录时不该显示计数");
+  // 一条记录落进来（宿主发布 → 订阅者被通知 → 重绘）。
+  value = { entries: [{ point: "authorize", mode: "enforce", action: "deny" }] };
+  assert.equal(listeners.size, 1, "组件应当订阅了轮次数据（晚到的记录才有办法刷新）");
+  for (const listener of listeners) listener();
+  // 桩里的 useSyncExternalStore 只在渲染时读快照，所以这里直接重渲一次：
+  // 真实 React 会在订阅回调后自动重绘。
+  const after = deepRender(entry.component(owner));
+  assert.ok(
+    collectText(after).join("\n").includes("1 次判断"),
+    `晚到的记录应当显示出来，实际：\n${collectText(after).join("\n")}`,
+  );
 });
 
 // ---------------------------------------------------------------- 渲染
