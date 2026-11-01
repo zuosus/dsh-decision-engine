@@ -47,7 +47,9 @@ async function loadBundle() {
   };
 
   const slots = [];
-  let definition;
+  // 插件会注册**多个** conversation Definition（错误一个、判断计数一个），
+  // 全收下来再按 kind 取：只留最后一个会让先注册的那个在测试里消失。
+  const definitions = [];
   let component;
 
   globalThis.window = {
@@ -78,7 +80,7 @@ async function loadBundle() {
           uiConversation: {
             events: {
               register(definitionValue) {
-                definition = definitionValue;
+                definitions.push(definitionValue);
                 return () => {};
               },
             },
@@ -104,7 +106,10 @@ async function loadBundle() {
   };
 
   await import(dataUrl);
-  return { slots, definition, component };
+  // 默认暴露**错误**那个 Definition（本文件测的就是错误尾部）：
+  // 判断计数那个是另一个 kind，不能顶掉它。
+  const definition = definitions.find((item) => item.kind === "decision-engine-error");
+  return { slots, definition, definitions, component };
 }
 
 /** 递归收集渲染树里的文本。 */

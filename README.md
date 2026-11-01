@@ -255,6 +255,46 @@ degradation, not an error. With no key, no request is sent at all.
 Degradations also surface **at the tail of the message they belong to** (one line per
 error kind per turn), and never enter the model's visible context.
 
+## 判断计数 / Judgement count
+
+同一轮消息尾部的另一行显示**这一轮做了多少次判断**（`N 次判断` / `N judgements`），
+点开浮层可以看到它们分别落在哪个决策点上。开关是 `judgementCount`（默认 `true`）；
+设 `false` 则一条记录都不发布，会话里不留任何痕迹。
+
+Alongside it, the turn tail shows **how many judgements that turn made**
+(`N 次判断` / `N judgements`); clicking opens an overlay breaking them down by decision
+point. Controlled by `judgementCount` (default `true`); `false` publishes nothing at all.
+
+- **什么算一次判断**：真正打到决策端点并拿到 `answers` 的调用才算，`observe`（观察）
+  与 `enforce`（生效）都算。**命中缓存不算**——那次根本没有发出请求。
+- **降级尝试单独一格**：没拿到可用答案的尝试（没有 key、超时、404、答案形状不符…）
+  本身不是判断，在浮层里单独记成「降级」并带原因，不混进判断数。
+- **单位是「轮」**：一轮 = 一次完整回答。不是整个会话，也不是会话里的一步。
+  计数按轮、按会话各自隔离，分叉出去的会话重放自己的记录。
+- **显示位置**：轮尾图标/时间那一行的**上面**，单独一行；一轮没有记录就什么都不显示。
+- **浮层内容**：顶部是这一轮的判断总数与时间区间；下面每个有活动的决策点一行——
+  判断次数、`observe` / `enforce` 拆分、裁决拆分（放行 / 询问 / 拦截）、降级次数与原因。
+  没有活动的点不出现。
+- **纯展示，不参与决策**：计数通路全程只读，发布失败只影响看不看得见，绝不影响放行还是拦截。
+
+A *judgement* is a decision-model call that actually reached the endpoint and returned
+answers, in either `observe` or `enforce` mode; **cache hits do not count** (no request was
+sent). Degraded attempts (no usable answer: no key, timeout, 404, answer-shape mismatch…)
+are not judgements — the overlay lists them as a separate degraded count with reasons. The
+unit is the **turn**: one completed response, not a session and not a step. It renders on
+its own line above the icon/time row of the turn footer, and renders nothing when a turn has
+no records. The overlay shows the turn's total plus its time range, then one row per
+decision point with activity: count, observe/enforce split, verdict split
+(allow / ask / reject) and degraded count. The path is display-only and fail-open.
+
+**已知限制**：思维链翻译点 `cotTranslate` 拿不到轮次——宿主的 `translator.translate()`
+既不给 session 也不给 turn，因此它无法归到任何一轮，**永远不会出现在计数里**
+（仍照常进遥测与统计）。它若降级，也不会进降级那一格。
+
+Known limitation: `cotTranslate` cannot be attributed to a turn — the host's
+`translator.translate()` carries neither session nor turn — so it never appears in the
+counter (it still goes to telemetry and stats).
+
 ## 统计与对比 / Statistics
 
 设置页第二个 tab 回答两个问题：**钱花在哪**，以及**不开这个插件本该花多少**。

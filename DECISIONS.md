@@ -41,6 +41,74 @@
 **没有中文字符**（品牌名「硅基流动」按服务端数据单独登记）；覆盖首屏未加载、保存失败、
 custom 表单、统计错误/空区间、错误尾部等分支。`test/i18n-coverage.test.js` 做静态兜底：
 渲染位置的中文都有英文、跨行拼接的整段不被漏翻、英文译文里不残留中文。
+## DEC-019 判断计数按「轮」统计：复用 DEC-015 的会话事件 + conversation Definition，不新开 HTTP 查询（2026-11-01）
+
+**背景**：DEC-015 把降级错误显示到「出事那一轮」的尾部之后，「这个插件到底有没有
+在工作」这个问题只回答了一半——用户能看见它**坏**了，却看不见它**干了活**。
+一次工具授权判断约 1.9k token、p50 约 0.5s，但它在界面上不留任何痕迹：一轮里
+模型被问了三次还是零次，用户只能去 `tail telemetry.jsonl`。
+
+于是要在轮尾显示「这一轮做了多少次判断」。看起来是个小需求，**单位**却是第一个
+必须钉死的词：需求原文说的是「每轮会话」（conversation），而本仓库里
+「conversation」既可能指整个会话（一个 session 里几十轮），也可能指一轮回答。
+两种解释的工程量差一个数量级——会话级需要跨轮聚合与一个新的统计查询入口，
+轮级只需要一次事件归类。
+
+**决策**：
+
+1. **计数按轮（turn）**，一轮 = 一次完整回答（一个 `turn/start` 到它结束），
+   不是会话、不是会话里的一步。「conversation」在本条里明确读作 turn：
+   用户看的是「这条回答下面挂了多少次判断」，会话级总数对这个界面毫无用处。
+   因此**不需要任何会话级聚合**：同轮事件由 conversation 索引自动折进同一个
+   上下文，组件从 `owner.turn.data.get(key)` 取这一轮的记录即可。
+
+2. **复用 DEC-015 的通路，不新开 HTTP 查询**（这是本条的核心）：既然「这条记录
+   属于哪一轮」这个信息只有会话知道，那么计数就必须走会话事件
+   （`plugin:decision-engine/judgement`，同样经 `appendPluginRecord` 发布、
+   同样 `ignorable`、同样永不进模型可见 surface），由同一个 conversation
+   Definition 机制按轮归位。轮询 `/api/...` 拿到的仍是「最近 N 条」，配上当前
+   轮次就会把别的轮次的活动挂到今天这条消息下面——**那比不显示更糟**，与
+   DEC-015 论证过的理由完全一致。顺带的好处也一致：会话重放时记录跟着重放，
+   翻历史时那一轮的判断数仍在原处。
+
+3. **降级尝试单独一格，不算判断**：判断的定义是「真正打到端点并拿到 answers
+   的调用」（`result !== null && cached !== true`），`observe` 与 `enforce` 都算；
+   命中缓存不算（那次根本没发请求）；没拿到可用答案的尝试（没有 key、冷却、
+   timeout、404、答案形状不符…）**不是判断**，在浮层里单列成「降级」并带原因。
+   把两者混成一个数字会让「判断了 5 次」这个数字既不能反映工作量、也不能反映
+   健康度——而两者要触发的用户动作完全不同（看拆分 vs 修 key / 改端点风格）。
+
+4. **纯展示、fail-open，且 `false` 意味着零会话痕迹**：计数通路全程只读，
+   发布是 fire-and-forget、`try/catch` 全包——发布抛异常、宿主没有该扩展位、
+   取不到 `appendPluginRecord`，都只影响「看不看得见」，绝不改变放行还是拦截。
+   这与「报告问题的通路绝不能反过来成为新的故障点」是同一条纪律。
+   `judgementCount: false` 时**一条记录都不发布**（客户端不需要知道这个配置：
+   没有记录 → 组件渲染 `null`），因此关闭它是真正的零会话 footprint，而不是
+   「照样发事件、只是不显示」。
+
+**`cotTranslate` 的已知限制**：它的宿主 API `translator.translate()` 既不给 session
+也不给 turn，无法归到任何一轮，硬凑一个（比如取「当前打开的会话」）就会把记录挂到
+**别的**消息下面。所以该点的判断与降级都**不发布**，只进遥测与统计——与 DEC-015
+对它的处理是同一个结论。
+
+**验证**：`test/judgements.test.js`（27 项：归一化、开关关闭时零发布、裁决/降级两类
+记录、发布失败被吞、动态 import 缓存）与 `test/judgement-ui.test.js`（27 项：Definition
+折叠、槽位以 `id` 注册且 `order: 20`、计数渲染、`null` 不占位、浮层逐决策点分栏、
+客户端与服务端的常量与裁决矩阵一致性）全通过；全量 `node --test test/` **413 项通过、
+0 失败**（改动前基线 359），`node scripts/verify-wiring.mjs` 全部接线检查通过。
+
+冒烟（临时脚本，未入库）：以假的 `@deepseek-ai/dsh-session` 与本地假端点跑真实 `apply()`，
+守卫真实裁决发出 `{turn:4,point:authorize,mode:enforce,action:delegate}`，同参数第二次
+（缓存命中）发 0 条；检索点走引擎发 `{action:"skip"}`，答案残缺发
+`{degraded:"answer-shape-mismatch"}`；`judgementCount: false` 时 judgement 记录 0 条，
+而错误记录照常——两条通路互不干扰。
+
+**改动文件**：`README.md`（新增「判断计数」双语小节）、
+`config.example.yml`（新增 `judgementCount` 键与注释）。
+代码侧（由其它任务交付）：`lib/index.js`（配置项与 `allowed` 名单、状态回显）、
+`lib/publish.js` / `lib/judgements.js`（记录归一化与发布）、`lib/client.js`
+（turnTail 槽位 + Definition + 浮层渲染）、`lib/client-judgements.js`
+（客户端纯逻辑，供测试与 bundle 对照）与相应测试。
 
 ## DEC-017 入口文件由 wrangler 的 build.command 现场生成，不依赖 CI 的 Build command 字段（2026-10-28）
 
