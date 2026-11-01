@@ -135,11 +135,18 @@ async function loadBundle(options = {}) {
         });
         const ctx = {
           logger: { info() {}, warn() {} },
+          // 宿主 locale 服务：显式声明中文。DEC-018 之后 `apply()` 一进来就
+          // 读宿主语言（读不到才退浏览器语言）——裸 Node 里 `navigator` 是
+          // en-US，不声明的话整个 bundle 会按英文翻译，本文件断言的中文
+          // （POINT_LABELS 的决策点名等）就全被渲染边界换掉了。与本文件
+          // 断言 en 的用例无关：那几个用例的期望走的是字典 `t`，不受影响。
           locale: {
             register(_ns, dicts) {
               dictionaries = dicts;
               return () => {};
             },
+            getSnapshot: () => ({ active: "zh", locales: [], revision: 1 }),
+            subscribe: () => () => {},
           },
           slots: {
             inject(_slot, callback) {
@@ -567,8 +574,11 @@ test("浮层：挂在 document.body 上（portal），且有关闭按钮与 aria
   const trigger = found.buttons.find((button) => button.props["aria-haspopup"] === "dialog");
   assert.ok(trigger, "计数器应该是 button（键盘可达）");
   assert.equal(trigger.props["aria-expanded"], true);
-  // 关闭按钮：aria-label 是「关闭」
-  const close = found.buttons.find((button) => button.props["aria-label"] === "关闭");
+  // 关闭按钮：aria-label 是「关闭浮层」。特意不叫「关闭」——EN_CONFIG 已把
+  // 「关闭」登记成 "Off"（提供方开关的档位名），同一句中文两处语义不同，
+  // 文案形态只能有一个英文，按钮的 aria-label 换成了不会撞车的说法
+  //（对应 lib/client.js 里 JUDGEMENT_ZH 与 EN_CONFIG 的注释）。
+  const close = found.buttons.find((button) => button.props["aria-label"] === "关闭浮层");
   assert.ok(close, "应有带 aria-label 的关闭按钮（点它关闭）");
   assert.equal(typeof close.props.onClick, "function", "关闭按钮要真的能点");
 });
