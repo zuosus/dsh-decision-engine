@@ -137,10 +137,11 @@ function ownerWith(turn, errors) {
     turn: {
       turn,
       data: {
-        get: (key) =>
-          key === "decision-engine-error"
-            ? { kind: "turn", turn, key, value: { errors } }
-            : undefined,
+        // 宿主契约：get() 返回**值**本身（MutableLocationDataStore.get 是
+        // `entries.get(key)?.value`），不是 `{kind, turn, key, value}` 包装。
+        // 2026-11-02 之前这里写的是包装——于是错误尾部在真机上从未渲染，
+        // 而测试一直是绿的。
+        get: (key) => (key === "decision-engine-error" ? { errors } : undefined),
       },
     },
     seq: 1,

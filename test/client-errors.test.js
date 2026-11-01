@@ -292,12 +292,23 @@ test("客户端：turnTail 用 owner.turn.data 取回本轮错误", () => {
   const owner = {
     turn: {
       data: {
-        get: (key) => (key === TURN_DATA_KEY ? { kind: "turn", turn: 1, key, value: { errors } } : undefined),
+        // 宿主契约：get() 返回**值**本身，不是 `{kind, turn, key, value}` 包装。
+        get: (key) => (key === TURN_DATA_KEY ? { errors } : undefined),
       },
     },
   };
   assert.equal(errorsOfTurn(owner).length, 1);
   assert.equal(errorsOfTurn({}).length, 0);
+});
+
+test("客户端：按宿主契约读——get() 返回值本身，不是一层包装（2026-11-02 回归闸）", () => {
+  const errors = [{ turn: 1, point: "authorize", code: "timeout", label: "决策请求超时" }];
+  // 宿主形状：值直接给出。
+  assert.equal(errorsOfTurn({ turn: { data: { get: () => ({ errors }) } } }).length, 1);
+  // 旧形状：多一层包装，也要认。
+  assert.equal(errorsOfTurn({ turn: { data: { get: () => ({ value: { errors } }) } } }).length, 1);
+  // 值里没有错误列表时给空数组。
+  assert.deepEqual(errorsOfTurn({ turn: { data: { get: () => ({ turn: 3 }) } } }), []);
 });
 
 // ---------------------------------------------------------------- 两份实现必须一致

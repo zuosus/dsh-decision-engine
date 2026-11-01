@@ -266,10 +266,11 @@ function ownerWith(turn, entries, t) {
     turn: {
       turn,
       data: {
-        get: (key) =>
-          key === "decision-engine-judgement"
-            ? { kind: "turn", turn, key, value: { turn, entries } }
-            : undefined,
+        // 按宿主的真实契约：**返回发布出去的那个值本身**，不是
+        // `{kind, turn, key, value}` 包装（宿主 MutableLocationDataStore.get
+        // 就是 `entries.get(key)?.value`）。2026-11-02 之前这里写的是包装，
+        // 于是组件在真机上永远取不到 entries——而测试却是绿的。
+        get: (key) => (key === "decision-engine-judgement" ? { turn, entries } : undefined),
       },
     },
     seq: 1,
@@ -458,11 +459,29 @@ test("汇总：畸形输入不抛（null / 非对象 / 不是数组都当空）"
 test("读取端：turnTail 用 owner.turn.data 取回本轮记录；owner 缺失时为空", () => {
   const entries = [{ point: "authorize", mode: "enforce", action: "deny" }];
   const owner = {
-    turn: { data: { get: (key) => (key === TURN_DATA_KEY ? { kind: "turn", turn: 1, key, value: { entries } } : undefined) } },
+    // 宿主契约：get() 返回**值**本身（不是 {kind,turn,key,value} 包装）。
+    turn: { data: { get: (key) => (key === TURN_DATA_KEY ? { entries } : undefined) } },
   };
   assert.equal(judgementsOfTurn(owner).length, 1);
   assert.equal(judgementsOfTurn({}).length, 0);
   assert.equal(judgementsOfTurn(undefined).length, 0);
+});
+
+test("读取端：按宿主契约读——get() 返回值本身，不是一层包装（2026-11-02 回归闸）", () => {
+  // 宿主的 MutableLocationDataStore.get 是 `entries.get(key)?.value`：
+  // 返回**发布出去的值**，不是 `{kind, turn, key, value}` 包装。
+  // 2026-11-02 的现场缺陷正是这里写错了——按包装读，界面上永远 0 条，
+  // 而当时的测试桩也写着包装，于是测试全绿、真机全哑。
+  const entries = [{ point: "authorize", mode: "enforce", action: "deny" }];
+  // 宿主形状：值直接给出。
+  assert.equal(judgementsOfTurn({ turn: { data: { get: () => ({ entries }) } } }).length, 1);
+  // 旧形状：多一层包装，也要认（万一宿主哪天改回去，或别的插件这么喂）。
+  assert.equal(
+    judgementsOfTurn({ turn: { data: { get: () => ({ value: { entries } }) } } }).length,
+    1,
+  );
+  // 取到的是值里的其它字段时，不该被误当成记录列表。
+  assert.deepEqual(judgementsOfTurn({ turn: { data: { get: () => ({ turn: 3 }) } } }), []);
 });
 
 // ---------------------------------------------------------------- 渲染

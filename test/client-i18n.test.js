@@ -426,7 +426,7 @@ test("英文：错误尾部（决策点/分类/工具名）不残留中文", asy
   const { tail } = await renderLang({ lang: "en" });
   assert.ok(typeof tail === "function", "未注册错误尾部组件");
   const tree = tail({
-    turn: { turn: 3, data: { get: (key) => (key === "decision-engine-error" ? { kind: "turn", turn: 3, key, value: { errors: [{ turn: 3, point: "authorize", code: "auth-failed", label: "鉴权被拒", tool: "bash" }] } } : undefined) } },
+    turn: { turn: 3, data: { get: (key) => (key === "decision-engine-error" ? { errors: [{ turn: 3, point: "authorize", code: "auth-failed", label: "鉴权被拒", tool: "bash" }] } : undefined) } },
     seq: 1,
     openFile() {},
   });
