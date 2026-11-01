@@ -23,6 +23,14 @@ import { readFileSync } from "node:fs";
 // 测试直接引用它，避免「测试抄一份清单、漏了新预设也照样绿」。
 import { PROVIDER_IDS, PROVIDER_PRESETS, providerCatalog } from "../lib/providers.js";
 
+/**
+ * 项目主页地址：与 lib/client.js 里的 SITE_URL 保持一致。
+ *
+ * 这里抄一份是刻意的：断言要盯住「链接指向哪」，而不是「client.js 里
+ * 有没有一个叫 SITE_URL 的变量」——后者在常量被改名后依然会绿。
+ */
+const SITE_URL = "https://dsh.zuos.us/dsh-decision-engine/";
+
 /** 每次加载都要拿到一份新的模块实例，否则 factory 只会跑第一次。 */
 let loadSeq = 0;
 
@@ -258,6 +266,54 @@ test("状态未加载时也渲染出完整表单（不空白）", async () => {
   // 自动保存：没有「保存」按钮，只有状态提示。
   assert.ok(text.includes("改动即保存"), "缺少自动保存的状态提示");
   assert.equal(hasButtonLabeled(tree, "保存"), false, "不该再有独立的「保存」按钮");
+});
+
+test("面板顶部有项目主页链接（入口放在最上面，不是附注）", async () => {
+  // 配置页是插件的主入口，但插件信息页里没有「文档在哪」的入口。
+  // 用户想查决策点说明、provider 清单只能自己搜——所以链接放在面板最顶上一行。
+  //
+  // 断言「在最上面」：埋到表单末尾等于没有（表单很长，没人会滚到底）。
+  const { tree } = await render(stateWith({}));
+  const link = findNode(tree, (node) => node.type === "a" && node.props.href === SITE_URL);
+  assert.ok(link !== null, "面板没有指向项目主页的链接");
+
+  // 站外链接：新标签页打开，并断开 opener（否则目标页能反向操纵本页）。
+  assert.equal(link.props.target, "_blank", "站外链接应在新标签页打开");
+  assert.ok(link.props.rel.includes("noreferrer"), "rel 应含 noreferrer");
+  assert.ok(link.props.rel.includes("noopener"), "rel 应含 noopener");
+  // 链接文字本身要能说明它去哪，不能只有一个孤零零的箭头。
+  assert.ok(
+    collectText(link).join("").includes("项目主页"),
+    `链接文字应说明去向，实际：${JSON.stringify(link.children)}`,
+  );
+});
+
+test("链接排在 tab 栏上面（页面头部），不是塞进表单末尾", async () => {
+  // 这条防的是「链接存在但埋到了底部」——有链接 ≠ 用户看得见。
+  const { tree } = await render(stateWith({}));
+  // react 桩会把 children 摊平（flat(Infinity)），根节点的 children 依次是：
+  // [链接, tabBar, 配置页内容…]。
+  const kids = tree.children.filter((child) => child !== null && child !== undefined && child !== false);
+  const linkIndex = kids.findIndex(
+    (child) => child.type === "a" && child.props.href === SITE_URL,
+  );
+  assert.ok(linkIndex >= 0, "面板没有指向项目主页的链接");
+  const tabIndex = kids.findIndex((child) => child.props.key === "tabs");
+  assert.ok(tabIndex >= 0, "没找到 tab 栏");
+  assert.ok(
+    linkIndex < tabIndex,
+    `链接应在 tab 栏上面，实际位置：链接 ${linkIndex}，tab ${tabIndex}`,
+  );
+});
+
+test("切到统计 tab 时链接依然在（它是页面级入口，不属于某一页）", async () => {
+  // 链接放在 tab 栏上面而不是配置页内部，就是为了让「文档在哪」在整个面板
+  // 里一直可见。若哪天把它挪回配置页内部，这条会红。
+  const { tree } = await render(stateWith({}), {
+    slots: { [SLOTS.tab]: "stats", [SLOTS.stats]: statsWith({}) },
+  });
+  const link = findNode(tree, (node) => node.type === "a" && node.props.href === SITE_URL);
+  assert.ok(link !== null, "统计页里找不到项目主页链接");
 });
 
 test("有改动时状态行说明自动保存，而不是等用户点按钮", async () => {

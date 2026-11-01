@@ -8,10 +8,18 @@
 //
 // `main` 指向 make-bundle.mjs 生成的产物：整个站点被 gzip + base64 嵌进
 // 一段自包含 Worker 脚本（见 site/README.md「为什么是『把文件嵌进 Worker』」）。
-// 所以 build 命令必须先生成 worker/bundle.js，再由 deploy 命令上传。
+//
+// `build.command` 让 wrangler 在 deploy 之前现场生成入口文件。这一条不是
+// 锦上添花，是 2026-10-28 的教训：CI 的 Build command 字段一旦没填/没跑，
+// deploy 会直接报「The entry-point file at "worker/bundle.js" was not
+// found」。生成物（gitignore 的 worker/bundle.js）不该依赖 dashboard 上
+// 另一个字段有没有填对——谁要用它，谁就负责把它造出来。
 {
   "name": "dsh-worker",
   "main": "worker/bundle.js",
+  "build": {
+    "command": "node build.mjs && node make-bundle.mjs"
+  },
   "account_id": "48bfaa4269a02470c2d6529a56b05f23",
   "compatibility_date": "2026-10-26",
   "compatibility_flags": ["nodejs_compat"],

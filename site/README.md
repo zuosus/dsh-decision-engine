@@ -82,12 +82,27 @@ Cloudflare 后台 **Settings → Builds → Build Configuration** 的设置：
 （此前只有手动 `deploy.mjs` 一条路，Workers Builds 因找不到 Root directory
 直接失败，见 DEC-016）。
 
+### 入口文件不能指望 Build command 字段
+
+`worker/bundle.js` 是生成物（gitignore），历史上栽过两次：
+
+| 失败 | 原因 |
+|---|---|
+| `Failed: root directory not found` | Root directory 指向 clone 里不存在的目录 |
+| `The entry-point file at "worker/bundle.js" was not found` | Build command 留空，构建步骤被跳过，deploy 找不到入口 |
+
+所以 `wrangler.jsonc` 里写了 `build.command = "node build.mjs && node make-bundle.mjs"`：
+**谁用入口文件，谁就现场把它造出来**（wrangler 的 custom build，deploy 前自动执行）。
+有了它，Build command 留空也能部署成功；填上 `npm run build` 则构建/部署阶段
+在日志里分得更清楚。两种都验证过（干净 clone、无 `worker/`，exit 0，
+产物与线上 sha256 一致）。
+
 ### 本地验证（模拟 CI）
 
 ```sh
 cd site
 npm ci                 # 与 CI 同一条命令
-npm run build          # 生成 worker/bundle.js
+npm run build          # 生成 worker/bundle.js（省略也可，wrangler 会自己跑）
 npx wrangler deploy --dry-run   # 只打包不上传
 ```
 

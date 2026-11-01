@@ -2,6 +2,54 @@
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
 
+## DEC-017 入口文件由 wrangler 的 build.command 现场生成，不依赖 CI 的 Build command 字段（2026-10-28）
+
+**背景**：DEC-016 把 Workers Builds 接上之后，第一次真实构建走过了 clone，
+死在 deploy：
+
+```
+✘ [ERROR] The entry-point file at "worker/bundle.js" was not found.
+Failed: error occurred while running deploy command
+```
+
+原因很朴素：**后台的 Build command 是空的**。Workers Builds 见它留空就跳过
+构建步骤，而 `worker/bundle.js` 是 `make-bundle.mjs` 的生成物（gitignore，
+仓库里根本没有），deploy 自然找不到入口。
+
+**这不是配置失误，是配置的形状错了。** DEC-016 的方案把「deploy 能不能成功」
+押在 dashboard 上另一个字段有没有填对——两个字段（Root directory、Build
+command）必须同时正确，构建才活。这种隐式耦合迟早再翻车：字段被谁改回空、
+新连接漏填、复制项目时丢设置，失败都长一个样，报错还指向入口文件，排查
+路径极长。
+
+**决策**：在 `site/wrangler.jsonc` 里声明
+
+```jsonc
+"build": { "command": "node build.mjs && node make-bundle.mjs" }
+```
+
+即 wrangler 的 custom build：`wrangler deploy` 在打包**之前**自己执行它。
+生成物被谁消费，谁就负责当场造出来——入口文件的存在不再取决于任何外部字段。
+
+**验证**（干净 clone，`site/worker/` 不存在，模拟 Build command 留空）：
+
+```
+npm ci                              → exit 0
+npx wrangler deploy --dry-run       → [custom build] Running: node build.mjs && node make-bundle.mjs
+                                       Total Upload: 28.23 KiB / gzip: 21.18 KiB → exit 0
+```
+
+custom build 产出的 bundle 与线上那份 sha256 完全一致（`538e83f7…`），
+重复构建字节不变。
+
+**Build command 字段现在填不填都行**：留空 → wrangler 兜底；填 `npm run build`
+→ 构建阶段与部署阶段在日志里分得更清楚。建议保留填上，但**它不再是成功的前置条件**。
+
+**与 Cloudflare 文档的一条注记的关系**：文档提到 Workers Builds 不采用
+Custom Builds 里的某些配置——那说的是 CI **构建阶段**不会替你识别/执行它；
+而 deploy 阶段执行的就是 wrangler 本体，`build.command` 照跑不误。上面在
+干净 clone 里的实测（模拟的正是 CI 的执行序列）确认了这一点。
+
 ## DEC-016 站点自动部署：Root directory 指向 site/，站点自成一个包（2026-10-28）
 
 **背景**：站点（`site/` → `dsh.zuos.us`）一直只有手动部署一条路——本地跑

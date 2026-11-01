@@ -5,7 +5,7 @@
 #   cp config.example.yml ~/.dsh/dsh-decision-engine/config.yml
 #
 # 文件名是 config.yml：本插件早已不是「只服务 startlux 一家」的插件，
-# 而是任意 system-one 风格服务（system one / bamboonode / custom）的决策层，
+# 而是任意决策服务（system one / bamboonode / 硅基流动 / custom）的决策层，
 # 名字里再挂某个服务商只会误导。旧名 startlux.yml 仍会被自动读取并迁移，
 # 升级不需要重新填 key。
 #
@@ -48,7 +48,7 @@ mode: shadow
 #   siliconflow       内置。硅基流动（国内站）https://api.siliconflow.cn/v1/systemone
 #   siliconflow-intl  内置。Silicon Flow 国际站 https://api.siliconflow.com/v1/systemone
 #                     （与国内站是两套账号，key 互不通用）
-#   custom            自己填 base URL，接任何 system-one 风格服务
+#   custom            自己填 base URL，接任何提供决策端点的服务
 #                     （自建 llama.cpp / vLLM、企业网关、第三方中转）。
 #
 # 不写这一项 = bamboonode，老配置行为完全不变。
