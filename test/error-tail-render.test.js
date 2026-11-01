@@ -59,7 +59,12 @@ async function loadBundle() {
         });
         const ctx = {
           logger: { info() {}, warn() {} },
-          locale: { register: () => () => {} },
+          // 宿主 locale 服务：显式声明中文（本文件断言中文文案）。
+          locale: {
+            register: () => () => {},
+            getSnapshot: () => ({ active: "zh", locales: [], revision: 1 }),
+            subscribe: () => () => {},
+          },
           slots: {
             inject(_slot, callback) {
               callback();

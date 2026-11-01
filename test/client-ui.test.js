@@ -120,7 +120,16 @@ async function render(status, options = {}) {
         const registered = [];
         const ctx = {
           logger: { info() {}, warn() {} },
-          locale: { register: () => () => {} },
+          // 宿主 locale 服务：**显式声明中文**。
+          //
+          // 这些用例断言的是中文文案，而语言不再写死——它跟随宿主。若不给出
+          // 语言，`browserLang()` 会读 Node 的 navigator（en-US）→ 界面变英文，
+          // 断言全部落空。中文界面在这里是「测试输入」，不是默认值。
+          locale: {
+            register: () => () => {},
+            getSnapshot: () => ({ active: "zh", locales: [], revision: 1 }),
+            subscribe: () => () => {},
+          },
           slots: {
             inject(_slot, callback) {
               callback();
@@ -817,6 +826,11 @@ test("client.js 不引用未定义的 setXxx（防重构留下悬空调用）", 
     declared.add(match[1]);
   }
   for (const match of code.matchAll(/const\s+(set[A-Za-z_$][\w$]*)\s*=/g)) {
+    declared.add(match[1]);
+  }
+  // 模块级普通函数也可能叫 setXxx（i18n 的 `function setLang(...)`），
+  // 同样是「本文件声明过」的名字，一并登记。
+  for (const match of code.matchAll(/function\s+(set[A-Za-z_$][\w$]*)\s*\(/g)) {
     declared.add(match[1]);
   }
   // 全局 setter 不在本文件声明，但可以调用。

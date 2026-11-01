@@ -25,20 +25,6 @@ which path it sits on, and whose key it uses are the provider's business and nev
 the per-point parsing logic, so you can pick a built-in preset or fill in any `custom`
 base URL (self-hosted llama.cpp / vLLM, corporate gateways, relays).
 
-> ⚠️ 名词澄清：**`system one` 只是五个 provider 之一**（TypeSafe 的预设），
-> `/v1/systemone` 只是两条端点路径之一——它们都不是本项目的定位。
-> 本项目的定位是「便宜的决策层」，端点走 `/decisions` 还是 `/systemone` 由服务商决定。
->
-> Naming: **`system one` is just one of five providers** (the TypeSafe preset) and
-> `/v1/systemone` just one of two endpoint paths — neither defines this project. This
-> project is the cheap judgement layer; whether your endpoint is `/decisions` or
-> `/systemone` is a property of the provider, not of the plugin.
-
-> 本项目更早叫 `dsh-startlux-guard` / `dsh-startlux-decision`，配置文件也曾叫
-> `startlux.yml`；插件启动时会自动读取并完成改名迁移，**升级不需要重填 key**。
-> Formerly `dsh-startlux-guard` / `dsh-startlux-decision`, with the config file renamed
-> from `startlux.yml`; migration runs automatically at startup — keys need no re-entry.
-
 ## 安装 / Install
 
 ```sh
@@ -101,6 +87,16 @@ API Key 只在**失焦或回车**时落盘（半截 key 不会进凭据文件）
 There is **no Save button**: controls persist on click, text fields after ~0.7s or on
 blur, the API key only on blur/Enter. The status line reports pending / saving / saved /
 unsaved-with-reason.
+
+**界面语言跟随宿主 / UI language follows the host**：配置页与统计页会自动使用宿主
+（DSH 设置 → 语言）当前的语言：中文宿主显示中文，英文宿主显示英文，切换语言时面板
+即时跟随，无需重开。宿主未提供语言时按浏览器语言判断。文案由插件自带的词表提供，
+因此与插件信息页里的标题/描述独立。
+
+The config and stats panels use the host language (DSH settings → Language): a Chinese
+host gets Chinese, an English host gets English, and the panel follows a live switch
+without reopening. When the host exposes no language, the browser language decides.
+Translations live in the plugin's own dictionary, independent of the manifest title.
 
 ## Provider：接哪个决策服务 / Which decision service
 

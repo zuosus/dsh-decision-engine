@@ -2,6 +2,46 @@
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
 
+## DEC-018 配置与统计界面双语：中文是源语言，在渲染边界按宿主语言翻译（2026-11-01）
+
+**背景**：面板此前只有中文。宿主（DSH）自己带 `locale` 服务（`dsh-client-locale`，
+提供 LocaleFace：`getSnapshot()` → `{ active, locales, revision }`、`subscribe(fn)`、
+`register(ns, {zh, en})`、`bind(ns)`），设置页里也有语言选择。用户希望界面跟着宿主
+语言走，而不是固定中文。
+
+**决定**：中文保持为源码里的源语言，英文是一张「中文原文 → English」的词表；
+在**渲染边界**（`createElement` 的包装 `h()`）按当前语言替换。带变量的句子不能整段
+命中，所以那 30 多处改成显式 `t("模板 {name}", {...})`。
+
+**为什么不在每个调用点写 key（`t("stats.title")`）**：
+
+1. **一半文案不在本文件里**。决策点名、区间标签、历史数据说明、错误分类都由服务端
+   下发（`/decisions` 的 `point.label`、`/stats` 的 `labels`、`lib/client-errors.js` 与
+   `lib/errors.js` 的 label）。按 key 翻译就得让服务端也双语化，并给每个接口加语言
+   参数——改动面从 1 个文件变成 5 个，每加一个字段还要两边同步。在渲染边界翻译，
+   服务端下发的中文与代码里的中文走同一条路。
+2. **漏翻的失败模式更好**。按 key 写漏了显示 `stats.title` 或空白；这里漏了只是
+   那一格保持中文——是中文，不是乱码，也不是另一种语言的错译。
+3. 代价是**必须整段命中**。跨行 `"a" + "b"` 在运行时会合成一整句，逐片段登记永远
+   命中不了——这正是实现时真的踩到的坑（两处：端点风格说明、节省量不可用提示），
+   所以新增了静态守卫（`test/i18n-coverage.test.js`）专门盯这件事。
+
+**跟随语言的方式**：`apply()` 里先读 `ctx.locale.getSnapshot().active`（读不到再试
+`active` / `language` 等直接属性），再 `yield` 一个订阅：优先 `ctx.locale.subscribe`
+（每次快照变化都回调，含词典注册），备用 `ctx.on("locale/change")`（只在切换时发）。
+订阅回调只更新模块级 `lang` 并通知 `useLang()` 注册的组件重绘。宿主没有 locale 服务
+时回落 `navigator.languages`（与宿主默认口径一致：带 `zh` 前缀算中文，其余算英文）。
+
+**没有用宿主注入的 `t` 席位**：`t` 只在槽位声明了 `locale: NS` 时才由框架注入，且只能
+翻译**本命名空间**的 key，翻不了服务端下发的文案。本插件要翻的正好是「服务端下发的
+那批中文」，所以自己持有一张表更直接。槽位仍保留 `locale: NS`（宿主据此注入 `t` 并
+在切换时重绘 outlet），与自持词表并存不冲突。
+
+**测试**：`test/client-i18n.test.js` 把着真实宿主 locale 桩渲染整页，断言英文界面里
+**没有中文字符**（品牌名「硅基流动」按服务端数据单独登记）；覆盖首屏未加载、保存失败、
+custom 表单、统计错误/空区间、错误尾部等分支。`test/i18n-coverage.test.js` 做静态兜底：
+渲染位置的中文都有英文、跨行拼接的整段不被漏翻、英文译文里不残留中文。
+
 ## DEC-017 入口文件由 wrangler 的 build.command 现场生成，不依赖 CI 的 Build command 字段（2026-10-28）
 
 **背景**：DEC-016 把 Workers Builds 接上之后，第一次真实构建走过了 clone，
