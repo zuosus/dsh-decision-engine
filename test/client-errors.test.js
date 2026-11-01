@@ -131,6 +131,34 @@ test("当前轮次：读不到时返回 undefined（宁可少显示，也不挂�
   assert.equal(currentTurnOf({ events: [{ type: "step/start", data: { turn: 3 } }] }), undefined);
 });
 
+test("当前轮次：没有 .events 的宿主回落到 snapshotEvents()（2026-11-02 回归闸）", () => {
+  // 当前宿主把 Session.events 整个移除了（同步事件读取被废弃）。
+  // 授权点是唯一没有 payload.turn 的决策点：这个回退一断，它的错误与
+  // 判断记录就全部静默消失——正是 2026-11-02 修掉的那个 bug。
+  const session = {
+    snapshotEvents() {
+      return [
+        { type: "turn/start", data: { turn: 4 } },
+        { type: "step/start", data: { turn: 4, step: 1 } },
+      ];
+    },
+  };
+  assert.equal(currentTurnOf(session), 4);
+  // snapshotEvents 返回的快照里也没有 turn/start → undefined。
+  assert.equal(
+    currentTurnOf({ snapshotEvents: () => [{ type: "step/start", data: { turn: 9 } }] }),
+    undefined,
+  );
+  // .events 优先：两套接口并存时用旧的那条（更便宜）。
+  assert.equal(
+    currentTurnOf({
+      events: [{ type: "turn/start", data: { turn: 1 } }],
+      snapshotEvents: () => [{ type: "turn/start", data: { turn: 2 } }],
+    }),
+    1,
+  );
+});
+
 // ---------------------------------------------------------------- 分类归并
 
 test("分类归并：http-4xx / http-5xx 归成 http-error（不铺开一堆红字）", () => {
