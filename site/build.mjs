@@ -1,6 +1,6 @@
 // 把站点源文件渲染成 dist/ 下的静态文件。运行：node site/build.mjs
 import { mkdir, writeFile, copyFile, rm } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { nav, footer, codeBlock, table, ICON, esc } from "./lib/partials.mjs";
@@ -8,7 +8,9 @@ import { indexBodyEn, pluginBodyEn } from "./lib/content-en.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DIST = path.join(HERE, "dist");
-const VERSION = "0.7.1";
+// 版本号只有一个来源：插件自己的 package.json。写死在这里必然漂移
+// （曾经停在 0.7.1，而包已经走到 0.9.x，站点上挂的就是旧号）。
+const VERSION = JSON.parse(readFileSync(path.join(HERE, "..", "package.json"), "utf8")).version;
 const ORIGIN = "https://dsh.zuos.us";
 
 // 两个语言的顶部导航。链接都写绝对路径，子目录页也能正确跳转。
@@ -108,14 +110,15 @@ const indexBody = `
         <span class="ver">v${VERSION}</span>
       </div>
       <p>
-        给 DSH 的 System-1 决策守卫：在每次工具调用前问模型四个问题
-        （风险、可逆性、任务相关性、注入嫌疑），据此放行、询问或拦截。
-        八个决策点（工具授权、模型路由、子任务分派、上下文压缩、轮次延续、
+        给 DSH 的决策层：在主模型动手前，把「当前状态 + 一组结构化问题」发给一个
+        便宜的决策小模型，拿回概率化的答案，据此放行、询问、拦截，或改道（换模型）、
+        跳过（省掉一次昂贵调用）。例如工具授权问四个问题：风险、可逆性、任务相关性、
+        注入嫌疑。八个决策点（工具授权、模型路由、子任务分派、上下文压缩、轮次延续、
         检索必要性、技能选择、思维链翻译）全部已实装，逐个可切换。
       </p>
       <div class="toc">
         <span class="badge green">默认 shadow，不打断</span>
-        <span class="badge blue">任意 system-one API</span>
+        <span class="badge blue">任意决策端点</span>
         <span class="badge gray">MIT</span>
       </div>
     </a>
@@ -275,9 +278,11 @@ const pluginBody = `
   <span class="eyebrow"><span class="dot"></span> DeepSeek Harness 插件 · v${VERSION} · MIT</span>
   <h1>dsh-decision-engine</h1>
   <p class="lede">
-    给 DeepSeek Harness 的 <strong>System-1 决策守卫</strong>：在每次工具调用前
-    问模型四个问题——<strong>风险、可逆性、任务相关性、注入嫌疑</strong>——
-    据此放行、询问或拦截。默认 <code>shadow</code>：只记录判断，绝不打断你干活。
+    给 DeepSeek Harness 的<strong>决策层</strong>：在主模型动手前，把「当前状态 +
+    一组结构化问题」发给一个便宜的决策小模型，拿回概率化的答案，据此放行、询问、
+    拦截，或改道（换模型）、跳过（省掉一次昂贵调用）。例如工具授权问四个问题——
+    <strong>风险、可逆性、任务相关性、注入嫌疑</strong>。默认 <code>shadow</code>：
+    只记录判断，绝不打断你干活。
   </p>
   <div class="cta-row">
     <a class="btn btn-primary" href="#install">安装</a>
@@ -336,11 +341,13 @@ const pluginBody = `
   </div>
 
   <div class="note">
-    <strong>它支持所有 system-one 风格 API。</strong>
-    内置 <code>system one</code> 与 <code>bamboonode</code> 两个预设，
-    也可以填任意 <code>custom</code> base URL（自建 llama.cpp / vLLM、
-    企业网关、第三方中转）。请求路径、鉴权方式与响应结构与 system-one 协议保持一致，
-    换 provider 不影响各决策点的解析逻辑。
+    <strong>接任意决策服务。</strong>
+    请求形状只有一个——<code>{ model, state, questions, think_mode }</code> 发过去，
+    拿回 <code>answers</code>。内置五个 provider 预设（<code>system one</code> /
+    <code>bamboonode</code> / <code>siliconflow</code> / <code>siliconflow-intl</code>），
+    也可以填任意 <code>custom</code> base URL（自建 llama.cpp / vLLM、企业网关、
+    第三方中转）。哪些服务商提供这个端点、走哪条路径、用谁的 key，都由 provider 决定，
+    与各决策点的解析逻辑无关。
   </div>
 </section>
 
@@ -473,7 +480,7 @@ const pluginBody = `
 <div class="wrap"><hr class="rule"></div>
 
 <section class="wrap" id="providers">
-  <h2>Provider：接任意 system-one 风格服务</h2>
+  <h2>Provider：接哪个决策服务</h2>
   <p class="sub">
     请求形状对所有 provider 完全一致。响应只需含 <code>answers</code>，
     因此 provider 只决定三件事：<strong>往哪发、用谁的 key、默认哪个模型</strong>。
@@ -672,7 +679,7 @@ await writeFile(
   path.join(DIST, "index.html"),
   page(
     "dsh.zuos.us — DeepSeek Harness 插件项目",
-    "DeepSeek Harness 插件项目主页：dsh-decision-engine —— 给 DSH 的 System-1 决策守卫。",
+    "DeepSeek Harness 插件项目主页：dsh-decision-engine —— 便宜的决策层，在主模型动手前用小的决策模型做结构化判断。",
     indexBody,
     ZH_HOME
   )
@@ -681,8 +688,8 @@ await writeFile(
 await writeFile(
   path.join(DIST, "dsh-decision-engine/index.html"),
   page(
-    "dsh-decision-engine — 给 DeepSeek Harness 的 System-1 决策守卫",
-    "在每次工具调用前问模型四个问题（风险、可逆性、任务相关性、注入嫌疑），据此放行、询问或拦截。八个决策点全部已实装，默认 shadow 只记录不打断。",
+    "dsh-decision-engine — 给 DeepSeek Harness 的决策层",
+    "便宜的决策层：在主模型动手前，把当前状态与一组结构化问题发给小的决策模型，用它的概率化答案决定放行、询问、拦截、换模型或跳过。八个决策点全部已实装，默认 shadow 只记录不打断。",
     pluginBody,
     ZH_PROJ
   )
@@ -692,7 +699,7 @@ await writeFile(
   path.join(DIST, "en/index.html"),
   page(
     "dsh.zuos.us — DeepSeek Harness plugin projects",
-    "Home of DeepSeek Harness plugin projects: dsh-decision-engine — a System-1 decision guard for DSH.",
+    "Home of DeepSeek Harness plugin projects: dsh-decision-engine — a cheap judgement layer for DSH.",
     indexBodyEn,
     EN_HOME
   )
@@ -701,8 +708,8 @@ await writeFile(
 await writeFile(
   path.join(DIST, "en/dsh-decision-engine/index.html"),
   page(
-    "dsh-decision-engine — a System-1 decision guard for DeepSeek Harness",
-    "Asks the model four questions (risk, reversibility, task relevance, injection suspicion) before every tool call. All eight decision points implemented; shadow mode by default.",
+    "dsh-decision-engine — a judgement layer for DeepSeek Harness",
+    "A cheap judgement layer for DeepSeek Harness: sends state plus a set of structured questions to a small decision model and uses the probability-bearing answers to allow, ask, block, reroute or skip. All eight decision points implemented; shadow mode by default.",
     pluginBodyEn,
     EN_PROJ
   )

@@ -1,9 +1,15 @@
 // 英文版页面内容。结构与 content（build.mjs 中的中文段落）逐节对应，
 // 章节 id 保持一致（#what / #install / #config / #points / #providers /
 // #tokens / #failopen / #verify），中文页的锚点链接可以直接复用。
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { codeBlock, table, ICON } from "./partials.mjs";
 
-const VERSION = "0.7.1";
+// 与 build.mjs 同一个来源：插件 package.json 的 version。
+const VERSION = JSON.parse(
+  readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "package.json"), "utf8"),
+).version;
 
 /* ------------------------------------------------------------------ *
  * Home (en)
@@ -44,16 +50,19 @@ export const indexBodyEn = `
         <span class="ver">v${VERSION}</span>
       </div>
       <p>
-        A System-1 decision guard for DSH: before every tool call it asks the
-        model four questions — risk, reversibility, task relevance, injection
-        suspicion — and allows, asks, or blocks accordingly. All eight decision
+        A judgement layer for DSH: before the main model acts, it sends
+        "current state + a set of structured questions" to a cheap decision
+        model and gets probability-bearing answers back, then allows, asks,
+        blocks, or reroutes to a cheaper model / skips an expensive call.
+        Tool authorization, for example, asks four questions — risk,
+        reversibility, task relevance, injection suspicion. All eight decision
         points (tool authorization, model routing, delegation, compaction, turn
         continuation, retrieval necessity, skill selection, COT translation)
         are implemented and individually switchable.
       </p>
       <div class="toc">
         <span class="badge green">Shadow mode by default</span>
-        <span class="badge blue">Any system-one API</span>
+        <span class="badge blue">Any decision endpoint</span>
         <span class="badge gray">MIT</span>
       </div>
     </a>
@@ -213,11 +222,13 @@ export const pluginBodyEn = `
   <span class="eyebrow"><span class="dot"></span> DeepSeek Harness plugin · v${VERSION} · MIT</span>
   <h1>dsh-decision-engine</h1>
   <p class="lede">
-    The <strong>System-1 decision guard</strong> for DeepSeek Harness: before
-    every tool call it asks the model four questions — <strong>risk,
-    reversibility, task relevance, injection suspicion</strong> — then allows,
-    asks, or blocks. Defaults to <code>shadow</code>: it records judgments and
-    never interrupts your work.
+    The <strong>judgement layer</strong> for DeepSeek Harness: before the main
+    model acts, it sends "current state + a set of structured questions" to a
+    cheap decision model, gets probability-bearing answers back, then allows,
+    asks, blocks, or reroutes to a cheaper model / skips an expensive call —
+    tool authorization, for example, asks the four questions <strong>risk,
+    reversibility, task relevance, injection suspicion</strong>. Defaults to
+    <code>shadow</code>: it records judgments and never interrupts your work.
   </p>
   <div class="cta-row">
     <a class="btn btn-primary" href="#install">Install</a>
@@ -279,12 +290,15 @@ export const pluginBodyEn = `
   </div>
 
   <div class="note">
-    <strong>Works with any system-one style API.</strong>
-    Built-in presets for <code>system one</code> and <code>bamboonode</code>,
-    SiliconFlow (CN + intl), or any <code>custom</code> base URL (self-hosted
-    llama.cpp / vLLM, corporate gateways, third-party relays). Request path,
-    auth and response shape follow the system-one protocol, so switching
-    providers never changes how answers are parsed.
+    <strong>Works against any decision endpoint.</strong>
+    There is exactly one request shape —
+    <code>{ model, state, questions, think_mode }</code> in,
+    <code>answers</code> out. Built-in presets for <code>system one</code>,
+    <code>bamboonode</code>, <code>siliconflow</code> and
+    <code>siliconflow-intl</code>, or any <code>custom</code> base URL
+    (self-hosted llama.cpp / vLLM, corporate gateways, relays). Which service
+    provides the endpoint, which path it sits on and whose key it uses are the
+    provider's business and never touch the per-point parsing logic.
   </div>
 </section>
 
@@ -429,12 +443,11 @@ export const pluginBodyEn = `
 <div class="wrap"><hr class="rule"></div>
 
 <section class="wrap" id="providers">
-  <h2>Providers: any system-one style service</h2>
+  <h2>Providers: which decision service</h2>
   <p class="sub">
-    The request shape is identical across providers (that is the system-one
-    protocol). A response only needs <code>answers</code>, so a provider
-    decides exactly three things: <strong>where to send, whose key to use,
-    which model by default</strong>.
+    The request shape is identical across providers. A response only needs
+    <code>answers</code>, so a provider decides exactly three things:
+    <strong>where to send, whose key to use, which model by default</strong>.
   </p>
 
   ${codeBlock("POST <base>/decisions  or  POST <base>/systemone")}
