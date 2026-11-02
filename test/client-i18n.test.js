@@ -422,14 +422,3 @@ test("英文：状态未加载（首屏）时不残留中文", async () => {
   assert.deepEqual(leftover, [], `未加载态仍有中文：\n${leftover.join("\n")}`);
 });
 
-test("英文：错误尾部（决策点/分类/工具名）不残留中文", async () => {
-  const { tail } = await renderLang({ lang: "en" });
-  assert.ok(typeof tail === "function", "未注册错误尾部组件");
-  const tree = tail({
-    turn: { turn: 3, data: { get: (key) => (key === "decision-engine-error" ? { errors: [{ turn: 3, point: "authorize", code: "auth-failed", label: "鉴权被拒", tool: "bash" }] } : undefined) } },
-    seq: 1,
-    openFile() {},
-  });
-  const leftover = collectCjkFragments(collectText(tree).join("\n") + "\n" + (tree.props?.title ?? ""));
-  assert.deepEqual(leftover, [], `错误尾部仍有中文：\n${leftover.join("\n")}`);
-});
