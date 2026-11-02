@@ -2,6 +2,51 @@
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
 
+## DEC-019 审批卡标题双语：ask 裁决附带 displayReason（2026-11-02）
+
+**背景**：宿主界面是英文时，授权审批卡的**标题**仍是中文，例如
+`decision-engine: 中风险调用，需人工确认（risk=medium p=0.84 irrev=0.74 task=0.78 inj=0.03）`，
+而同一张卡上的 `Waiting for approval` / `Reject` / `Allow once` 都是英文——看起来像
+「这卡翻译了一半」。
+
+**根因**（对着宿主 0.2.1-rc.5 的 `app.asar` 逐跳核对）：
+
+1. 标题来自 `decideGuard()` 造的 `reason`，中文硬编码（四条 ask 分支）；
+2. 宿主审批卡本身是**双语的**：`@deepseek-ai/dsh-client-ui-approval` 的
+   `ApprovalPanel` 用自己的 `approval` 命名空间词典渲染 `waiting` / `reject` /
+   `allowOnce`，跟着「设置 → 语言」走；
+3. 但标题走的是另一条路。`ApprovalPanel` 渲染
+   `approval.displayReason === undefined ? approval.reason : props.resolveReason(approval.displayReason)`，
+   而宿主契约 `PreToolDecision` 的 `ask` 分支本来就有
+   `displayReason?: { en: string; [locale: string]: string }`，由
+   `ctx.locale.resolveText()` 按当前语言解析（映射必须带 `en` 回退值）；
+4. 本插件只回传了 `reason`——`displayReason` 在整个仓库里零出现，宿主只能回退到
+   中文原文。
+
+所以这不是「宿主没翻译」，是**我们没用宿主已经提供的本地化通道**。DEC-018 的双语化
+只覆盖 `lib/client.js`（配置页/统计页，在渲染边界替换），守卫的 `reason` 走
+Node → 宿主审批卡那条路，不在它的链上——`test/i18n-coverage.test.js` 也只扫
+`lib/client.js`，所以这几句从来没被兜住。
+
+**决定**：
+
+- `reason` **保持中文原文不动**：它进宿主的 `approval/asked` 审计事件，也进本插件
+  遥测的 `detail`，改它会让历史口径漂移（`test/guard-threshold.test.js` 还断言了
+  其中的中文）。
+- 四条 ask 分支统一由 `askOutcome()` 产出，额外带 `displayReason: { zh, en }`；
+  `zh` 与 `reason` 逐字相同，`en` 是对应译文，`evidence` 摘要语言中立、两边共用。
+- 守卫把 `displayReason` 原样透传给宿主（`tools/pre-execute` 的返回处，此前只传
+  `reason`）。
+- `deny` 不带：宿主 `PreToolDecision` 的 deny 分支没有 `displayReason` 字段，且
+  deny 的 `reason` 是给模型看的工具错误，不是审批卡文案。
+
+**没做的事**：没把 `reason` 改成英文、没让客户端词表去翻它（跨进程，翻不到）、
+没动 DEC-018 的渲染边界方案。
+
+**测试**：`test/guard-display-reason.test.js` 把住四条分支——每条 ask 的
+`displayReason.zh` 与 `reason` 逐字相同、`en` 不含任何 CJK 字符且保留 `evidence`、
+`delegate` / `deny` 不带 `displayReason`。
+
 ## DEC-018 配置与统计界面双语：中文是源语言，在渲染边界按宿主语言翻译（2026-11-01）
 
 **背景**：面板此前只有中文。宿主（DSH）自己带 `locale` 服务（`dsh-client-locale`，

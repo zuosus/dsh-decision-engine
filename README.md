@@ -91,12 +91,17 @@ unsaved-with-reason.
 **界面语言跟随宿主 / UI language follows the host**：配置页与统计页会自动使用宿主
 （DSH 设置 → 语言）当前的语言：中文宿主显示中文，英文宿主显示英文，切换语言时面板
 即时跟随，无需重开。宿主未提供语言时按浏览器语言判断。文案由插件自带的词表提供，
-因此与插件信息页里的标题/描述独立。
+因此与插件信息页里的标题/描述独立。工具授权审批卡的**标题**同样跟随宿主语言：插件按
+宿主的 `PreToolDecision.displayReason` 契约成对给出中英两种文案，`reason` 保持中文
+原文，只用于审批审计与遥测。
 
 The config and stats panels use the host language (DSH settings → Language): a Chinese
 host gets Chinese, an English host gets English, and the panel follows a live switch
 without reopening. When the host exposes no language, the browser language decides.
 Translations live in the plugin's own dictionary, independent of the manifest title.
+A tool-authorization approval card's **title** follows the host language too: the plugin
+supplies the host's paired `PreToolDecision.displayReason`, while `reason` stays the
+Chinese original for the approval audit trail and telemetry.
 
 ## Provider：接哪个决策服务 / Which decision service
 
