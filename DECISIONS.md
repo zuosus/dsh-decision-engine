@@ -2,6 +2,58 @@
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
 
+## DEC-020 匿名使用统计：每日心跳 + D1 + Bark 日报（2026-11-02）
+
+**背景**：插件已在 npm 上（`dsh-decision-engine`），但只有下载数（npm API 口径），
+不知道「装了多少台、每天有多少人在用」。需求是统计下载 / 装机 / DAU 与使用频率，
+并且**不要展示页**——只要每天收到一条推送。
+
+**决定**：
+
+1. **两套口径分开**。下载数取 npm 官方 API（`api.npmjs.org/downloads/point/<day>/<pkg>`），
+   装机与 DAU 取插件主动上报的匿名心跳。二者不可互相替代：npm 下载包含 CI、镜像、
+   重复安装；心跳只反映真正跑起来的实例。
+2. **匿名心跳的存在最小化**。字段只有 7 个：`v`（协议版本）、`id`（安装 UUIDv4）、
+   `k`（install/heartbeat）、`ver`、`os`、`arch`、`d`（当日决策数）。
+   **永不上报** API key、prompt / 工具参数、cwd、provider URL、会话内容、用户名；
+   **服务端不读、不存 `CF-Connecting-IP`**。`id` 是首次运行生成的随机 UUIDv4，
+   删除 `~/.dsh/dsh-decision-engine/analytics.json` 即换新身份。
+3. **档位默认 `install` 而不是 `daily`**。仓库既定姿态是 `enabled: false`「不擅自介入」；
+   每天联网属于更主动的行为，默认开它与此姿态冲突。「每天一次」留给用户显式开启。
+   `off` 是**真的不联网**：`prepare()` 在任何文件读取之前就返回，没有版本检查、没有 DNS。
+4. **状态文件叫 `analytics.json`，不叫 `telemetry.json`**。同目录已有 `telemetry.jsonl`
+   （用户的本地决策流水账，会被 `tail -f`）。两个只差一个字母、口径完全不同的文件
+   放在一起，迟早有人清缓存时删错——删错流水账等于丢掉用户的决策审计记录。
+5. **「一天」固定按 UTC+8 算**。中国自 1991 年起无夏令时，`(ms + 8h)` 取日历日即当地日期，
+   不需要 Intl / 时区数据库（Electron 里还取决于 ICU 打包方式）。客户端与服务端同一算法。
+6. **落库用 `ctx.waitUntil` + `DB.batch`**。心跳先回 `202`，写入放 `waitUntil`；
+   不用 `waitUntil` 的异步写入会在调用结束时被取消。`installs` 与 `daily_active`
+   两条 upsert 合成一个 `batch`：一次往返、一个事务、也只算一次查询（Free 档每次
+   调用 50 查询上限）。`decisions` 取 `MAX` 而非累加——同一台机器异日重复上报也不会翻倍。
+7. **推送在 Worker 的 `scheduled()` 里做，cron `42 10 * * *` UTC**（= 18:42 Asia/Shanghai）。
+   Bark 用 `GET https://api.day.app/<key>/<title>/<body>`，key 存 **Worker Secret
+   `BARK_TOKEN`**（不入库、不进 wrangler.jsonc）。`digest_log` 表按天去重，
+   保证手工触发与 cron 撞车时不会推两条。
+8. **不建展示页**。用户明确说只需要每天看一次数据。省下两个页面、图表代码与
+   `/api/stats` 读接口，也就省掉了「静态页 ETag 是 content-blind、旧图会一直 304」的坑。
+
+**迁移是一次性的手工步骤**：`wrangler deploy` **不会**执行 D1 迁移，上线前必须
+`npx wrangler d1 migrations apply dsh-telemetry --remote`，否则首条 INSERT 就会因为
+表不存在而失败。
+
+**改动文件**：`lib/telemetry.js`（新增，纯函数 + 注入式上报器）、`lib/index.js`
+（`telemetryLevel`/`telemetryEndpoint` 配置、`readOwnVersion`、`apply()` 里 `void`
+调用的上报钩子、status 回传与 PUT 白名单）、`site/make-bundle.mjs`（`/api/e` 采集、
+`scheduled()` 汇总、npm 拉取、Bark 推送）、`site/migrations/0001_init.sql`、
+`site/wrangler.jsonc`（D1 绑定 + cron）、`test/telemetry.test.js`。
+
+**测试**：`test/telemetry.test.js` 16 项——日界换算、id 稳定性与可重置、
+`off` 档「fetch 一次都没被调用」、同一天不重发、install 档终身只报一次、
+发送失败不抛错且当天不重试、第 30 次失败触发降级、payload 字段白名单与
+禁用字段断言（`prompt|key|token|path|cwd|url|user|ip|session|email`）、
+状态文件损坏后能自愈。全量 352 项通过，`verify-wiring` 通过。
+
+
 ## DEC-019 审批卡标题双语：ask 裁决附带 displayReason（2026-11-02）
 
 **背景**：宿主界面是英文时，授权审批卡的**标题**仍是中文，例如

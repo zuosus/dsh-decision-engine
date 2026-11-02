@@ -23,6 +23,26 @@
   "account_id": "48bfaa4269a02470c2d6529a56b05f23",
   "compatibility_date": "2026-10-26",
   "compatibility_flags": ["nodejs_compat"],
+  // 匿名使用统计（DEC-020）：心跳写进 D1，每天 UTC 10:42 汇总后推 Bark。
+  //
+  // 注意两件事：
+  //
+  //   1. `wrangler deploy` **不会**自动执行迁移。上线前必须手动跑一次
+  //      `npx wrangler d1 migrations apply dsh-telemetry --remote`，
+  //      否则 Worker 里第一条 INSERT 就会因为表不存在而失败。
+  //   2. cron 只认 UTC：10:42 UTC = 18:42 Asia/Shanghai（中国无夏令时，
+  //      全年恒为 +8，所以这个换算不需要季节性调整）。
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "dsh-telemetry",
+      "database_id": "e828893a-5f98-444a-9082-71910bd705ae",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "triggers": {
+    "crons": ["42 10 * * *"]
+  },
   "observability": {
     "enabled": true,
     "logs": {

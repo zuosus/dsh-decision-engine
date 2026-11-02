@@ -6,6 +6,9 @@ startlux.yml
 # 运行时遥测（含真实工具调用记录）
 telemetry.jsonl
 telemetry.jsonl.old
+# 匿名统计的本地状态（含安装 id，属于本机隐私数据）
+analytics.json
+analytics.json.tmp
 *.log
 
 # 依赖与系统文件

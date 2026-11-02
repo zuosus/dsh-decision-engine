@@ -60,9 +60,27 @@ Windows 上形如 `C:\Users\<name>\.dsh\`）。解析顺序与宿主一致：显
 | `config.yml` | 配置（可从 [config.example.yml](config.example.yml) 拷贝；实际以配置页写入为准） |
 | `telemetry.jsonl` | 决策流水账，给人读 / `tail` 排查 |
 | `stats.jsonl` | 按 provider × model 的 token 与耗时，供「统计与对比」页读取 |
+| `analytics.json` | 匿名统计的本地状态（安装 id + 上次上报日期），可随时删除以重置身份 |
 | `~/.dsh/.credentials.yaml` 的 `refs:` 段 | API key 的默认存放处（见下） |
 
 配置里可能有明文 key，因此 `config.yml` 权限保持 `600`。
+
+## 匿名使用统计 / Anonymous usage stats
+
+默认 **`install` 档**：首次运行时上报一次「装了」这件事，之后不再联网。
+改成 `daily` 则每天上报一次（含当日决策数）。`off` 是**真的一个请求都不发**。
+
+```yaml
+telemetryLevel: install   # off | install | daily
+telemetryEndpoint: ""     # 留空用内置端点
+```
+
+上报内容只有七个字段：匿名安装 id（首次运行随机生成的 UUIDv4，与任何账号无关）、
+插件版本、平台、架构、宿主版本、当日决策数、事件类型。
+
+**绝不上报**：API key、prompt / 工具参数、文件路径、provider 地址、会话内容、用户名；
+服务端也不记录 IP。想看/重置身份就删掉 `analytics.json`——下次运行会生成新 id。
+
 
 ## 配置页 / The config page
 
