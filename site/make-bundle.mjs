@@ -166,8 +166,8 @@ async function npmDownloads(day){
 function sumRows(res){let n=0;const rows=(res&&res.results)||[];for(const r of rows){n+=Number(r.n)||0}return n}
 function one(res){const rows=(res&&res.results)||[];return rows.length>0?rows[0]:null}
 
-async function runDigest(env){
-  if(!env||!env.DB)return;
+async function runDigest(env,opts={}){
+  if(!env||!env.DB)return { skipped:"no-db" };
   const now=Date.now();
   const today=dayOf(now);
   const yday=dayOf(now-86400000);
@@ -177,8 +177,9 @@ async function runDigest(env){
   const monthStart=dayStart(dayOf(now-29*86400000));
 
   // 去重：同一天成功推过就不再推（防止手工触发与 cron 撞车时刷两条）。
+  // force 只给 /api/digest 的调试入口用：验证时需要能重复跑。
   const seen=one(await env.DB.prepare("SELECT ok FROM digest_log WHERE day=?").bind(today).all());
-  if(seen&&Number(seen.ok)===1)return;
+  if(!opts.force&&seen&&Number(seen.ok)===1)return { skipped:"already-sent" };
 
   const qs=[
     env.DB.prepare("SELECT COUNT(*) AS n FROM daily_active WHERE day=?").bind(yday),
@@ -253,6 +254,7 @@ async function runDigest(env){
     .bind(today,now,sent.ok?1:0,sent.ok?"":String(sent.err||"").slice(0,200))
     .run().catch(()=>{});
   if(!sent.ok)console.warn("bark-push-failed "+String(sent.err||""));
+  return { ok:sent.ok, err:sent.err||"", day:yday, dau:dauY };
 }
 
 export default{fetch:async(rq,env,ctx)=>{
@@ -261,6 +263,20 @@ export default{fetch:async(rq,env,ctx)=>{
   if(u.pathname==="/api/e"){
     if(rq.method!=="POST")return new Response("Method Not Allowed",{status:405,headers:{allow:"POST"}});
     return ingestEvent(rq,env,ctx);
+  }
+  // 手工触发一次日报：cron 只能在 UTC 到点才会跑，本地无法验证「推送到底
+  // 发没发出去」，因此留一个有密钥保护的调试入口。
+  //
+  // 必须带 'x-digest-key' 且与 Worker Secret 'DIGEST_KEY' 一致；没配这个
+  // secret 时整条路由不存在（404），不会意外成为公开接口。
+  if(u.pathname==="/api/digest"){
+    if(rq.method!=="POST")return new Response("Method Not Allowed",{status:405,headers:{allow:"POST"}});
+    const expected=(env&&typeof env.DIGEST_KEY==="string"?env.DIGEST_KEY:"").trim();
+    if(expected.length===0)return json({ok:false,err:"not-found"},404);
+    const given=(rq.headers.get("x-digest-key")||"").trim();
+    if(given!==expected)return json({ok:false,err:"forbidden"},403);
+    const result=await runDigest(env,{force:true});
+    return json({ok:true,result:result||null},200);
   }
   if(u.pathname.indexOf("/api/")===0){
     return json({ok:false,err:"not-found"},404);
