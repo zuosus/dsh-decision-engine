@@ -2,6 +2,50 @@
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
 
+## DEC-020 ⛔️ 修订：默认档位改为 daily，上报移到配置加载之后（2026-11-02）
+
+**取代**：同号 DEC-020 原条目中「默认档位是 `install`」与「`void startTelemetry()` 紧跟 apply 开头」两处结论。
+原条目保留不改（append-only），仅在此声明失效。
+
+**推翻的理由一：`install` 档会让统计彻底失效。**
+
+`install` 只在首次运行上报一次。这意味着装机之后再也不会有心跳，于是
+`daily_active` 只会在安装当天有一行 —— **DAU / WAU / MAU 恒为 0**。
+而需求恰恰是「每天看一次数据（新增下载、安装、每日 DAU）」。选更保守的默认值
+看起来更「尊重用户」，但它让整个功能变成一个永远返回 0 的数字：既没实现需求，
+也让「离线安装数」这种本该有用的口径失去可信度（谁也不会看一个恒为 0 的报表）。
+
+**与「默认不擅自介入」的关系**：那条姿态约束的是**守卫**——`enabled: false`
+意味着不干预会话的裁决。上报是旁路：不发请求给 provider、不改任何裁决、
+不增加任何决策路径延迟（`apply()` 里 `void` 掉）。隐私边界写死在上报体本身
+（7 个字段、无内容字段）。因此默认 `daily` 不违背该姿态；`off` 依然是一个
+请求都不发的硬承诺，且有测试专门断言「off 时 fetch 一次都没被调用」。
+
+**推翻的理由二：上报时机早于配置加载，会把 `off` 当成默认档。**
+
+`apply()` 开头的 `cfg` 只是 `DEFAULTS` 的副本；用户在 `config.yml` 里写的
+`telemetryLevel: off` 要等 `reloadOwnConfig()` 合并后才生效。原实现紧跟
+`apply` 开头就 `void startTelemetry()`，在「读配置」之前就发了请求——
+一个明确关掉统计的用户，每次启动仍会被上报一次。这既是隐私承诺的破口，
+也是典型的「读了 DEFAULTS 就当成用户配置」错误（仓库里同类的坑见 DEC-001）。
+
+改成等 `reloadOwnConfig()` 落定后再上报；读配置失败时用 DEFAULTS 兜底，
+上报本身的失败只记一条日志，不影响插件。
+
+**代价**：启动时上报会晚一个微任务（读一个 yml 文件的时间），但它是 `void`
+掉的旁路，不参与任何 await 链，对启动无感知。
+
+**测试**：新增「默认档位是 daily」用例——构造器不传 level 时必须是 `daily`，
+且次日的 `start()` 必须继续上报（`kind === "heartbeat"`）。这条用例同时钉住
+了「DAU 能否存在」这个前提；`resolveLevel` 的未知值兜底也改为 `daily`。
+全量 359 项通过。
+
+**改动文件**：`lib/telemetry.js`（`resolveLevel` 默认值与构造器默认档）、
+`lib/index.js`（`DEFAULTS.telemetryLevel`、上报时机移到 `reloadOwnConfig` 之后）、
+`lib/client.js`（界面文案、draft 初值、status 兜底）、`README.md`、
+`config.example.yml`、`test/telemetry.test.js`。
+
+
 ## DEC-020 匿名使用统计：每日心跳 + D1 + Bark 日报（2026-11-02）
 
 **背景**：插件已在 npm 上（`dsh-decision-engine`），但只有下载数（npm API 口径），

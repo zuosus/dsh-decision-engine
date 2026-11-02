@@ -274,8 +274,8 @@ pointCotTranslate: off
 # 用户名；服务端也不记录 IP。删掉 analytics.json 即换新身份。
 #
 #   off      完全联网都不做（连版本检查都没有）
-#   install  仅首次运行上报一次「装了」（默认）
-#   daily    每天上报一次，附带当日决策数
+#   install  仅首次运行上报一次「装了」
+#   daily    每天上报一次，附带当日决策数（默认）
 #
-# telemetryLevel: install
+# telemetryLevel: daily
 # telemetryEndpoint: ""     # 留空用内置端点

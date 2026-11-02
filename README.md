@@ -67,13 +67,17 @@ Windows 上形如 `C:\Users\<name>\.dsh\`）。解析顺序与宿主一致：显
 
 ## 匿名使用统计 / Anonymous usage stats
 
-默认 **`install` 档**：首次运行时上报一次「装了」这件事，之后不再联网。
-改成 `daily` 则每天上报一次（含当日决策数）。`off` 是**真的一个请求都不发**。
+默认 **`daily` 档**：每天上报一次（首次运行那次算「安装」，之后算「今天在用」），
+附带当日决策数。`install` 只在首次运行报一次；`off` 是**真的一个请求都不发**。
 
 ```yaml
-telemetryLevel: install   # off | install | daily
+telemetryLevel: daily     # off | install | daily
 telemetryEndpoint: ""     # 留空用内置端点
 ```
+
+为什么默认是 `daily` 而不是更保守的 `install`：只报首次的话，装机之后再也没有
+心跳，日活/周活会恒为 0，统计本身就没有意义了。这条上报不改任何决策、不给会话
+加延迟（`apply()` 里 `void` 掉），隐私边界见下。不想参与就设 `off`。
 
 上报内容只有七个字段：匿名安装 id（首次运行随机生成的 UUIDv4，与任何账号无关）、
 插件版本、平台、架构、宿主版本、当日决策数、事件类型。

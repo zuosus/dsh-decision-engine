@@ -194,12 +194,35 @@ test("normalizeVersion / resolveEndpoint / resolveLevel 的兜底", () => {
   assert.equal(resolveEndpoint("not a url"), DEFAULT_ENDPOINT);
   assert.equal(resolveEndpoint("https://example.com/api"), "https://example.com/api");
 
-  // 档位：未知值回落 install（默认档），不是 daily。
+  // 档位：未知值回落 daily（默认档）。为什么默认不是 install：install 只在
+  // 首次运行报一次，已装用户第二天起不再上报，DAU/WAU 会恒为 0。
   assert.equal(resolveLevel("daily"), "daily");
   assert.equal(resolveLevel("off"), "off");
   assert.equal(resolveLevel("install"), "install");
-  assert.equal(resolveLevel("nonsense"), "install");
-  assert.equal(resolveLevel(undefined), "install");
+  assert.equal(resolveLevel("nonsense"), "daily");
+  assert.equal(resolveLevel(undefined), "daily");
+});
+
+test("默认档位是 daily——否则已装用户第二天不再上报，DAU 恒为 0", async () => {
+  await withTempDir(async (dir) => {
+    // 不传 level，走构造器的默认值。
+    const { impl, calls } = stubFetch();
+    const first = new TelemetryReporter({
+      dir, fetchImpl: impl, clock: () => Date.parse("2026-11-02T02:00:00Z"),
+    });
+    assert.equal(first.level, "daily", "构造器默认档位必须是 daily");
+    await first.start({ version: "1.0.0" });
+    assert.equal(calls().length, 1);
+
+    // 关键：次日仍要上报。这是 DAU 能否存在的前提。
+    const nextDay = new TelemetryReporter({
+      dir, fetchImpl: impl, clock: () => Date.parse("2026-11-03T02:00:00Z"),
+    });
+    const r = await nextDay.start({ version: "1.0.0", decisions: 5 });
+    assert.equal(r.sent, true, "默认档位下次日必须继续上报");
+    assert.equal(r.kind, "heartbeat");
+    assert.equal(calls().length, 2);
+  });
 });
 
 test("档位 off 时绝不联网、绝不读文件", async () => {
