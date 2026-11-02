@@ -191,7 +191,10 @@ async function runDigest(env){
     env.DB.prepare("SELECT COALESCE(SUM(decisions),0) AS n FROM daily_active WHERE day=?").bind(yday),
     env.DB.prepare("SELECT version, COUNT(*) AS n FROM daily_active WHERE day=? GROUP BY version ORDER BY n DESC LIMIT 3").bind(yday),
     env.DB.prepare("SELECT source, count FROM downloads WHERE day=?").bind(yday),
-    env.DB.prepare("SELECT version, COUNT(*) AS n FROM installs WHERE first_seen_ms>=? AND first_seen_ms<? GROUP BY version ORDER BY n DESC LIMIT 3").bind(ydayStart,todayStart)
+    // 每个版本的「新装」按 first_version 分组——installs 表里只有
+    // first_version / last_version 两列，没有裸 version（写裸 version 会
+    // 直接 SQLITE_ERROR，整个 cron 静默失败）。
+    env.DB.prepare("SELECT first_version AS version, COUNT(*) AS n FROM installs WHERE first_seen_ms>=? AND first_seen_ms<? GROUP BY first_version ORDER BY n DESC LIMIT 3").bind(ydayStart,todayStart)
   ];
   const res=await env.DB.batch(qs);
 
