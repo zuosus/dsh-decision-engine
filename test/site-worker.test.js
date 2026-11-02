@@ -37,20 +37,33 @@ const BUNDLER = join(SITE, "make-bundle.mjs");
  */
 export function parseSchema(sql) {
   const tables = {};
-  const re = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\(([\s\S]*?)\)\s*;/gi;
+  // 迁移里会用「建新表 -> 搬数据 -> 改名」的方式升级表结构（SQLite 不能改主键）。
+  // 因此必须**按出现顺序**同时处理 CREATE 与 RENAME：只看 CREATE 会拿到升级前的
+  // 旧定义，检查器就会误报「plugin 列不存在」。
+  const pattern = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\(([\s\S]*?)\)\s*;|ALTER\s+TABLE\s+([A-Za-z_][A-Za-z0-9_]*)\s+RENAME\s+TO\s+([A-Za-z_][A-Za-z0-9_]*)\s*;/gi;
   let m;
-  while ((m = re.exec(sql)) !== null) {
-    const name = m[1].toLowerCase();
-    const columns = new Set();
-    for (const rawLine of m[2].split("\n")) {
-      const line = rawLine.trim();
-      if (line.length === 0) continue;
-      // 跳过表级约束行（PRIMARY KEY (...) / FOREIGN KEY / UNIQUE ...）。
-      if (/^(PRIMARY|FOREIGN|UNIQUE|CHECK|CONSTRAINT)\b/i.test(line)) continue;
-      const col = /^([A-Za-z_][A-Za-z0-9_]*)/.exec(line);
-      if (col) columns.add(col[1].toLowerCase());
+  while ((m = pattern.exec(sql)) !== null) {
+    if (m[1] !== undefined) {
+      const name = m[1].toLowerCase();
+      const columns = new Set();
+      for (const rawLine of m[2].split("\n")) {
+        const line = rawLine.trim();
+        if (line.length === 0) continue;
+        // 跳过表级约束行（PRIMARY KEY (...) / FOREIGN KEY / UNIQUE ...）。
+        if (/^(PRIMARY|FOREIGN|UNIQUE|CHECK|CONSTRAINT)\b/i.test(line)) continue;
+        const col = /^([A-Za-z_][A-Za-z0-9_]*)/.exec(line);
+        if (col) columns.add(col[1].toLowerCase());
+      }
+      tables[name] = columns;
+    } else {
+      // 改名：把旧名字的定义搬到新名字上，并删掉临时名。
+      const from = m[3].toLowerCase();
+      const to = m[4].toLowerCase();
+      if (tables[from] !== undefined) {
+        tables[to] = tables[from];
+        delete tables[from];
+      }
     }
-    tables[name] = columns;
   }
   return tables;
 }
@@ -302,4 +315,99 @@ test("隐私：bundle 不得读取客户端 IP，也不得出现密钥类字段�
   for (const forbidden of ["prompt", "cwd", "apiKey", "sessionId"]) {
     assert.ok(!new RegExp(`\\b${forbidden}\\b`, "i").test(source), `bundle 不应出现 ${forbidden}`);
   }
+});
+
+// ---------- 多插件维度（DEC-021）----------
+
+test("每张明细表都把 plugin 并入主键，且按 plugin 建索引", async () => {
+  const files = (await readdir(MIGRATIONS)).filter((f) => f.endsWith(".sql")).sort();
+  let merged = "";
+  for (const f of files) merged += `${await readFile(join(MIGRATIONS, f), "utf8")}\n`;
+  const schema = parseSchema(merged);
+
+  for (const table of ["installs", "daily_active", "downloads", "version_daily", "digest_log"]) {
+    assert.ok(schema[table].has("plugin"), `表 ${table} 必须有 plugin 列`);
+  }
+
+  // SQLite 不能改主键，因此升级只能重建表；迁移里必须留下重建的痕迹，
+  // 否则说明 plugin 被加成了普通列 —— 那样两条不同插件的同 id 记录会互相覆盖。
+  assert.match(merged, /PRIMARY KEY\s*\(\s*plugin\s*,\s*install_id\s*\)/i, "installs 主键应含 plugin");
+  assert.match(merged, /PRIMARY KEY\s*\(\s*plugin\s*,\s*day\s*,\s*install_id\s*\)/i, "daily_active 主键应含 plugin");
+  assert.match(merged, /PRIMARY KEY\s*\(\s*plugin\s*,\s*day\s*,\s*source\s*\)/i, "downloads 主键应含 plugin");
+  assert.match(merged, /PRIMARY KEY\s*\(\s*plugin\s*,\s*day\s*,\s*version\s*\)/i, "version_daily 主键应含 plugin");
+  // digest_log 的去重也必须按插件分开：两个插件的日报是两条独立消息。
+  assert.match(merged, /PRIMARY KEY\s*\(\s*plugin\s*,\s*day\s*\)/i, "digest_log 主键应含 plugin");
+});
+
+test("聚合查询一律按 plugin 过滤——否则数字会跨插件混在一起", async () => {
+  const source = await readFile(BUNDLER, "utf8");
+  const statements = extractSql(source);
+
+  const tables = ["daily_active", "installs", "downloads", "version_daily"];
+  const offenders = [];
+  for (const { sql } of statements) {
+    if (!/SELECT/i.test(sql)) continue;
+    // 「有哪些插件」这条查询本身不可能按插件过滤——它就是要跨插件扫。
+    if (/SELECT\s+DISTINCT\s+plugin\b/i.test(sql)) continue;
+    const touched = tables.filter((t) => new RegExp(`\\bFROM\\s+${t}\\b`, "i").test(sql));
+    if (touched.length === 0) continue;
+    if (!/\bplugin\s*=\s*\?/i.test(sql)) {
+      offenders.push(`${touched.join(",")} <- ${sql.slice(0, 80).replace(/\s+/g, " ")}`);
+    }
+  }
+  assert.deepEqual(offenders, [], "存在没有按 plugin 过滤的聚合查询");
+});
+
+test("写入语句都带上 plugin，冲突目标按 (plugin, ...) 匹配", async () => {
+  const source = await readFile(BUNDLER, "utf8");
+  const statements = extractSql(source);
+  const offenders = [];
+
+  for (const { sql } of statements) {
+    if (!/INSERT\s+INTO/i.test(sql)) continue;
+    for (const table of ["installs", "daily_active", "downloads", "version_daily", "digest_log"]) {
+      const into = new RegExp(`INSERT\\s+INTO\\s+${table}\\s*\\(([^)]*)\\)`, "i").exec(sql);
+      if (into === null) continue;
+      const cols = into[1].split(",").map((c) => c.trim().toLowerCase());
+      if (!cols.includes("plugin")) offenders.push(`${table} 的 INSERT 没有 plugin 列`);
+      // ON CONFLICT 的目标必须从 plugin 开始，否则 upsert 会撞错行。
+      const conflict = /ON\s+CONFLICT\s*\(([^)]*)\)/i.exec(sql);
+      if (conflict !== null) {
+        const keys = conflict[1].split(",").map((c) => c.trim().toLowerCase());
+        if (keys[0] !== "plugin") offenders.push(`${table} 的 ON CONFLICT 不以 plugin 开头：${conflict[1]}`);
+      }
+    }
+  }
+  assert.deepEqual(offenders, [], "存在缺少插件维度的写入语句");
+});
+
+test("npm 下载与推送标题都按插件区分，不再写死包名", async () => {
+  const source = await readFile(BUNDLER, "utf8");
+  // npm 查询必须用 plugin 参数拼接，而不是写死某个包名。
+  assert.ok(
+    source.includes("encodeURIComponent(plugin)"),
+    "npm 下载查询应按 plugin 拼接",
+  );
+  assert.ok(!source.includes('/dsh-decision-engine"'), "npm 查询不得写死包名");
+  // 推送标题同理：应带插件名，而不是固定字符串。
+  assert.ok(source.includes('const title=plugin+" "'), "推送标题应按 plugin 区分");
+  assert.ok(!source.includes('const title="dsh-decision-engine "'), "标题不得写死插件名");
+});
+
+test("插件清单从 D1 读取，新增插件不必改 Worker 代码", async () => {
+  const source = await readFile(BUNDLER, "utf8");
+  assert.ok(source.includes("SELECT DISTINCT plugin FROM installs"), "应动态读取插件清单");
+  // 空表兜底：首日还没人上报时也要能发日报。
+  assert.ok(source.includes("if(plugins.length===0)plugins=[DEFAULT_PLUGIN]"), "空清单应有兜底");
+});
+
+test("老客户端（无 p 字段）回填为默认插件，非法 p 直接拒绝", async () => {
+  const source = await readFile(BUNDLER, "utf8");
+  // 老版本上报体没有插件字段：按历史事实回填，而不是丢弃那段数据。
+  assert.ok(source.includes(":DEFAULT_PLUGIN;"), "无 p 字段应回填 DEFAULT_PLUGIN");
+  // 带了但非法：拒绝，绝不猜测归属。
+  assert.ok(
+    source.includes('return json({ok:false,err:"bad-plugin"},400)'),
+    "非法插件 id 应返回 400",
+  );
 });

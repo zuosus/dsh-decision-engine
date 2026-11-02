@@ -2,6 +2,57 @@
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
 
+## DEC-021 统计加「插件维度」：上报自报家门，D1 按插件分账（2026-11-02）
+
+**背景**：DEC-020 的统计只服务 `dsh-decision-engine` 一个插件——上报体里没有插件
+标识，Worker 把包名写死在 npm 下载查询与推送标题上，D1 各表的主键也不含插件。
+将来 dsh 生态里出现第二个、第三个插件时，这些数字会**跨插件混在一起**，而且
+「加一个插件」意味着改 Worker 代码、改推送标题、改下载查询。
+
+**根因不是「少一个字段」，是维度缺失**：`installs` 的主键是 `install_id`、
+`daily_active` 是 `(day, install_id)`。两个插件在同一台机器上各自生成自己的
+install_id，撞车概率低但**并不保证不同**；更关键的是查询无法回答
+「这个插件今天有多少人用」——它只能回答「所有插件一共多少人」。
+
+**决定**：
+
+1. **上报体自报家门**：新增 `p` 字段（plugin id，npm 包名形态，小写、
+   `[a-z0-9._-]`、最长 48）。客户端从 `package.json` 的 `name` 读，不写死常量——
+   写死的话，仓库拆子包或有人 fork 改名会把两个不同插件混成同一条统计线。
+2. **没有合法 `p` 就拒发**（`prepare` 阶段直接返回 null）。宁可少一条数据，也不能
+   往公共统计里塞一条无法归属的记录——那是多插件共存时最难收拾的脏数据。
+3. **`p` 提为第一等维度**：五张明细表全部加 `plugin` 列并**并入主键**
+   （`installs` → `(plugin, install_id)`、`daily_active` → `(plugin, day, install_id)`、
+   `downloads` → `(plugin, day, source)`、`version_daily` → `(plugin, day, version)`、
+   `digest_log` → `(plugin, day)`）。SQLite 不支持修改主键，因此迁移用
+   「建新表 → 搬数据 → 改名」（`0002_plugin_dimension.sql`），旧数据按历史事实
+   回填 `dsh-decision-engine`——这一版之前只有它一个上报方，回填值是确定的，不是猜测。
+4. **所有聚合查询按 plugin 过滤**，所有写入带 plugin、`ON CONFLICT` 从 plugin 起匹配。
+5. **npm 下载与推送标题都按插件区分**。npm 查询改 `encodeURIComponent(plugin)`；
+   标题从写死的 `dsh-decision-engine <day>` 改成 `<plugin> <day>`。
+6. **日报按插件逐条发**：`scheduled()` 先用 `SELECT DISTINCT plugin FROM installs`
+   读插件清单（而不是写死常量），对每个插件各跑一次 `runDigest` 并发一条 Bark。
+   新增插件只要开始上报，第二天自动进日报，**不必改 Worker 代码再发版**。
+   清单为空时兜底跑默认插件，保证首日也有日报。
+   `digest_log` 去重按 `(plugin, day)`：两个插件的日报是两条独立消息，不能因为
+   「今天已经推过一个」就把另一个跳过。
+7. **老客户端兼容**：升级前那批上报体没有 `p` 字段，服务端按历史事实回填
+   `DEFAULT_PLUGIN`，而不是丢弃——丢掉的代价是那段时间的 DAU 永远缺一块且无法补回。
+   带了 `p` 但非法的（被人直接 POST 或客户端被改坏）直接 400，**绝不猜测归属**。
+
+**测试**：新增 6 项多插件断言——五张表主键都必须含 plugin、所有聚合查询必须带
+`plugin=?`（唯一豁免是「列出有哪些插件」那条）、所有 INSERT 必须带 plugin 列且
+`ON CONFLICT` 以 plugin 开头、npm 查询与标题不得写死包名、插件清单必须动态读取
+且有空表兜底、老客户端回填与非法 `p` 拒绝。`parseSchema` 改为跟随
+`CREATE … RENAME TO`，否则检查器会拿迁移前的旧定义误报。全量 365 项通过。
+
+**改动文件**：`lib/telemetry.js`（`normalizePluginId`、`buildPayload` 增 `p`、
+构造器与 `prepare`）、`lib/index.js`（`readOwnPackage` / `readOwnPluginId`）、
+`site/make-bundle.mjs`（采集校验、所有 SQL、npm、标题、scheduled 多插件循环）、
+`site/migrations/0002_plugin_dimension.sql`、`test/telemetry.test.js`、
+`test/site-worker.test.js`。
+
+
 ## DEC-020 ⛔️ 修订：默认档位改为 daily，上报移到配置加载之后（2026-11-02）
 
 **取代**：同号 DEC-020 原条目中「默认档位是 `install`」与「`void startTelemetry()` 紧跟 apply 开头」两处结论。

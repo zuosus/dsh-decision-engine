@@ -88,6 +88,14 @@ const NOSTORE={"cache-control":"no-store","x-content-type-options":"nosniff"};
 const MAX_BODY=2048;
 const MAX_FIELD=32;
 const UUIDV4=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+// 插件标识（npm 包名形态）：小写字母数字 + - . _，最长 48。上报体里的 p 字段。
+// 校验在服务端再做一次：客户端被改坏、或有人直接 POST 时，不能让它写进
+// 一个无法归属的插件名下。
+const PLUGIN_RE=/^[a-z0-9][a-z0-9._-]{0,47}$/;
+// 兜底插件名：老客户端（升级前那批）还没带 'p' 字段。它们的上报全部来自
+// dsh-decision-engine，所以按历史事实回填，而不是丢弃（丢掉的代价是那段
+// 时间的 DAU 永远缺一块，且无法补回）。
+const DEFAULT_PLUGIN="dsh-decision-engine";
 
 function dayOf(ms){return new Date(ms+TZ).toISOString().slice(0,10)}
 function dayStart(day){return Date.parse(day+"T00:00:00+08:00")}
@@ -107,6 +115,11 @@ async function ingestEvent(rq,env,ctx){
   try{body=JSON.parse(text)}catch(e){return json({ok:false,err:"bad-json"},400)}
   if(body===null||typeof body!=="object")return json({ok:false,err:"bad-body"},400);
   if(body.v!==1)return json({ok:false,err:"bad-version"},400);
+  // 插件维度：新客户端必须带合法的 p；老客户端没有这个字段时按历史事实
+  // 回填 DEFAULT_PLUGIN（见常量注释）。带了但非法 —— 直接拒绝，绝不猜测。
+  const hasPlugin=Object.prototype.hasOwnProperty.call(body,"p");
+  const plugin=hasPlugin?String(body.p==null?"":body.p).trim().toLowerCase():DEFAULT_PLUGIN;
+  if(!PLUGIN_RE.test(plugin))return json({ok:false,err:"bad-plugin"},400);
   const id=typeof body.id==="string"?body.id:"";
   if(!UUIDV4.test(id))return json({ok:false,err:"bad-id"},400);
   const kind=body.k==="install"?"install":(body.k==="heartbeat"?"heartbeat":"");
@@ -123,13 +136,13 @@ async function ingestEvent(rq,env,ctx){
   // decisions 取 MAX 而不是累加：同一台机器同一天若真的重复上报（客户端状态
   // 文件被删），也不会把决策数算成两倍。
   const stmts=[
-    env.DB.prepare("INSERT INTO installs (install_id,first_seen_ms,last_seen_ms,first_version,last_version,platform,arch,host_version) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(install_id) DO UPDATE SET last_seen_ms=excluded.last_seen_ms,last_version=excluded.last_version,host_version=excluded.host_version,platform=excluded.platform,arch=excluded.arch")
-      .bind(id,now,now,ver,ver,os,arch,host),
-    env.DB.prepare("INSERT INTO daily_active (day,install_id,version,platform,decisions,updated_ms) VALUES (?,?,?,?,?,?) ON CONFLICT(day,install_id) DO UPDATE SET version=excluded.version,platform=excluded.platform,decisions=MAX(daily_active.decisions,excluded.decisions),updated_ms=excluded.updated_ms")
-      .bind(day,id,ver,os,decisions,now)
+    env.DB.prepare("INSERT INTO installs (plugin,install_id,first_seen_ms,last_seen_ms,first_version,last_version,platform,arch,host_version) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(plugin,install_id) DO UPDATE SET last_seen_ms=excluded.last_seen_ms,last_version=excluded.last_version,host_version=excluded.host_version,platform=excluded.platform,arch=excluded.arch")
+      .bind(plugin,id,now,now,ver,ver,os,arch,host),
+    env.DB.prepare("INSERT INTO daily_active (plugin,day,install_id,version,platform,decisions,updated_ms) VALUES (?,?,?,?,?,?,?) ON CONFLICT(plugin,day,install_id) DO UPDATE SET version=excluded.version,platform=excluded.platform,decisions=MAX(daily_active.decisions,excluded.decisions),updated_ms=excluded.updated_ms")
+      .bind(plugin,day,id,ver,os,decisions,now)
   ];
   ctx.waitUntil(env.DB.batch(stmts).catch(e=>console.warn("telemetry-write-failed "+String(e&&e.message))));
-  return json({ok:true,day:day},202);
+  return json({ok:true,day:day,plugin:plugin},202);
 }
 
 // ---------- 每日推送 ----------
@@ -153,9 +166,11 @@ async function barkPush(env,title,body){
 }
 
 // npm 下载数：官方公开 API，无需 token。
-async function npmDownloads(day){
+async function npmDownloads(plugin,day){
   try{
-    const r=await fetch("https://api.npmjs.org/downloads/point/"+day+"/dsh-decision-engine");
+    // 按插件查各自的下载量：原来写死包名，加第二个插件时会把两个插件的
+    // 下载数算成同一个。
+    const r=await fetch("https://api.npmjs.org/downloads/point/"+day+"/"+encodeURIComponent(plugin));
     if(!r.ok)return null;
     const j=await r.json();
     const n=Number(j&&j.downloads);
@@ -168,6 +183,9 @@ function one(res){const rows=(res&&res.results)||[];return rows.length>0?rows[0]
 
 async function runDigest(env,opts={}){
   if(!env||!env.DB)return { skipped:"no-db" };
+  // 一个插件一条日报：所有查询都按 plugin 过滤，否则装了两个插件的用户
+  // 会看到「混在一起的 DAU」，数字没有任何含义。
+  const plugin=PLUGIN_RE.test(String(opts.plugin||""))?String(opts.plugin).toLowerCase():DEFAULT_PLUGIN;
   const now=Date.now();
   const today=dayOf(now);
   const yday=dayOf(now-86400000);
@@ -178,24 +196,24 @@ async function runDigest(env,opts={}){
 
   // 去重：同一天成功推过就不再推（防止手工触发与 cron 撞车时刷两条）。
   // force 只给 /api/digest 的调试入口用：验证时需要能重复跑。
-  const seen=one(await env.DB.prepare("SELECT ok FROM digest_log WHERE day=?").bind(today).all());
+  const seen=one(await env.DB.prepare("SELECT ok FROM digest_log WHERE plugin=? AND day=?").bind(plugin,today).all());
   if(!opts.force&&seen&&Number(seen.ok)===1)return { skipped:"already-sent" };
 
   const qs=[
-    env.DB.prepare("SELECT COUNT(*) AS n FROM daily_active WHERE day=?").bind(yday),
-    env.DB.prepare("SELECT COUNT(*) AS n FROM daily_active WHERE day=?").bind(today),
-    env.DB.prepare("SELECT COUNT(*) AS n FROM installs WHERE first_seen_ms>=? AND first_seen_ms<?").bind(ydayStart,todayStart),
-    env.DB.prepare("SELECT COUNT(*) AS n FROM installs WHERE first_seen_ms>=?").bind(todayStart),
-    env.DB.prepare("SELECT COUNT(*) AS n FROM installs").bind(),
-    env.DB.prepare("SELECT COUNT(DISTINCT install_id) AS n FROM daily_active WHERE day>=?").bind(dayOf(weekStart+TZ)),
-    env.DB.prepare("SELECT COUNT(DISTINCT install_id) AS n FROM daily_active WHERE day>=?").bind(dayOf(monthStart+TZ)),
-    env.DB.prepare("SELECT COALESCE(SUM(decisions),0) AS n FROM daily_active WHERE day=?").bind(yday),
-    env.DB.prepare("SELECT version, COUNT(*) AS n FROM daily_active WHERE day=? GROUP BY version ORDER BY n DESC LIMIT 3").bind(yday),
-    env.DB.prepare("SELECT source, count FROM downloads WHERE day=?").bind(yday),
+    env.DB.prepare("SELECT COUNT(*) AS n FROM daily_active WHERE plugin=? AND day=?").bind(plugin,yday),
+    env.DB.prepare("SELECT COUNT(*) AS n FROM daily_active WHERE plugin=? AND day=?").bind(plugin,today),
+    env.DB.prepare("SELECT COUNT(*) AS n FROM installs WHERE plugin=? AND first_seen_ms>=? AND first_seen_ms<?").bind(plugin,ydayStart,todayStart),
+    env.DB.prepare("SELECT COUNT(*) AS n FROM installs WHERE plugin=? AND first_seen_ms>=?").bind(plugin,todayStart),
+    env.DB.prepare("SELECT COUNT(*) AS n FROM installs WHERE plugin=?").bind(plugin),
+    env.DB.prepare("SELECT COUNT(DISTINCT install_id) AS n FROM daily_active WHERE plugin=? AND day>=?").bind(plugin,dayOf(weekStart+TZ)),
+    env.DB.prepare("SELECT COUNT(DISTINCT install_id) AS n FROM daily_active WHERE plugin=? AND day>=?").bind(plugin,dayOf(monthStart+TZ)),
+    env.DB.prepare("SELECT COALESCE(SUM(decisions),0) AS n FROM daily_active WHERE plugin=? AND day=?").bind(plugin,yday),
+    env.DB.prepare("SELECT version, COUNT(*) AS n FROM daily_active WHERE plugin=? AND day=? GROUP BY version ORDER BY n DESC LIMIT 3").bind(plugin,yday),
+    env.DB.prepare("SELECT source, count FROM downloads WHERE plugin=? AND day=?").bind(plugin,yday),
     // 每个版本的「新装」按 first_version 分组——installs 表里只有
     // first_version / last_version 两列，没有裸 version（写裸 version 会
     // 直接 SQLITE_ERROR，整个 cron 静默失败）。
-    env.DB.prepare("SELECT first_version AS version, COUNT(*) AS n FROM installs WHERE first_seen_ms>=? AND first_seen_ms<? GROUP BY first_version ORDER BY n DESC LIMIT 3").bind(ydayStart,todayStart)
+    env.DB.prepare("SELECT first_version AS version, COUNT(*) AS n FROM installs WHERE plugin=? AND first_seen_ms>=? AND first_seen_ms<? GROUP BY first_version ORDER BY n DESC LIMIT 3").bind(plugin,ydayStart,todayStart)
   ];
   const res=await env.DB.batch(qs);
 
@@ -212,20 +230,20 @@ async function runDigest(env,opts={}){
   const verNew=(res[10]&&res[10].results)||[];
 
   const npm=(dlRows.find(r=>r.source==="npm")||{}).count;
-  const npmNow=await npmDownloads(yday);
+  const npmNow=await npmDownloads(plugin,yday);
 
   // 顺手把版本维度与下载数固化下来：以后要看趋势不用回扫明细。
   const writes=[
-    env.DB.prepare("INSERT INTO downloads (day,source,count,updated_ms) VALUES (?,?,?,?) ON CONFLICT(day,source) DO UPDATE SET count=excluded.count,updated_ms=excluded.updated_ms")
-      .bind(yday,"npm",npmNow===null?Number(npm)||0:npmNow,now)
+    env.DB.prepare("INSERT INTO downloads (plugin,day,source,count,updated_ms) VALUES (?,?,?,?,?) ON CONFLICT(plugin,day,source) DO UPDATE SET count=excluded.count,updated_ms=excluded.updated_ms")
+      .bind(plugin,yday,"npm",npmNow===null?Number(npm)||0:npmNow,now)
   ];
   for(const r of verActive){
-    writes.push(env.DB.prepare("INSERT INTO version_daily (day,version,installs,active_users) VALUES (?,?,?,?) ON CONFLICT(day,version) DO UPDATE SET installs=excluded.installs,active_users=excluded.active_users")
-      .bind(yday,String(r.version||"unknown"),0,Number(r.n)||0));
+    writes.push(env.DB.prepare("INSERT INTO version_daily (plugin,day,version,installs,active_users) VALUES (?,?,?,?,?) ON CONFLICT(plugin,day,version) DO UPDATE SET installs=excluded.installs,active_users=excluded.active_users")
+      .bind(plugin,yday,String(r.version||"unknown"),0,Number(r.n)||0));
   }
   for(const r of verNew){
-    writes.push(env.DB.prepare("INSERT INTO version_daily (day,version,installs,active_users) VALUES (?,?,?,?) ON CONFLICT(day,version) DO UPDATE SET installs=excluded.installs")
-      .bind(yday,String(r.version||"unknown"),Number(r.n)||0,0));
+    writes.push(env.DB.prepare("INSERT INTO version_daily (plugin,day,version,installs,active_users) VALUES (?,?,?,?,?) ON CONFLICT(plugin,day,version) DO UPDATE SET installs=excluded.installs")
+      .bind(plugin,yday,String(r.version||"unknown"),Number(r.n)||0,0));
   }
   await env.DB.batch(writes).catch(e=>console.warn("digest-write-failed "+String(e&&e.message)));
 
@@ -238,7 +256,7 @@ async function runDigest(env,opts={}){
     ?verNew.map(r=>String(r.version||"unknown")+" +"+Number(r.n||0)).join(" · ")
     :"(无)";
 
-  const title="dsh-decision-engine "+yday;
+  const title=plugin+" "+yday;
   const body=[
     "DAU "+dauY+"（今日至此刻 "+dauT+"）",
     "新增安装 "+newY+"（今日 "+newT+"） · 累计 "+total,
@@ -250,8 +268,8 @@ async function runDigest(env,opts={}){
   ].join("\\n");
 
   const sent=await barkPush(env,title,body);
-  await env.DB.prepare("INSERT INTO digest_log (day,sent_ms,ok,detail) VALUES (?,?,?,?) ON CONFLICT(day) DO UPDATE SET sent_ms=excluded.sent_ms,ok=excluded.ok,detail=excluded.detail")
-    .bind(today,now,sent.ok?1:0,sent.ok?"":String(sent.err||"").slice(0,200))
+  await env.DB.prepare("INSERT INTO digest_log (plugin,day,sent_ms,ok,detail) VALUES (?,?,?,?,?) ON CONFLICT(plugin,day) DO UPDATE SET sent_ms=excluded.sent_ms,ok=excluded.ok,detail=excluded.detail")
+    .bind(plugin,today,now,sent.ok?1:0,sent.ok?"":String(sent.err||"").slice(0,200))
     .run().catch(()=>{});
   if(!sent.ok)console.warn("bark-push-failed "+String(sent.err||""));
   return { ok:sent.ok, err:sent.err||"", day:yday, dau:dauY };
@@ -275,8 +293,10 @@ export default{fetch:async(rq,env,ctx)=>{
     if(expected.length===0)return json({ok:false,err:"not-found"},404);
     const given=(rq.headers.get("x-digest-key")||"").trim();
     if(given!==expected)return json({ok:false,err:"forbidden"},403);
-    const result=await runDigest(env,{force:true});
-    return json({ok:true,result:result||null},200);
+    const wantPlugin=String(u.searchParams.get("plugin")||"").trim().toLowerCase();
+    const plugin=PLUGIN_RE.test(wantPlugin)?wantPlugin:DEFAULT_PLUGIN;
+    const result=await runDigest(env,{force:true,plugin});
+    return json({ok:true,plugin:plugin,result:result||null},200);
   }
   if(u.pathname.indexOf("/api/")===0){
     return json({ok:false,err:"not-found"},404);
@@ -298,7 +318,23 @@ export default{fetch:async(rq,env,ctx)=>{
 },scheduled:async(ev,env,ctx)=>{
   // 与 fetch 一样用 waitUntil：cron 的 CPU 预算很小（Free 只有 10ms），
   // 而 D1 与 fetch 都是 I/O，不该被 CPU 预算卡住。
-  ctx.waitUntil(runDigest(env));
+  //
+  // 插件清单从 D1 里读，而不是写死常量：新增插件只要它开始上报，第二天就会
+  // 自动进日报，不必为了「加一条推送」去改 Worker 代码再发版。
+  // 兜底：表为空时（还没人上报）只跑默认插件，保证首日也有日报。
+  ctx.waitUntil((async()=>{
+    let plugins=[];
+    try{
+      const r=await env.DB.prepare("SELECT DISTINCT plugin FROM installs").all();
+      plugins=((r&&r.results)||[]).map(x=>String(x.plugin||"")).filter(p=>PLUGIN_RE.test(p));
+    }catch(e){console.warn("plugin-list-failed "+String(e&&e.message))}
+    if(plugins.length===0)plugins=[DEFAULT_PLUGIN];
+    // 串行而不是 Promise.all：D1 每次调用只有有限的并发连接，
+    // 而且并发推送更容易触发 Bark 的频率限制。
+    for(const plugin of plugins){
+      try{ await runDigest(env,{plugin}) }catch(e){ console.warn("digest-failed "+plugin+" "+String(e&&e.message)) }
+    }
+  })());
 }};`;
 
 const script = BOILER.replace("@@PAYLOAD@@", b64).replace("@@DIRS@@", JSON.stringify(dirs));

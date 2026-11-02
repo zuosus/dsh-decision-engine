@@ -17,6 +17,8 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+const PLUGIN = "dsh-decision-engine";
+
 import {
   DEFAULT_ENDPOINT,
   STATE_FILE,
@@ -139,6 +141,7 @@ test("decideKind 真值表", () => {
 
 test("buildPayload 只包含允许的字段，且没有自由文本位", () => {
   const payload = buildPayload({
+    pluginId: PLUGIN,
     installId: "8dec1da9-8712-4b12-8323-2957c13bf391",
     kind: "heartbeat",
     version: "1.0.0",
@@ -148,7 +151,10 @@ test("buildPayload 只包含允许的字段，且没有自由文本位", () => {
     decisions: 42,
   });
   const keys = Object.keys(payload).sort();
-  assert.deepEqual(keys, ["arch", "d", "id", "k", "os", "v", "ver"]);
+  // `p` = 插件标识。多插件共存靠它区分，因此它必须在允许列表里，
+  // 而不是被当作「多余字段」删掉。
+  assert.deepEqual(keys, ["arch", "d", "id", "k", "os", "p", "v", "ver"]);
+  assert.equal(payload.p, PLUGIN);
   assert.equal(payload.v, 1);
   assert.equal(payload.d, 42);
   // host 为空串时整字段省略（不猜、不伪造）。
@@ -208,6 +214,7 @@ test("默认档位是 daily——否则已装用户第二天不再上报，DAU �
     // 不传 level，走构造器的默认值。
     const { impl, calls } = stubFetch();
     const first = new TelemetryReporter({
+      pluginId: PLUGIN,
       dir, fetchImpl: impl, clock: () => Date.parse("2026-11-02T02:00:00Z"),
     });
     assert.equal(first.level, "daily", "构造器默认档位必须是 daily");
@@ -216,6 +223,7 @@ test("默认档位是 daily——否则已装用户第二天不再上报，DAU �
 
     // 关键：次日仍要上报。这是 DAU 能否存在的前提。
     const nextDay = new TelemetryReporter({
+      pluginId: PLUGIN,
       dir, fetchImpl: impl, clock: () => Date.parse("2026-11-03T02:00:00Z"),
     });
     const r = await nextDay.start({ version: "1.0.0", decisions: 5 });
@@ -228,7 +236,7 @@ test("默认档位是 daily——否则已装用户第二天不再上报，DAU �
 test("档位 off 时绝不联网、绝不读文件", async () => {
   await withTempDir(async (dir) => {
     const { impl, calls } = forbiddenFetch();
-    const reporter = new TelemetryReporter({ dir, level: "off", fetchImpl: impl });
+    const reporter = new TelemetryReporter({ pluginId: PLUGIN, dir, level: "off", fetchImpl: impl });
 
     // 让 statePath 指向一个真实存在的文件：如果它被读了，说明 off 没挡住。
     await writeFile(join(dir, STATE_FILE), serializeState({ installId: newInstallId(), firstRunAt: 1 }), "utf8");
@@ -246,7 +254,7 @@ test("首次运行发 install，同一天再启动不再发", async () => {
   await withTempDir(async (dir) => {
     const { impl, calls } = stubFetch();
     const clock = () => Date.parse("2026-11-02T02:00:00Z");
-    const reporter = new TelemetryReporter({ dir, level: "daily", fetchImpl: impl, clock });
+    const reporter = new TelemetryReporter({ pluginId: PLUGIN, dir, level: "daily", fetchImpl: impl, clock });
 
     const first = await reporter.start({ version: "1.0.0", platform: "darwin", arch: "arm64", decisions: 7 });
     assert.equal(first.sent, true);
@@ -266,6 +274,7 @@ test("首次运行发 install，同一天再启动不再发", async () => {
 
     // 次日：发 heartbeat。
     const nextDay = new TelemetryReporter({
+      pluginId: PLUGIN,
       dir, level: "daily", fetchImpl: impl, clock: () => Date.parse("2026-11-03T02:00:00Z"),
     });
     const third = await nextDay.start({ version: "1.0.0", decisions: 12 });
@@ -280,6 +289,7 @@ test("安装 id 跨升级稳定；删掉状态文件后换新 id", async () => {
   await withTempDir(async (dir) => {
     const { impl, calls } = stubFetch();
     const reporter = new TelemetryReporter({
+      pluginId: PLUGIN,
       dir, level: "daily", fetchImpl: impl, clock: () => Date.parse("2026-11-02T02:00:00Z"),
     });
     await reporter.start({ version: "0.9.1" });
@@ -290,6 +300,7 @@ test("安装 id 跨升级稳定；删掉状态文件后换新 id", async () => {
 
     // 升级后（版本变了，id 与首个版本都不变）。
     const upgraded = new TelemetryReporter({
+      pluginId: PLUGIN,
       dir, level: "daily", fetchImpl: impl, clock: () => Date.parse("2026-11-03T02:00:00Z"),
     });
     await upgraded.start({ version: "1.0.0" });
@@ -301,6 +312,7 @@ test("安装 id 跨升级稳定；删掉状态文件后换新 id", async () => {
     // 用户删掉状态文件 = 换一个新身份（隐私承诺：可随时重置）。
     await rm(join(dir, STATE_FILE));
     const fresh = new TelemetryReporter({
+      pluginId: PLUGIN,
       dir, level: "daily", fetchImpl: impl, clock: () => Date.parse("2026-11-04T02:00:00Z"),
     });
     const again = await fresh.start({ version: "1.0.0" });
@@ -312,7 +324,7 @@ test("安装 id 跨升级稳定；删掉状态文件后换新 id", async () => {
 test("install 档只报首次，之后永不再报", async () => {
   await withTempDir(async (dir) => {
     const { impl, calls } = stubFetch();
-    const make = (ms) => new TelemetryReporter({ dir, level: "install", fetchImpl: impl, clock: () => ms });
+    const make = (ms) => new TelemetryReporter({ pluginId: PLUGIN, dir, level: "install", fetchImpl: impl, clock: () => ms });
     assert.equal((await make(Date.parse("2026-11-02T02:00:00Z")).start({ version: "1.0.0" })).kind, "install");
     assert.equal(calls().length, 1);
     for (const day of ["2026-11-03", "2026-11-10", "2026-12-01"]) {
@@ -329,6 +341,7 @@ test("发送失败不抛错，且当天不再重试", async () => {
       throw new Error("offline");
     };
     const reporter = new TelemetryReporter({
+      pluginId: PLUGIN,
       dir, level: "daily", fetchImpl: failing, clock: () => Date.parse("2026-11-02T02:00:00Z"),
     });
     const result = await reporter.start({ version: "1.0.0" });
@@ -362,6 +375,7 @@ test("连续失败到阈值后彻底降级，不再尝试", async () => {
       throw new Error("offline");
     };
     const reporter = new TelemetryReporter({
+      pluginId: PLUGIN,
       dir, level: "daily", fetchImpl: failing, clock: () => Date.parse("2026-11-02T02:00:00Z"),
     });
     await reporter.start({ version: "1.0.0" });
@@ -372,6 +386,7 @@ test("连续失败到阈值后彻底降级，不再尝试", async () => {
 
     // 降级之后，次日也不再尝试。
     const next = new TelemetryReporter({
+      pluginId: PLUGIN,
       dir, level: "daily", fetchImpl: failing, clock: () => Date.parse("2026-11-03T02:00:00Z"),
     });
     const r = await next.start({ version: "1.0.0" });
@@ -384,6 +399,7 @@ test("自定义端点生效；状态文件是合法 JSON 且权限收敛", async
   await withTempDir(async (dir) => {
     const { impl, calls } = stubFetch();
     const reporter = new TelemetryReporter({
+      pluginId: PLUGIN,
       dir,
       level: "daily",
       endpoint: "https://example.com/collect",
@@ -406,6 +422,7 @@ test("状态文件损坏后重新上报，而不是静默死掉", async () => {
     await writeFile(join(dir, STATE_FILE), "{ this is not json", "utf8");
     const { impl, calls } = stubFetch();
     const reporter = new TelemetryReporter({
+      pluginId: PLUGIN,
       dir, level: "daily", fetchImpl: impl, clock: () => Date.parse("2026-11-02T02:00:00Z"),
     });
     const result = await reporter.start({ version: "1.0.0" });
