@@ -1,6 +1,6 @@
 {
   "name": "dsh-decision-engine",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "dsh-decision-engine: a cheap judgement layer for DeepSeek Harness — a small decision model answers structured questions before the main model acts, so calls can be allowed, escalated, rerouted to a cheaper model, or skipped. All eight decision points (tool authorization, model routing, delegation, compaction, turn continuation, retrieval, skill pick, COT translation) are implemented and individually switchable. Works against any service exposing a decision endpoint: built-in presets (system one, bamboonode, SiliconFlow, Silicon Flow) or a custom base URL.",
   "icon": "./icon.svg",
   "type": "module",
