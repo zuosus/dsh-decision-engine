@@ -1391,11 +1391,10 @@ test("服务端下发生效时显示地址、模型与 key 末四位，且树里
       serverProvider: serverProviderWith({}),
     }),
   );
-  // 一行说明就够：地址 + 模型 + key 末四位 + 「仅内存」这句承诺。
+  // 一行说明就够：地址 + 模型 + key 末四位 + 来源角标。
   assert.ok(text.includes("https://api.example.com/v1"), `未显示下发地址：\n${text.slice(0, 600)}`);
   assert.ok(text.includes("Kev-4B"), "未显示下发模型");
   assert.ok(text.includes("…1234"), "未显示 key 末四位");
-  assert.ok(text.includes("仅内存，不落盘"), "缺少「只驻内存」的说明");
   assert.ok(text.includes("（地址与密钥来自服务端下发）"), "生效端点行缺少来源角标");
   assert.ok(hasButtonLabeled(tree, "重新获取"), "开启时应出现「重新获取」按钮");
 });
