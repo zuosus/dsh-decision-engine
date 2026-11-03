@@ -60,10 +60,63 @@ Windows 上形如 `C:\Users\<name>\.dsh\`）。解析顺序与宿主一致：显
 | `config.yml` | 配置（可从 [config.example.yml](config.example.yml) 拷贝；实际以配置页写入为准） |
 | `telemetry.jsonl` | 决策流水账，给人读 / `tail` 排查 |
 | `stats.jsonl` | 按 provider × model 的 token 与耗时，供「统计与对比」页读取 |
+| `decisions.jsonl` | 决策明细（含会话归属与决策内容），供「决策历史」标签页读取；到 8 MB 轮转 |
 | `analytics.json` | 匿名统计的本地状态（安装 id + 上次上报日期），可随时删除以重置身份 |
 | `~/.dsh/.credentials.yaml` 的 `refs:` 段 | API key 的默认存放处（见下） |
 
 配置里可能有明文 key，因此 `config.yml` 权限保持 `600`。
+
+## 决策历史 / The Decisions tab
+
+开启后，会话的标签栏会在「对话」「轨迹」之后多出一个 **决策历史** 标签页，
+按时间顺序列出**当前会话**里经本插件做出的每一次决策：时间、决策点、
+provider、model、裁决、耗时，以及是否命中缓存 / 降级。点任意一行展开，
+能看到这次决策的完整现场——发给决策模型的 `state` 与 `questions`，以及
+它回来的 `answers` 和本地算出的 `scores`。
+
+**列表滚动时表头（时间 / 决策点 / …）保持冻结**，记录多了也看得到列名。
+**每一列表头都可点排序**（再点切换升降序；默认按时间升序）。
+
+With the feature on, each session gains a **Decisions** tab right after
+Chat and Trajectory. It lists every decision this plugin made in *that* session,
+in time order — decision point, provider, model, verdict, latency, cache/degrade
+flags — and expanding a row reveals the full context sent to the decision model,
+the questions, its answers, and the locally computed scores.
+
+**默认开启**，可在配置页关掉（`decisionsTabEnabled`）：
+
+Default **on**; turn it off on the config page (`decisionsTabEnabled`):
+
+```yaml
+# 配置页上只有这一个开关（关掉后不写任何明细文件，标签页也消失）
+decisionsTabEnabled: true
+
+# 以下是高级档位，配置页上没有开关，需要时手改 config.yml：
+decisionsCapture: true           # false = 只存元数据，不保存任何会话正文
+decisionsMaxContentChars: 4000   # 单条内容上限
+decisionsMaxBytes: 8388608       # 明细文件体积上限（到顶轮转，只留一代）
+```
+
+**隐私边界 / Privacy**：明细只写本机 `decisions.jsonl`，**不发网络请求**，
+也**不进匿名统计**。写盘前会做一层密钥兜底替换（`sk-…`、`Bearer …`、
+JSON 里的 `apiKey`/`token` 字段），单条内容超 4000 字符时按
+「工具参数 → 对话摘要 → 整个 state」依次裁剪。关掉开关时**完全不写这个
+文件**——不是「写了藏起来」。
+
+The detail file never leaves the machine and is never part of anonymous
+telemetry. Secrets matching common key shapes are masked before the line hits
+disk, and oversized content is trimmed in a fixed order. Turning the feature
+off writes nothing at all.
+
+**为什么单独一个文件**：`telemetry.jsonl` 是给人 `tail` 的结论流水账，
+平均每行几百字节，而且被历史回填消费；把会话正文与完整现场塞进去会让它
+膨胀十几倍，同时破坏「好读」和「回填口径」两件事。所以明细另立
+`decisions.jsonl`，各管一件事。
+
+> 有一个已知取舍：**思维链翻译**这个决策点在使用免费通道（google / bing）
+> 时拿不到会话 id，因此那些记录「不可归属」，不会出现在任何会话的决策
+> 历史里。为它编造一个会话 id 会让用户看到不属于自己会话的记录，比缺失
+> 更糟。
 
 ## 匿名使用统计 / Anonymous usage stats
 

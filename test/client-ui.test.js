@@ -1205,3 +1205,49 @@ test("统计：没有裁决数据时不渲染裁决一节（而不是显示一�
     `没有 outcomes 时不该渲染裁决一节，实际：\n${text.slice(0, 1600)}`,
   );
 });
+
+test("决策历史在配置页只有一个开关（不再有「决策内容」子开关）", async () => {
+  // 曾经是「决策历史 + 决策内容」两个开关，表达的是**同一件事**（这个功能
+  // 要不要用），却要求用户先决定「记不记」、再决定「记多细」——而后者根本不是
+  // 日常选择。合成一个之后，第二个不该再出现。
+  //
+  // 「只存元数据、不存内容」的档位没有消失，只是退到 config.yml 的
+  // `decisionsCapture`（与体积/长度上限同级），不再占配置页的位置。
+  //
+  // 判据用行上的 `key`（就是配置键名），而不是文案：文案会随开关状态变化，
+  // 拿文案当判据会漏（第一次就是这么写的，变异测试证明它抓不到）。
+  const { tree } = await render(stateWith({}));
+  const keys = [];
+  const walk = (node) => {
+    if (!node || typeof node !== 'object') return;
+    if (typeof node.props?.key === 'string') keys.push(node.props.key);
+    for (const child of node.children ?? []) walk(child);
+  };
+  walk(tree);
+  assert.equal(
+    keys.filter((key) => key === 'decisionsTabEnabled').length,
+    1,
+    `配置页应恰有一行决策历史，实际：${keys.join(', ')}`,
+  );
+  assert.equal(keys.includes('decisionsCapture'), false, '不该再有第二个子开关');
+});
+
+test("决策历史关闭时仍然只有一行，且提示说明「不写文件」", async () => {
+  // 合并成一行之后，关闭态不该换出第二个控件（比如又冒出一个「保留元数据」），
+  // 也不该只是把开关拨灰——提示要明确回答「关掉会发生什么」。
+  const { tree, text } = await render(stateWith({ decisionsTabEnabled: false }));
+  const keys = [];
+  const walk = (node) => {
+    if (!node || typeof node !== 'object') return;
+    if (typeof node.props?.key === 'string') keys.push(node.props.key);
+    for (const child of node.children ?? []) walk(child);
+  };
+  walk(tree);
+  assert.equal(keys.filter((key) => key === 'decisionsTabEnabled').length, 1, '仍应只有一行');
+  assert.equal(keys.includes('decisionsCapture'), false, '关闭态也不该多出子开关');
+  assert.ok(
+    text.includes('关闭后不写任何明细文件'),
+    `关闭态应说明后果，实际：\n${text.slice(0, 400)}`,
+  );
+});
+
