@@ -208,6 +208,8 @@ check("规范化幂等", plugin.normalizeEndpoint(plugin.normalizeEndpoint("http
 // 少一个 schema 键，用户在设置页切到 custom 就会得到一次静默失效。
 const providerKeys = [
   "provider",
+  // 服务端下发开关（DEC-030）：它不在 schema 里，设置页那个开关拨了也没处存。
+  "serverProvider",
   "baseUrl",
   "customBaseUrl",
   "customEndpointStyle",
@@ -302,6 +304,71 @@ for (const id of ["siliconflow", "siliconflow-intl"]) {
 // custom 缺地址时必须判为不可用，而不是给出一个猜出来的地址。
 const brokenCustom = plugin.resolveProvider({ ...defaults, provider: "custom", customBaseUrl: "" });
 check("custom 缺 base URL 时 valid=false", brokenCustom.valid === false, `实际 ${brokenCustom.valid}`);
+
+// ---- 服务端下发（DEC-030）------------------------------------------------
+//
+// 这一节校验的是「下发值真的能接管 provider 解析」，而不只是新文件被 import 了。
+// 三个要点各一条：接管后的身份（id/label/source）、下发的 model 不被本地设置
+// 覆盖、以及 memoryKey 的优先级——最后一条最重要，因为「下发的地址 + 本地的
+// key」这种半桌组合必然 401，而守卫是 fail-open 的，症状是「静默没反应」。
+const serverResolved = plugin.resolveProvider(defaults, {
+  server: { baseUrl: "https://api.example.com/v1", model: "Kev-4B", endpointStyle: "systemone" },
+});
+check(
+  "下发值接管 provider 解析（id=server）",
+  serverResolved.id === "server" && serverResolved.source === "server" && serverResolved.valid === true,
+  `实际 ${serverResolved.id} / ${serverResolved.source} / ${String(serverResolved.valid)}`,
+);
+check(
+  "下发值拼出 systemone 端点与候选",
+  serverResolved.endpoint.endsWith("/systemone") && serverResolved.candidates.length > 0,
+  `实际 ${serverResolved.endpoint} / ${serverResolved.candidates.length} 个候选`,
+);
+check(
+  "下发的 model 原样生效（不被本地 model 覆盖）",
+  serverResolved.model === "Kev-4B",
+  `实际 ${serverResolved.model}`,
+);
+// 下发模型留空 = 省略 model 字段（服务端回填默认），不是回落到本地某个默认名。
+check(
+  "下发 model 留空时保持空串（= 不发送 model 字段）",
+  plugin.resolveProvider(defaults, { server: { baseUrl: "https://api.example.com/v1", model: "" } }).model === "",
+  "空串语义被改写",
+);
+check(
+  "下发 base URL 非法时 valid=false 且带中文原因",
+  plugin.resolveProvider(defaults, { server: { baseUrl: "ftp://x.dev", model: "" } }).valid === false
+    && typeof plugin.resolveProvider(defaults, { server: { baseUrl: "ftp://x.dev", model: "" } }).error === "string",
+  "非法下发地址没有被拒绝",
+);
+// 不传 server 时必须与旧签名逐字一致（升级不能改变既有行为）。
+check(
+  "不传 server 时解析结果与旧签名一致",
+  JSON.stringify(plugin.resolveProvider(defaults)) === JSON.stringify(plugin.resolveProvider(defaults, {})),
+  "带空 options 的结果与不带时不同",
+);
+// memoryKey 最高优先级：它必须盖过显式 key、凭据文件与环境变量。
+const serverProvider = plugin.resolveProvider(defaults, {
+  server: { baseUrl: "https://api.example.com/v1", model: "" },
+});
+const withAllSources = plugin.resolveKeyFor(serverProvider, {
+  memoryKey: "sk-from-server",
+  credentialReader: () => "sk-from-credentials",
+  env: { TYPESAFE_API_KEY: "sk-from-env" },
+});
+check(
+  "memoryKey 优先于凭据文件与环境变量",
+  withAllSources === "sk-from-server",
+  `实际 ${withAllSources}`,
+);
+check(
+  "memoryKey 为空串时退回既有来源",
+  plugin.resolveKeyFor(
+    plugin.resolveProvider({ ...defaults, systemoneApiKey: "sk-explicit" }),
+    { memoryKey: "", credentialReader: () => "sk-from-credentials" },
+  ) === "sk-explicit",
+  "空 memoryKey 没有退回既有优先级链",
+);
 
 // 落盘前的校验函数必须真的拦住非法输入。
 const rejected = plugin.validateProviderPatch({ provider: "custom", customBaseUrl: "ftp://x.dev" }, defaults);
