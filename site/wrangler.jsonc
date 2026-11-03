@@ -1,5 +1,10 @@
 // dsh-worker 的 Wrangler 配置。
 //
+// 故意不写 account_id：Workers Builds 部署的是后台里已绑定本仓库的 Worker，
+// 账号在连接时就已确定，配置里不需要（官方 C3 模板也不带这个字段）；
+// 本地跑 deploy / d1 migrations --remote 时，wrangler 会用 `wrangler login`
+// 的 OAuth 凭证解析账号。没必要把账号 ID 提交进仓库。
+//
 // Workers Builds 的 Root directory 设为 `site`，所以这个文件必须在 site/ 下，
 // 且 `main` 相对于本文件解析。
 //
@@ -20,7 +25,6 @@
   "build": {
     "command": "node build.mjs && node make-bundle.mjs"
   },
-  "account_id": "48bfaa4269a02470c2d6529a56b05f23",
   "compatibility_date": "2026-10-26",
   "compatibility_flags": ["nodejs_compat"],
   // 匿名使用统计（DEC-020）：心跳写进 D1，每天 UTC 10:42 汇总后推 Bark。

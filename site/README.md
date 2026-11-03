@@ -12,7 +12,7 @@ site/
   deploy.mjs           上传 Worker 并挂自定义域名（手动路径，见下）
   package.json         site/ 自己的包：build / deploy 脚本 + wrangler 依赖
   package-lock.json    锁 wrangler 版本，保证 CI 与本地一致
-  wrangler.jsonc       Workers Builds 的配置（name / main / account_id）
+  wrangler.jsonc       Workers Builds 的配置（name / main / build.command）
   lib/partials.mjs     共用 HTML 片段（导航含主题按钮 + 语言按钮）
   lib/content-en.mjs   英文版页面内容（章节 id 与中文版一致）
   assets/style.css     样式（light/dark 双调色板）
