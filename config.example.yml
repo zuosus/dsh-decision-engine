@@ -5,7 +5,7 @@
 #   cp config.example.yml ~/.dsh/dsh-decision-engine/config.yml
 #
 # 文件名是 config.yml：本插件早已不是「只服务 startlux 一家」的插件，
-# 而是任意决策服务（system one / bamboonode / 硅基流动 / custom）的决策层，
+# 而是任意决策服务（system one / 硅基流动 / custom）的决策层，
 # 名字里再挂某个服务商只会误导。旧名 startlux.yml 仍会被自动读取并迁移，
 # 升级不需要重新填 key。
 #
@@ -42,9 +42,8 @@ mode: shadow
 # ============================================================================
 # 服务提供方（provider）
 # ============================================================================
-# 五选一：
-#   bamboonode        内置。StartLux 官方端点 POST /v1/decisions，本插件的原有默认值。
-#   systemone         内置。任意 System One 协议服务 POST /v1/systemone，
+# 四选一：
+#   systemone         内置（默认）。任意 System One 协议服务 POST /v1/systemone，
 #                     默认指向 TypeSafe（https://api.typesafe.ai/v1）。
 #   siliconflow       内置。硅基流动（国内站）https://api.siliconflow.cn/v1/systemone
 #   siliconflow-intl  内置。Silicon Flow 国际站 https://api.siliconflow.com/v1/systemone
@@ -52,30 +51,24 @@ mode: shadow
 #   custom            自己填 base URL，接任何提供决策端点的服务
 #                     （自建 llama.cpp / vLLM、企业网关、第三方中转）。
 #
-# 不写这一项 = bamboonode，老配置行为完全不变。
+# 不写这一项 = systemone。
+# 老配置里写的 provider: bamboonode 会在加载时自动迁移到 custom（DEC-031）：
+# 用户自己填过的地址 / 模型 / key 原样搬过去；若从未改过默认地址，插件不替
+# 用户挑新地址，而是在设置页明确报「不可用」，等用户自己填。
 #
 # siliconflow / siliconflow-intl 是「开箱即用」的：地址、路径、默认模型都已
 # 预置，只要粘一个 API key 就能跑（详见下方「密钥」一节）。
-provider: bamboonode
+provider: systemone
 
-# ---- bamboonode 预设的地址覆盖 ----------------------------------------------
-# 只在 provider=bamboonode 时生效。老版本唯一的地址字段，继续支持，因此
-# 已有的自建 bamboonode 兼容地址不会因为升级被改回官方。
-# 接受多种写法（等价）：
-#   https://api.bamboonode.dev/v1
-#   https://api.bamboonode.dev/v1/decisions
-#   api.bamboonode.dev/v1          （会补 https://）
-# 末尾斜杠会被规范化，不会拼出 //decisions 或 /v1/v1/decisions。
-baseUrl: https://api.bamboonode.dev/v1
+# ---- 遗留字段（DEC-031：bamboonode 预设已移除）------------------------------
+# 下面的 baseUrl / model 是 bamboonode 时代的历史字段，解析点不再读取，
+# 只在加载时作为迁移来源被搬到 custom 的对应字段。新配置不要再写它们。
+#
+# baseUrl: https://your-own-gateway.example.com/v1   （会搬到 customBaseUrl）
+# model: your-model-name                             （会搬到 customModel）
 
 # ---- 模型（按 provider 分开存，切换时互不覆盖）------------------------------
-# bamboonode 的模型。留空 = 自动（由服务端选当前默认决策模型），
-# 这样服务商将来换模型名时，本配置不会失效。
-model:
-
 # system one 的模型。留空 = 服务端默认（jev-latest）。
-# 与上面的 model 分开：否则切到 system one 会把 bamboonode 的模型名发过去，
-# 得到 400 model not served。
 systemoneModel: ""
 
 # 硅基流动 / Silicon Flow 的模型。**留空 = 用预设默认 Kev-4B**——
@@ -100,7 +93,6 @@ siliconflowIntlModel: ""
 #
 # 路径后缀由**服务商**决定，不由模型决定。实测（2026-10-25，真实端点）：
 #   SiliconFlow 的 Kev-4B   /v1/decisions → 404，/v1/systemone → 200
-#   bamboonode 的决策模型     两条路径都 200
 #
 # 所以首选路径返回 404 时，插件会自动改用另一条再试一次，并记住试通的那条。
 # 只有 404 会触发换路径：400（模型/内容不合法）与 401（key 不对）都跟路径无关。
@@ -122,12 +114,13 @@ customHeaders: ""
 # 每个 provider 有**自己的** key 名，各自保存各自的 key：
 #
 #   system one          -> TYPESAFE_API_KEY
-#   bamboonode          -> BAMBOO_API_KEY
 #   硅基流动（国内站）   -> SILICONFLOW_API_KEY
 #   Silicon Flow 国际站 -> SILICONFLOW_INTL_API_KEY
 #   custom              -> customApiKeyEnv（没填时用 DECISION_ENGINE_CUSTOM_KEY）
 #
-# 五者互不覆盖，可以同时配好；切换 provider 不会串用别人的 key。
+# 四者互不覆盖，可以同时配好；切换 provider 不会串用别人的 key。
+# 老安装存在 BAMBOO_API_KEY 名下的 key 不受影响：迁移到 custom 后，密钥变量名
+# 会自动指回它（DEC-031）。
 # 两个 SiliconFlow 站点是**两套账号**，key 不通用，因此各占一格——
 # 共用一格的话，切过去就会拿错 key 得到 401，而用户看不出是拿错了还是失效了。
 
@@ -138,7 +131,6 @@ keyStorage: credentials
 
 # 变量名可以覆盖（留空即用上面的默认名）：
 # systemoneApiKeyEnv: ""
-# bamboonodeApiKeyEnv: ""
 # siliconflowApiKeyEnv: ""
 # siliconflowIntlApiKeyEnv: ""
 # customApiKeyEnv: ""
@@ -147,17 +139,36 @@ keyStorage: credentials
 # 若 keyStorage=credentials，在设置界面粘贴的 key 会写进 .credentials.yaml，
 # 不会落到这里；只有 keyStorage=config 时下面这些字段才会被写入。
 # systemoneApiKey: ""
-# bamboonodeApiKey: ""
 # siliconflowApiKey: ""
 # siliconflowIntlApiKey: ""
 # customApiKey: ""
 
 # .credentials.yaml 里的形态就是 refs 段：
 #   refs:
-#     BAMBOO_API_KEY: sk-你的key
 #     TYPESAFE_API_KEY: sk-另一个key
 #     SILICONFLOW_API_KEY: sk-国内站的key
 #     SILICONFLOW_INTL_API_KEY: sk-国际站的key
+
+# ============================================================================
+# 服务端下发（DEC-030）
+# ============================================================================
+# 打开后，地址 / 模型 / key 由内置端点 https://dsh.zuos.us/api/provider-config
+# 下发并直接使用。**地址不可配置**是刻意的：它就是「开箱即用」的全部含义。
+#
+# 关于下发的那把 key（重要）：
+#   - 只保存在插件进程的内存里，**永不落盘**：不写本文件、不写 .credentials.yaml、
+#     不进遥测 / 统计 / 决策明细；任何接口只回传末四位（…abcd）。
+#   - 进程退出即消失，下次启动重新获取（下发带 TTL，默认 600 秒）。
+#   - 关掉这个开关会立刻把它从内存里清掉。
+#
+# 服务端不可用时（404 / 403 / 超时 / 载荷非法 / 已过期且刷新失败）**静默回落到下面的
+# 本地配置**（包括你自己填的 key），配置页显示一行原因，不会中断守卫。
+#
+# 手动填 key 的整套流程完全不变；服务端生效期间本地值只是暂不生效，关掉开关立刻恢复。
+#
+# 可选门禁：Worker 侧若设了 PROVIDER_CONFIG_TOKEN，本机要能读到同一把令牌——
+# 优先环境变量 DECISION_SERVER_CONFIG_TOKEN，其次下方 .credentials.yaml 的 refs 段同名键。
+serverProvider: false
 
 # 超时预算（毫秒）。超时自动降级放行，连续失败进入冷却。
 timeoutMs: 8000

@@ -7,12 +7,12 @@
  *
  * 覆盖的验收项（对应需求里的 6 条）：
  *
- *   1. 内置 `system one` 选项可用
- *   2. 内置 `bamboonode` 选项保持原有行为
+ *   1. 内置 `system one` 选项可用（也是默认 provider）
+ *   2. bamboonode 预设已移除；老配置经 migrateLegacyProviderConfig 迁到 custom
  *   3. custom base URL 可用
  *   4. 非法 URL 被拒绝
  *   5. 末尾斜杠与端点拼接不重复、不缺失
- *   6. 请求构造不再硬编码 bamboonode.dev
+ *   6. 请求构造不再硬编码服务商域名
  *
  * 运行：node --test test/
  */
@@ -25,16 +25,25 @@ import {
   DEFAULT_PROVIDER,
   DEFAULT_THINK_MODE,
   ENDPOINT_STYLES,
+  LEGACY_API_KEY_ENV,
+  LEGACY_PRESET_BASE_URL,
+  LEGACY_PRESET_DEFAULT_MODEL,
+  LEGACY_PROVIDER_ID,
   PROVIDER_IDS,
   PROVIDER_PRESETS,
+  SERVER_PROVIDER_ID,
+  SERVER_PROVIDER_LABEL,
+  SERVER_PROVIDER_LABEL_EN,
   THINK_MODES,
   buildEndpoint,
   buildHeaders,
   buildRequestBody,
+  migrateLegacyProviderConfig,
   normalizeBaseUrl,
   normalizeThinkMode,
   parseCustomHeaders,
   providerCatalog,
+  resolveKey,
   resolveKeyFor,
   resolveProvider,
   validateBaseUrl,
@@ -42,11 +51,14 @@ import {
 
 // ---------------------------------------------------------------- 1. 内置预设
 
-test("内置预设齐备：systemone / bamboonode / siliconflow / siliconflow-intl / custom", () => {
-  assert.deepEqual([...PROVIDER_IDS], ["systemone", "bamboonode", "siliconflow", "siliconflow-intl", "custom"]);
+test("内置预设齐备：systemone / siliconflow / siliconflow-intl / custom，且不再有 bamboonode", () => {
+  assert.deepEqual([...PROVIDER_IDS], ["systemone", "siliconflow", "siliconflow-intl", "custom"]);
   for (const id of PROVIDER_IDS) {
     assert.ok(PROVIDER_PRESETS[id] !== undefined, `缺少预设 ${id}`);
   }
+  // bamboonode 必须从预设表里消失：它还在的话，设置界面就仍能选中一个
+  // 已下线的服务（DEC-031）。
+  assert.equal(PROVIDER_PRESETS.bamboonode, undefined);
   // 自定义 provider 的「默认值」由用户给，因此地址为空是刻意设计。
   assert.equal(PROVIDER_PRESETS.custom.baseUrl, "");
 });
@@ -74,40 +86,37 @@ test("三个 provider 各有各的 key 名，互不共用", () => {
   // 这是本插件的核心约定：一个 key 名对应一个服务。
   // 共用一格会导致「切 provider 就得重填」，也无法同时保存多套凭据。
   const base = resolveProvider({ provider: "systemone" });
-  const bamboo = resolveProvider({ provider: "bamboonode" });
+  const sf = resolveProvider({ provider: "siliconflow" });
   const custom = resolveProvider({ provider: "custom", customBaseUrl: "https://x.dev/v1" });
 
   assert.equal(base.apiKeyEnv, "TYPESAFE_API_KEY");
-  assert.equal(bamboo.apiKeyEnv, "BAMBOO_API_KEY");
+  assert.equal(sf.apiKeyEnv, "SILICONFLOW_API_KEY");
   assert.equal(custom.apiKeyEnv, "DECISION_ENGINE_CUSTOM_KEY");
 
   // 三者必须互不相同——相同就等于又合并回一个了。
-  const names = [base.apiKeyEnv, bamboo.apiKeyEnv, custom.apiKeyEnv];
+  const names = [base.apiKeyEnv, sf.apiKeyEnv, custom.apiKeyEnv];
   assert.equal(new Set(names).size, 3, `key 名出现重复：${names.join(", ")}`);
 });
 
 test("用户自定义的密钥变量名会被尊重", () => {
-  const custom = resolveProvider({ provider: "bamboonode", apiKeyEnv: "MY_OWN_KEY" });
-  assert.equal(custom.apiKeyEnv, "MY_OWN_KEY");
+  const provider = resolveProvider({ provider: "systemone", systemoneApiKeyEnv: "MY_OWN_KEY" });
+  assert.equal(provider.apiKeyEnv, "MY_OWN_KEY");
 
-  // 专用覆盖字段优先级最高
-  const explicit = resolveProvider({
-    provider: "bamboonode",
-    bamboonodeApiKeyEnv: "EXPLICIT_KEY",
-    apiKeyEnv: "MY_OWN_KEY",
-  });
-  assert.equal(explicit.apiKeyEnv, "EXPLICIT_KEY");
+  // 历史字段 apiKeyEnv 不参与预设解析（那是 bamboonode 遗留语义，
+  // 由迁移函数单独处理），不能盖掉预设自己的变量名。
+  const ignoresLegacy = resolveProvider({ provider: "systemone", apiKeyEnv: "MY_OWN_KEY" });
+  assert.equal(ignoresLegacy.apiKeyEnv, "TYPESAFE_API_KEY");
 });
 
-test("system one 不会被历史字段 apiKeyEnv 带走 bamboonode 的 key", () => {
-  // 真实运行配置里 apiKeyEnv 默认就是 DECISION_ENGINE_KEY。若它参与 system one 的
-  // 解析，切到 system one 会拿 bamboonode 的 key 去请求，得到 401。
+test("system one 不会被历史字段 apiKeyEnv 带走旧服务的 key；迁移时再尊重它", () => {
+  // 真实运行配置里 apiKeyEnv 是 bamboonode 时代的历史字段。若它参与 system one
+  // 的解析，切换后会拿旧服务的 key 去请求，得到 401。
   const systemOne = resolveProvider({ provider: "systemone", apiKeyEnv: "DECISION_ENGINE_KEY" });
   assert.equal(systemOne.apiKeyEnv, "TYPESAFE_API_KEY");
 
-  // 但 bamboonode 必须继续尊重 apiKeyEnv（老用户的变量名可能就在这儿）
-  const bamboo = resolveProvider({ provider: "bamboonode", apiKeyEnv: "MY_BAMBOO_KEY" });
-  assert.equal(bamboo.apiKeyEnv, "MY_BAMBOO_KEY");
+  // 尊重语义移进了迁移：用户自定义过的变量名会被搬到 customApiKeyEnv。
+  const migrated = migrateLegacyProviderConfig({ provider: "bamboonode", apiKeyEnv: "MY_BAMBOO_KEY" });
+  assert.equal(migrated.config.customApiKeyEnv, "MY_BAMBOO_KEY");
 });
 
 test("system one 允许用自己的密钥变量名覆盖预设", () => {
@@ -134,7 +143,6 @@ test("providerCatalog 覆盖全部 provider 且带展示信息", () => {
   const fields = catalog.map((item) => item.keyField);
   assert.deepEqual(fields, [
     "systemoneApiKey",
-    "bamboonodeApiKey",
     "siliconflowApiKey",
     "siliconflowIntlApiKey",
     "customApiKey",
@@ -145,7 +153,6 @@ test("providerCatalog 覆盖全部 provider 且带展示信息", () => {
   const modelFields = catalog.map((item) => item.modelField);
   assert.deepEqual(modelFields, [
     "systemoneModel",
-    "model",
     "siliconflowModel",
     "siliconflowIntlModel",
     "customModel",
@@ -153,49 +160,98 @@ test("providerCatalog 覆盖全部 provider 且带展示信息", () => {
   assert.equal(new Set(modelFields).size, modelFields.length);
 });
 
-// ------------------------------------------------- 2. bamboonode 行为不变
+// --------------------------------------- 2. 默认值与 bamboonode 迁移（DEC-031）
 
-test("默认 provider 仍是 bamboonode（老配置没有 provider 键也不变行为）", () => {
-  assert.equal(DEFAULT_PROVIDER, "bamboonode");
+test("默认 provider 是 systemone，端点落在 /v1/systemone", () => {
+  assert.equal(DEFAULT_PROVIDER, "systemone");
   const provider = resolveProvider({});
-  assert.equal(provider.id, "bamboonode");
-  assert.equal(provider.endpoint, "https://api.bamboonode.dev/v1/decisions");
-  assert.equal(provider.apiKeyEnv, "BAMBOO_API_KEY");
-  // 上一版短暂用过 DECISION_ENGINE_KEY，仍作回退读取，老安装不必重填
-  assert.deepEqual(provider.legacyApiKeyEnvs, ["DECISION_ENGINE_KEY"]);
+  assert.equal(provider.id, "systemone");
+  assert.equal(provider.endpoint, "https://api.typesafe.ai/v1/systemone");
+  assert.equal(provider.apiKeyEnv, "TYPESAFE_API_KEY");
   assert.equal(provider.source, "preset");
 });
 
-test("bamboonode 继续尊重老 baseUrl 覆盖（含完整端点写法）", () => {
-  const full = resolveProvider({ provider: "bamboonode", baseUrl: "https://api.bamboonode.dev/v1/decisions" });
-  assert.equal(full.endpoint, "https://api.bamboonode.dev/v1/decisions");
-  assert.equal(full.source, "legacy");
+test("迁移：老配置里写了 provider: bamboonode 时整体搬到 custom", () => {
+  // 纯函数：不改原对象，返回新配置。
+  const original = {
+    provider: "bamboonode",
+    baseUrl: "https://relay.example.com/v1",
+    model: "m-bamboo",
+    bamboonodeApiKey: "sk-bamboo",
+  };
+  const { config, migratedFrom } = migrateLegacyProviderConfig(original);
+  assert.equal(migratedFrom, "bamboonode");
+  assert.equal(config.provider, "custom");
+  assert.equal(config.customBaseUrl, "https://relay.example.com/v1");
+  assert.equal(config.customModel, "m-bamboo");
+  assert.equal(config.customApiKey, "sk-bamboo");
+  // 入参不被原地修改。
+  assert.equal(original.provider, "bamboonode");
 
-  const selfHosted = resolveProvider({ provider: "bamboonode", baseUrl: "https://relay.example.com/v1" });
-  assert.equal(selfHosted.endpoint, "https://relay.example.com/v1/decisions");
+  // 迁移结果必须能解析出可用的 provider，端点风格保持 bamboonode 时代的
+  // auto（先 decisions 后 systemone，两条都有退路）。
+  const resolved = resolveProvider(config);
+  assert.equal(resolved.id, "custom");
+  assert.equal(resolved.valid, true);
+  assert.equal(resolved.baseUrl, "https://relay.example.com/v1");
 });
 
-test("模型按 provider 分开存：切到 system one 不会带过去 bamboonode 的模型名", () => {
-  // 老配置里 model 是 bamboonode 的模型名；切到 system one 后必须不发送它，
+test("迁移：等于老预设默认的 baseUrl / model 是残留，不搬", () => {
+  // 老版本把预设默认值注入 DEFAULTS，配置里出现默认地址不代表用户选过它；
+  // 搬过去等于让用户继续指向一个已下线的服务。
+  const { config } = migrateLegacyProviderConfig({
+    provider: "bamboonode",
+    baseUrl: LEGACY_PRESET_BASE_URL,
+    model: LEGACY_PRESET_DEFAULT_MODEL,
+  });
+  assert.equal(config.customBaseUrl, "");
+  assert.equal(config.customModel, "");
+  // 拒绝静默迁移的落点：provider 变成 base URL 为空的 custom，
+  // 解析结果明确「不可用」，设置页把原因亮给用户，而不是悄悄换地址。
+  const resolved = resolveProvider(config);
+  assert.equal(resolved.id, "custom");
+  assert.equal(resolved.valid, false);
+  assert.ok(resolved.error.includes("base URL"), `错误信息不明确：${resolved.error}`);
+});
+
+test("迁移：key 与变量名跟过去；全是默认残留时落回老默认变量名", () => {
+  // 历史共享字段 apiKey（老版本唯一的 key 字段）也要接住。
+  const viaShared = migrateLegacyProviderConfig({ provider: "bamboonode", apiKey: "legacy-shared" });
+  assert.equal(viaShared.config.customApiKey, "legacy-shared");
+
+  const viaField = migrateLegacyProviderConfig({ provider: "bamboonode", bamboonodeApiKey: "sk-1" });
+  assert.equal(viaField.config.customApiKey, "sk-1");
+
+  // 用户自定义过变量名（apiKeyEnv 或专用字段）要尊重，专用字段优先。
+  const customEnv = migrateLegacyProviderConfig({
+    provider: "bamboonode",
+    bamboonodeApiKeyEnv: "EXPLICIT_KEY",
+    apiKeyEnv: "MY_OWN_KEY",
+  });
+  assert.equal(customEnv.config.customApiKeyEnv, "EXPLICIT_KEY");
+
+  // 全是默认残留：落回 BAMBOO_API_KEY，key 存在环境变量/凭据文件旧默认名下
+  // 的用户升级后不断供。
+  const residue = migrateLegacyProviderConfig({ provider: "bamboonode" });
+  assert.equal(residue.config.customApiKeyEnv, LEGACY_API_KEY_ENV);
+});
+
+test("迁移：非 bamboonode 配置原样通过", () => {
+  const cfg = { provider: "systemone", systemoneApiKey: "sk-ts" };
+  const { config, migratedFrom } = migrateLegacyProviderConfig(cfg);
+  assert.equal(migratedFrom, "");
+  assert.equal(config, cfg, "未迁移时必须返回入参本身，不能复制");
+});
+
+test("模型按 provider 分开存：切到 system one 不会带过去旧模型名", () => {
+  // 老配置里 model 是旧服务的模型名；切到 system one 后必须不发送它，
   // 否则 TypeSafe 会回 400 `model not served`——「一切换就坏」的典型来源。
-  const cfg = { provider: "systemone", model: "startlux-decision-27b-autothink" };
+  const cfg = { provider: "systemone", model: LEGACY_PRESET_DEFAULT_MODEL };
   const systemOne = resolveProvider(cfg);
-  assert.equal(systemOne.model, "", "system one 不应读到 bamboonode 的 model 字段");
+  assert.equal(systemOne.model, "", "system one 不应读到遗留的 model 字段");
 
   const withOwn = resolveProvider({ ...cfg, systemoneModel: "jev-1.14" });
   assert.equal(withOwn.model, "jev-1.14");
-
-  // 反向：systemoneModel 也不能污染 bamboonode
-  const bamboo = resolveProvider({ provider: "bamboonode", systemoneModel: "jev-1.14", model: "m-bamboo" });
-  assert.equal(bamboo.model, "m-bamboo");
-});
-
-test("bamboonode 的模型默认值与历史常量一致", () => {
-  // 老版本 DEFAULTS.model 就是这个名字，升级后不能悄悄换掉。
-  assert.equal(PROVIDER_PRESETS.bamboonode.defaultModel, "startlux-decision-27b-autothink");
-  const provider = resolveProvider({ provider: "bamboonode", model: "" });
-  // 模型留空 = 自动，必须原样保留空串（发送时省略字段）。
-  assert.equal(provider.model, "");
 });
 
 // ------------------------------------------------------ 3. custom 可用
@@ -283,7 +339,7 @@ test("每个 provider 只读自己的 key，不会串到别人的", () => {
   // 同时配好三个 key 时，各 provider 必须拿到与自己地址匹配的那一个。
   const credentials = {
     TYPESAFE_API_KEY: "key-typesafe",
-    BAMBOO_API_KEY: "key-bamboo",
+    SILICONFLOW_API_KEY: "key-sf",
     DECISION_ENGINE_CUSTOM_KEY: "key-custom",
   };
   const reader = (ref) => credentials[ref];
@@ -291,54 +347,35 @@ test("每个 provider 只读自己的 key，不会串到别人的", () => {
   const cfg = { provider: "systemone" };
   assert.equal(resolveKeyFor(resolveProvider(cfg), { credentialReader: reader, env: {} }), "key-typesafe");
 
-  cfg.provider = "bamboonode";
-  assert.equal(resolveKeyFor(resolveProvider(cfg), { credentialReader: reader, env: {} }), "key-bamboo");
+  cfg.provider = "siliconflow";
+  assert.equal(resolveKeyFor(resolveProvider(cfg), { credentialReader: reader, env: {} }), "key-sf");
 
   cfg.provider = "custom";
   cfg.customBaseUrl = "https://gw.example.com/v1";
   assert.equal(resolveKeyFor(resolveProvider(cfg), { credentialReader: reader, env: {} }), "key-custom");
 });
 
-test("bamboonode 仍能从上一版的 DECISION_ENGINE_KEY 读回 key", () => {
-  // 上一版把 bamboonode 的 key 名改成了 DECISION_ENGINE_KEY；
-  // 现在改回按 provider 分开，但那个位置的 key 不能就此读不到。
-  const provider = resolveProvider({ provider: "bamboonode" });
-  const key = resolveKeyFor(provider, {
-    credentialReader: (ref) => (ref === "DECISION_ENGINE_KEY" ? "legacy-key" : undefined),
-    env: {},
-  });
-  assert.equal(key, "legacy-key");
-
-  // 新名（BAMBOO_API_KEY）有值时优先，避免用户改了新 key 却仍读旧值
-  const both = resolveKeyFor(provider, {
-    credentialReader: (ref) =>
-      ref === "BAMBOO_API_KEY" ? "new-key" : ref === "DECISION_ENGINE_KEY" ? "legacy-key" : undefined,
-    env: {},
-  });
-  assert.equal(both, "new-key");
-});
-
 test("显式 key 也按 provider 分开，不会串用别人的明文", () => {
-  // 明文 key 同理：切到 system one 时不能拿 bamboonode 的那一份去请求。
-  const bamboo = resolveProvider({ provider: "bamboonode", bamboonodeApiKey: "key-bamboo", systemoneApiKey: "key-ts" });
-  assert.equal(bamboo.explicitKey, "key-bamboo");
+  // 明文 key 同理：切到 system one 时不能拿别家的那一份去请求。
+  const sf = resolveProvider({ provider: "siliconflow", siliconflowApiKey: "key-sf", systemoneApiKey: "key-ts" });
+  assert.equal(sf.explicitKey, "key-sf");
 
-  const systemOne = resolveProvider({ provider: "systemone", bamboonodeApiKey: "key-bamboo", systemoneApiKey: "key-ts" });
+  const systemOne = resolveProvider({ provider: "systemone", siliconflowApiKey: "key-sf", systemoneApiKey: "key-ts" });
   assert.equal(systemOne.explicitKey, "key-ts");
 
   // 只有对方那一格有值时，当前 provider 必须视为「没有显式 key」
-  const onlyBamboo = resolveProvider({ provider: "systemone", bamboonodeApiKey: "key-bamboo" });
-  assert.equal(onlyBamboo.explicitKey, "");
+  const onlySf = resolveProvider({ provider: "systemone", siliconflowApiKey: "key-sf" });
+  assert.equal(onlySf.explicitKey, "");
 });
 
-test("历史共享字段 apiKey 只对 bamboonode 生效", () => {
-  // 老 yml 里只有 apiKey 这一个 key 字段；升级后它应当只被 bamboonode 读到，
-  // 否则切换到 system one 会误用 bamboonode 的 key。
-  const bamboo = resolveProvider({ provider: "bamboonode", apiKey: "legacy-shared" });
-  assert.equal(bamboo.explicitKey, "legacy-shared");
-
+test("历史共享字段 apiKey 不再参与解析，只由迁移接走", () => {
+  // 老 yml 里只有 apiKey 这一个 key 字段。解析点不再读它（那是已移除预设的
+  // 遗留语义），否则切换 provider 会误用旧服务的 key；迁移负责搬到 customApiKey。
   const systemOne = resolveProvider({ provider: "systemone", apiKey: "legacy-shared" });
   assert.equal(systemOne.explicitKey, "");
+
+  const migrated = migrateLegacyProviderConfig({ provider: "bamboonode", apiKey: "legacy-shared" });
+  assert.equal(migrated.config.customApiKey, "legacy-shared");
 });
 
 test("切换 provider 不影响其它 provider 已保存的值", () => {
@@ -467,7 +504,7 @@ test("请求体对所有 provider 形状一致；模型为空时省略字段", (
   const body2 = buildRequestBody(withModel, { state: {}, questions: {} });
   assert.equal(body2.model, "m1");
   // 实测端点对 "model": "" 回 400，因此留空必须整段省略。
-  const empty = resolveProvider({ provider: "bamboonode", model: "" });
+  const empty = resolveProvider({ provider: "systemone" });
   assert.equal("model" in buildRequestBody(empty, { state: {}, questions: {} }), false);
 });
 
@@ -534,7 +571,7 @@ test("思考模式只有三档，默认 never", () => {
 test("三个合法思考模式原样透传到 think_mode", () => {
   const questions = { q: { type: "noul", instructions: "x" } };
   for (const mode of THINK_MODES) {
-    const provider = resolveProvider({ provider: "bamboonode", thinkMode: mode });
+    const provider = resolveProvider({ provider: "systemone", thinkMode: mode });
     assert.equal(provider.thinkMode, mode);
     const body = buildRequestBody(provider, { state: {}, questions, thinkMode: mode });
     assert.equal(body.think_mode, mode);
@@ -551,14 +588,14 @@ test("非法思考模式归一为 never，不会原样发给服务端", () => {
 test("空串不会被透传为 think_mode（?? 兜不住空串的老 bug）", () => {
   const questions = { q: { type: "noul", instructions: "x" } };
   // parseConfigText 对 `thinkMode:` 会解析成 ""，这是「显式空值」的既定语义。
-  const provider = resolveProvider({ provider: "bamboonode", thinkMode: "" });
+  const provider = resolveProvider({ provider: "systemone", thinkMode: "" });
   const body = buildRequestBody(provider, { state: {}, questions, thinkMode: "" });
   assert.equal(body.think_mode, "never");
   assert.notEqual(body.think_mode, "");
 });
 
 test("thinkMode 缺失时回退 never", () => {
-  const provider = resolveProvider({ provider: "bamboonode" });
+  const provider = resolveProvider({ provider: "systemone" });
   assert.equal(provider.thinkMode, "never");
 });
 
@@ -624,17 +661,15 @@ test("siliconflow-intl 是另一套账号：地址、key、字段名都不与国
 });
 
 test("requiresModel 只对声明了的预设生效：其它 provider 留空仍省略字段", () => {
-  // bamboonode / system one 省略 model 时服务端会回填默认模型，保留省略语义
+  // system one 省略 model 时服务端会回填默认模型，保留省略语义
   // 才能在服务商给模型改名时配置不失效（见 config.example.yml）。
-  assert.equal(resolveProvider({ provider: "bamboonode", model: "" }).model, "");
   assert.equal(resolveProvider({ provider: "systemone" }).model, "");
   assert.equal("model" in buildRequestBody(resolveProvider({ provider: "systemone" }), { state: {}, questions: {} }), false);
 });
 
-test("五个 provider 各读各的 key，同时配好也互不串用", () => {
+test("四个 provider 各读各的 key，同时配好也互不串用", () => {
   const credentials = {
     TYPESAFE_API_KEY: "key-typesafe",
-    BAMBOO_API_KEY: "key-bamboo",
     SILICONFLOW_API_KEY: "key-sf-cn",
     SILICONFLOW_INTL_API_KEY: "key-sf-intl",
     DECISION_ENGINE_CUSTOM_KEY: "key-custom",
@@ -642,7 +677,6 @@ test("五个 provider 各读各的 key，同时配好也互不串用", () => {
   const reader = (ref) => credentials[ref];
   for (const [id, expected] of [
     ["systemone", "key-typesafe"],
-    ["bamboonode", "key-bamboo"],
     ["siliconflow", "key-sf-cn"],
     ["siliconflow-intl", "key-sf-intl"],
     ["custom", "key-custom"],

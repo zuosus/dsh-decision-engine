@@ -32,6 +32,48 @@ site/
 无尾斜杠的目录访问返回 308。每页都有 `canonical` + 双向 `hreflang`，
 导航右侧是「中文 / English」按钮与太阳/月亮主题按钮。
 
+### API 路由
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| POST | `/api/e` | 匿名使用统计心跳（DEC-020/021）：校验后 202，写入放进 `ctx.waitUntil` |
+| POST | `/api/digest` | 手工触发日报（需 `x-digest-key` 与 `DIGEST_KEY` 一致；未配 secret 即 404） |
+| GET | `/api/provider-config` | 下发插件的 provider 配置（DEC-030，见下节） |
+
+其余 `/api/*` 一律 404。
+
+## 服务端下发 provider 配置（DEC-030）
+
+`GET /api/provider-config` 把 baseUrl / model / endpointStyle / **key** 交给插件。
+插件的「跟随服务端下发」开关（默认关）打开后直接用它们，**key 只驻留插件进程内存、
+不落盘**（不写 config.yml / .credentials.yaml / 遥测 / 统计 / 决策明细）。
+地址写死在插件里（`lib/server-config.js` 的 `SERVER_CONFIG_ENDPOINT`），服务端不提供自定义路径。
+
+环境变量（全部部署时填，**不要写进仓库**）：
+
+```sh
+npx wrangler secret put PROVIDER_BASE_URL           # 下发给插件的基础地址
+npx wrangler secret put PROVIDER_MODEL              # 下发的模型名；留空 = 不发送 model 字段
+npx wrangler secret put PROVIDER_ENDPOINT_STYLE     # auto（默认）/ decisions / systemone
+npx wrangler secret put PROVIDER_KEY                # 下游服务商的 api-key（必须 secret）
+npx wrangler secret put PROVIDER_CONFIG_TTL_SECONDS # 可选，夹取 60..3600，默认 600
+npx wrangler secret put PROVIDER_CONFIG_TOKEN       # 可选门禁
+```
+
+行为：
+
+- **未配置 `PROVIDER_KEY` → 整条路由 404**（功能等同不存在，不会意外成为公开接口）；
+- 设了 `PROVIDER_CONFIG_TOKEN` → 请求必须带 `x-provider-token` 且完全相等，否则 403。
+  插件从环境变量 `DECISION_SERVER_CONFIG_TOKEN`，或 `.credentials.yaml` 的 `refs:` 同名键读取；
+- `endpointStyle` 只认 `decisions` / `systemone`，其余（含拼错、空值）一律回落 `auto`；
+  严格校验留给客户端——服务端将来加新风格，老客户端不会因此直接报错；
+- 响应沿用 `json()` 的 `cache-control: no-store`；key 只在响应体里出现一次，
+  **不写 D1、不打日志**；
+- 无迁移、无新增绑定。
+
+> ⚠️ **这不是鉴权**：任何知道地址的人 GET 一次就能拿到 api-key。请只放**专用、低额度**
+> 的 key；轮换靠改 Worker secret（插件在 TTL 内自动跟上，不需要发版）。
+
 ## 主题
 
 默认跟随系统 `prefers-color-scheme`；手动切换后记住在 `localStorage`

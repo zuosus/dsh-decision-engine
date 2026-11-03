@@ -32,7 +32,7 @@ import { resolveDshHome } from "../lib/home-paths.js";
  * 读取真实运行配置（`config.yml`），让验收打的就是用户实际在用的端点。
  *
  * 支持环境变量覆盖，便于在不改用户配置的前提下对别的服务做验收：
- *   DECISION_ENGINE_PROVIDER    systemone | bamboonode | custom
+ *   DECISION_ENGINE_PROVIDER    systemone | siliconflow | siliconflow-intl | custom
  *   DECISION_ENGINE_BASE_URL    覆盖 base URL（custom 直接生效）
  *   DECISION_ENGINE_API_KEY     显式 key（优先级最高）
  *

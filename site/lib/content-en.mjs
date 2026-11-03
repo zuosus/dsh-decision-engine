@@ -169,13 +169,6 @@ const providersTableEn = table(
       "server default",
     ],
     [
-      "<code>bamboonode</code>",
-      "<code>https://api.bamboonode.dev/v1</code>",
-      "<code>/v1/decisions</code>",
-      "<code>BAMBOO_API_KEY</code>",
-      "server default",
-    ],
-    [
       "<code>siliconflow</code><br><span class='badge gray'>CN site</span>",
       "<code>https://api.siliconflow.cn/v1</code>",
       "<code>/v1/systemone</code>",
@@ -294,9 +287,11 @@ export const pluginBodyEn = `
     There is exactly one request shape —
     <code>{ model, state, questions, think_mode }</code> in,
     <code>answers</code> out. Built-in presets for <code>system one</code>,
-    <code>bamboonode</code>, <code>siliconflow</code> and
+    <code>siliconflow</code> and
     <code>siliconflow-intl</code>, or any <code>custom</code> base URL
-    (self-hosted llama.cpp / vLLM, corporate gateways, relays). Which service
+    (self-hosted llama.cpp / vLLM, corporate gateways, relays). The retired
+    <code>bamboonode</code> preset is auto-migrated to <code>custom</code> on load.
+    Which service
     provides the endpoint, which path it sits on and whose key it uses are the
     provider's business and never touch the per-point parsing logic.
   </div>
@@ -469,9 +464,7 @@ export const pluginBodyEn = `
   ${table(
     ["Provider", "Model", "<code>/v1/decisions</code>", "<code>/v1/systemone</code>"],
     [
-      ["SiliconFlow", "<code>Kev-4B</code>", "<strong>404 Not Found</strong>", '<span class="badge green">200 ✓</span>'],
-      ["bamboonode", "<code>startlux-decision-27b-autothink</code>", '<span class="badge green">200 ✓</span>', '<span class="badge green">200 ✓</span>'],
-    ]
+      ["SiliconFlow", "<code>Kev-4B</code>", "<strong>404 Not Found</strong>", '<span class="badge green">200 ✓</span>'],    ]
   )}
   <p style="color:var(--fg-dim)">
     So <code>Kev-4B</code> is not "a model that only speaks /systemone" —

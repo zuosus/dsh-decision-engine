@@ -27,6 +27,19 @@
   },
   "compatibility_date": "2026-10-26",
   "compatibility_flags": ["nodejs_compat"],
+  // 服务端下发 provider 配置（DEC-030）。路由 `GET /api/provider-config` 把下面
+  // 这几个值交给插件；**值本身绝不写进本文件**——全部用 `wrangler secret put`
+  // 在部署时填（即使不是敏感信息也走 secret，避免把线上地址与模型名固化进仓库）：
+  //
+  //   PROVIDER_BASE_URL            下发给插件的基础地址（缺失即整条路由 404）
+  //   PROVIDER_MODEL               下发的模型名；留空 = 客户端不发送 model 字段
+  //   PROVIDER_ENDPOINT_STYLE      auto（默认）/ decisions / systemone，其它值回落 auto
+  //   PROVIDER_KEY                 **下游服务商的 api-key**：必须 secret，绝不入库
+  //   PROVIDER_CONFIG_TOKEN        可选门禁：设了就要求请求头 x-provider-token 一致
+  //   PROVIDER_CONFIG_TTL_SECONDS  可选：下发 TTL（夹取 60..3600，默认 600）
+  //
+  // 这个端点是**公开领取** api-key，不是鉴权：请只放专用低额度 key，轮换靠改 secret
+  // （插件在 TTL 内自动跟上，不需要发版）。未配置 PROVIDER_KEY 时路由返回 404。
   // 匿名使用统计（DEC-020）：心跳写进 D1，每天 UTC 10:42 汇总后推 Bark。
   //
   // 注意两件事：

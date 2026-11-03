@@ -317,6 +317,34 @@ test("隐私：bundle 不得读取客户端 IP，也不得出现密钥类字段�
   }
 });
 
+// ---------- 服务端下发 provider 配置（DEC-030）----------
+
+test("下发端点：路由排在 /api/* 兜底之前，且值全部来自 Worker secret", async () => {
+  const source = await readFile(BUNDLER, "utf8");
+  const routeAt = source.indexOf('u.pathname==="/api/provider-config"');
+  const catchAllAt = source.indexOf('u.pathname.indexOf("/api/")===0');
+  assert.ok(routeAt >= 0, "模板应包含 /api/provider-config 路由");
+  // 顺序不是风格问题：兜底 404 在前，这条路由永远不会被走到。
+  assert.ok(catchAllAt > routeAt, "/api/provider-config 必须排在 /api/* 兜底 404 之前");
+
+  const block = source.slice(routeAt, catchAllAt);
+  assert.ok(block.includes('allow:"GET"'), "非 GET 必须 405");
+  assert.ok(block.includes("env.PROVIDER_KEY"), "下发的 key 必须来自 Worker secret");
+  assert.ok(block.includes("env.PROVIDER_BASE_URL"), "下发的地址必须来自 Worker secret");
+  assert.ok(block.includes("env.PROVIDER_CONFIG_TOKEN"), "可选门禁 secret 名不对");
+  assert.ok(block.includes("x-provider-token"), "可选门禁请求头名不对");
+  // 未配置就 404：路由等同不存在，不会变成一个公开的 key 领取点。
+  assert.ok(block.includes("not-configured"), "未配 PROVIDER_KEY 时应返回 not-configured");
+  assert.ok(block.includes('err:"forbidden"'), "门禁不匹配应返回 forbidden");
+  for (const field of ["baseUrl", "model", "endpointStyle", "key", "ttlSeconds"]) {
+    assert.ok(block.includes(`${field}:`), `下发载荷应含 ${field}`);
+  }
+  // 这条路由不写库：没有 SQL，也就没有任何把 key 落进 D1 的路径。
+  assert.ok(!/\b(INSERT|SELECT|UPDATE|DELETE)\b/.test(block), "下发路由不应包含 SQL");
+  // key 只准出现在响应体里：不许交给任何 console。
+  assert.ok(!/console\.[a-zA-Z]+\([^)]*PROVIDER_KEY/.test(source), "不得把下发的 key 打进日志");
+});
+
 // ---------- 多插件维度（DEC-021）----------
 
 test("每张明细表都把 plugin 并入主键，且按 plugin 建索引", async () => {

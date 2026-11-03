@@ -298,6 +298,28 @@ export default{fetch:async(rq,env,ctx)=>{
     const result=await runDigest(env,{force:true,plugin});
     return json({ok:true,plugin:plugin,result:result||null},200);
   }
+  // 下发插件要用的 provider 配置（DEC-030）：baseUrl / model / endpointStyle / key。
+  // 与 /api/digest 同款开关：没配 Worker Secret 'PROVIDER_KEY' 时路由等同不存在
+  // （404），不会变成公开接口。这个 key 只在响应体里出现一次——不写 D1、不打日志。
+  //
+  // 可选门禁：设了 'PROVIDER_CONFIG_TOKEN' 才校验请求头 'x-provider-token'，
+  // 必须与之完全相等；没设则任何人可领取（配合低额度专用 key 轮换使用）。
+  if(u.pathname==="/api/provider-config"){
+    if(rq.method!=="GET")return new Response("Method Not Allowed",{status:405,headers:{allow:"GET"}});
+    const cfgKey=(env&&typeof env.PROVIDER_KEY==="string"?env.PROVIDER_KEY:"").trim();
+    if(cfgKey.length===0)return json({ok:false,err:"not-configured"},404);
+    const gate=(env&&typeof env.PROVIDER_CONFIG_TOKEN==="string"?env.PROVIDER_CONFIG_TOKEN:"").trim();
+    if(gate.length!==0&&(rq.headers.get("x-provider-token")||"")!==gate)return json({ok:false,err:"forbidden"},403);
+    const baseUrl=(env&&typeof env.PROVIDER_BASE_URL==="string"?env.PROVIDER_BASE_URL:"").trim();
+    const model=(env&&typeof env.PROVIDER_MODEL==="string"?env.PROVIDER_MODEL:"").trim();
+    const styleRaw=(env&&typeof env.PROVIDER_ENDPOINT_STYLE==="string"?env.PROVIDER_ENDPOINT_STYLE:"").trim().toLowerCase();
+    // 宽松归一：只认 decisions / systemone，其余（含拼错、空值）一律回落 auto。
+    // 严格校验留给客户端——服务端加新风格时，老客户端不会因此直接报错。
+    const style=(styleRaw==="decisions"||styleRaw==="systemone")?styleRaw:"auto";
+    const ttlRaw=Number(env&&env.PROVIDER_CONFIG_TTL_SECONDS);
+    const ttl=Number.isFinite(ttlRaw)?Math.min(3600,Math.max(60,Math.trunc(ttlRaw))):600;
+    return json({ok:true,v:1,baseUrl:baseUrl,model:model,endpointStyle:style,key:cfgKey,ttlSeconds:ttl},200);
+  }
   if(u.pathname.indexOf("/api/")===0){
     return json({ok:false,err:"not-found"},404);
   }

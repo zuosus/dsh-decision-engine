@@ -10,7 +10,7 @@
  *
  * 覆盖：
  *   - 状态未加载时的兜底渲染（不空白，且不自带服务商地址）
- *   - provider 下拉包含全部预设，默认 bamboonode
+ *   - provider 下拉包含全部预设，默认 systemone
  *   - 选 custom 时出现必填字段与本地校验提示
  *   - 服务端拒绝的原因会显示在界面上
  */
@@ -211,15 +211,15 @@ function stateWith(over) {
   return {
     enabled: true,
     mode: "shadow",
-    provider: "bamboonode",
-    providerLabel: "bamboonode",
+    provider: "systemone",
+    providerLabel: "system one",
     providerValid: true,
     providerError: "",
     // provider 清单直接用服务端那张表（providers.js 的 providerCatalog()）：
     // 界面按它渲染，测试若另抄一份就测不出「清单漏了新预设」。
     providerCatalog: providerCatalog(),
-    baseUrl: "https://api.bamboonode.dev/v1/decisions",
-    rawBaseUrl: "https://api.bamboonode.dev/v1",
+    baseUrl: "https://api.typesafe.ai/v1/systemone",
+    rawBaseUrl: "https://api.typesafe.ai/v1",
     customBaseUrl: "",
     customEndpointStyle: "auto",
     customModel: "",
@@ -232,7 +232,6 @@ function stateWith(over) {
     // 服务端按「字段名」下发的模型原值（见 lib/providers.js 的 modelField）。
     // 这张表决定「模型框写回 config.yml 的哪一格」，新增预设时前端自动跟上。
     rawModels: {
-      model: "",
       systemoneModel: "",
       siliconflowModel: "",
       siliconflowIntlModel: "",
@@ -242,16 +241,20 @@ function stateWith(over) {
     timeoutMs: 8000,
     keyConfigured: true,
     keyHint: "…abcd",
-    keyEnvName: "BAMBOO_API_KEY",
+    keyEnvName: "TYPESAFE_API_KEY",
     keyStorage: "credentials",
     keyStatus: {
       systemone: {
-        configured: false, hint: "", refName: "TYPESAFE_API_KEY", keyField: "systemoneApiKey",
+        configured: true, hint: "…abcd", refName: "TYPESAFE_API_KEY", keyField: "systemoneApiKey",
+        source: "credentials", sourceLabel: "~/.dsh/.credentials.yaml 的 TYPESAFE_API_KEY",
+      },
+      siliconflow: {
+        configured: false, hint: "", refName: "SILICONFLOW_API_KEY", keyField: "siliconflowApiKey",
         source: "none", sourceLabel: "未配置",
       },
-      bamboonode: {
-        configured: true, hint: "…abcd", refName: "BAMBOO_API_KEY", keyField: "bamboonodeApiKey",
-        source: "credentials", sourceLabel: "~/.dsh/.credentials.yaml 的 BAMBOO_API_KEY",
+      "siliconflow-intl": {
+        configured: false, hint: "", refName: "SILICONFLOW_INTL_API_KEY", keyField: "siliconflowIntlApiKey",
+        source: "none", sourceLabel: "未配置",
       },
       custom: {
         configured: false, hint: "", refName: "DECISION_ENGINE_CUSTOM_KEY", keyField: "customApiKey",
@@ -259,6 +262,24 @@ function stateWith(over) {
       },
     },
     stats: { requests: 0, cached: 0 },
+    // 服务端下发（DEC-030）的默认形态：关闭、尚未取过。字段名与
+    // `/status` 的冻结契约一致（服务端由 lib/index.js 的 statusPayload 给出）。
+    serverProvider: {
+      enabled: false,
+      active: false,
+      endpoint: "https://dsh.zuos.us/api/provider-config",
+      label: "服务端下发",
+      status: "idle",
+      usable: false,
+      error: "",
+      keyHint: "",
+      baseUrl: "",
+      model: "",
+      endpointStyle: "auto",
+      fetchedAt: 0,
+      expiresAt: 0,
+      expired: false,
+    },
     ...over,
   };
 }
@@ -352,6 +373,26 @@ function findNode(node, predicate) {
 }
 
 /**
+ * 按**所在行的标题**取那一行的开关。
+ *
+ * 不能用「渲染树里第一个 toggle」定位：每加一个开关行，位置就会指到别人，
+ * 而测试仍然会绿——它测的已经不是它名字里说的那个开关了（DEC-030 加
+ * 「跟随服务端下发」时就发生过：那条「拨一下开关就发出 PUT」实际拨的是
+ * 新增的那个）。行结构固定为 `div > [标题/说明, 控件]`（见 client.js 的 row()），
+ * 因此按标题找到行节点，再取行内的 button[aria-pressed] 即可。
+ */
+function toggleOfRow(node, title) {
+  const row = findNode(node, (item) => {
+    const children = Array.isArray(item?.children) ? item.children : [];
+    const head = children[0];
+    const texts = head === undefined || head === null ? [] : collectText(head);
+    return texts.includes(title);
+  });
+  if (row === null) return undefined;
+  return findNode(row.children, (item) => item.type === "button" && item.props["aria-pressed"] !== undefined);
+}
+
+/**
  * 拦截 fetch：记录每次调用，并回一份「服务端原样接受」的响应。
  *
  * @returns `{ calls, restore }`：calls 是 `{ url, init }` 列表。
@@ -379,8 +420,10 @@ function stubFetch() {
 
 test("拨一下开关就发出 PUT /config，不需要点保存", async () => {
   const { tree } = await render(stateWith({ enabled: false }));
-  const toggleButton = findNode(tree, (node) => node.type === "button" && node.props["aria-pressed"] !== undefined);
-  assert.ok(toggleButton !== undefined && toggleButton !== null, "没有找到开关按钮");
+  // 按**所在行的标题**定位，而不是「渲染树里第一个 toggle」——后者在新增
+  // 开关行之后会静默指到别处，测试照样绿但已经名不副实。
+  const toggleButton = toggleOfRow(tree, "启用守卫");
+  assert.ok(toggleButton !== undefined && toggleButton !== null, "没有找到「启用守卫」开关按钮");
   assert.equal(toggleButton.props["aria-pressed"], false, "开关初始应为关闭");
 
   const stub = stubFetch();
@@ -401,7 +444,7 @@ test("拨一下开关就发出 PUT /config，不需要点保存", async () => {
 });
 
 test("粘贴 API Key 后失焦即提交，且只带 key 那一格", async () => {
-  const { tree } = await render(stateWith({ provider: "bamboonode" }));
+  const { tree } = await render(stateWith({ provider: "systemone" }));
   const keyInput = findNode(tree, (node) => node.type === "input" && node.props.type === "password");
   assert.ok(keyInput !== undefined && keyInput !== null, "没有找到 API Key 输入框");
 
@@ -421,9 +464,9 @@ test("粘贴 API Key 后失焦即提交，且只带 key 那一格", async () => 
   const configCall = stub.calls.find((item) => item.url.endsWith("/api/decision-engine/config"));
   assert.ok(configCall !== undefined, "失焦后应自动提交密钥");
   const body = JSON.parse(configCall.init.body);
-  assert.equal(body.bamboonodeApiKey, "sk-test-1234567890", `patch 应带上密钥，实际：${configCall.init.body}`);
+  assert.equal(body.systemoneApiKey, "sk-test-1234567890", `patch 应带上密钥，实际：${configCall.init.body}`);
   // 只写当前 provider 那一格：切 provider 不会把 A 的 key 存到 B 名下。
-  assert.equal(Object.hasOwn(body, "systemoneApiKey"), false, "不该写其它 provider 的 key 字段");
+  assert.equal(Object.hasOwn(body, "siliconflowApiKey"), false, "不该写其它 provider 的 key 字段");
   assert.equal(Object.hasOwn(body, "customApiKey"), false, "不该写其它 provider 的 key 字段");
 });
 
@@ -502,13 +545,13 @@ test("硅基流动：改模型写进它自己那一格，且「留空」被说�
     `模型应写进 ${preset.modelField}，实际：${configCall.init.body}`,
   );
   // 只写当前 provider 的模型格：A 的模型名不能被写进 B 的格子。
-  assert.equal(Object.hasOwn(body, "model"), false, "不该写 bamboonode 的模型字段");
+  assert.equal(Object.hasOwn(body, "model"), false, "不该写遗留的模型字段");
   assert.equal(Object.hasOwn(body, "customModel"), false, "不该写 custom 的模型字段");
 });
 
 test("服务端没给 provider 字段映射时绝不猜格子：宁可延后也不写", async () => {
   // 模拟「status 还没回来」：catalog 为空 → 前端不知道模型与 key 该写哪一格。
-  // 猜一个名字就会把 siliconflow 的 key 存进 bamboonode 的格子——正是
+  // 猜一个名字就会把一家的 key 存进另一家的格子——正是
   // 「填了 key 仍说没配 key」的来源。
   const { tree } = await render(
     stateWith({ provider: "siliconflow", providerCatalog: [] }),
@@ -528,10 +571,10 @@ test("服务端没给 provider 字段映射时绝不猜格子：宁可延后也�
   assert.equal(configCall, undefined, "字段映射缺失时不该发 /config（宁可延后也不猜着写）");
 });
 
-test("provider 下拉包含全部预设，默认 bamboonode", async () => {
+test("provider 下拉包含全部预设，默认 systemone，且不再有 bamboonode", async () => {
   const { controls } = await render(stateWith({}));
-  const providerSelect = controls.find((node) => node.type === "select" && node.props.value === "bamboonode");
-  assert.ok(providerSelect !== undefined, "没有找到 provider 下拉（或当前值不是 bamboonode）");
+  const providerSelect = controls.find((node) => node.type === "select" && node.props.value === "systemone");
+  assert.ok(providerSelect !== undefined, "没有找到 provider 下拉（或当前值不是 systemone）");
   const options = providerSelect.children
     .filter((child) => child !== null && typeof child === "object" && child.type === "option")
     .map((child) => child.props.value);
@@ -633,17 +676,17 @@ test("密钥保存位置有下拉，默认 .credentials.yaml", async () => {
 });
 
 test("每个 provider 显示自己的密钥名，不共用", async () => {
-  const bamboo = await render(stateWith({ provider: "bamboonode", providerLabel: "bamboonode" }));
-  assert.ok(bamboo.text.includes("BAMBOO_API_KEY"), "bamboonode 没显示自己的 key 名");
+  const sf = await render(stateWith({ provider: "siliconflow", providerLabel: "硅基流动", baseUrl: "https://api.siliconflow.cn/v1/systemone" }));
+  assert.ok(sf.text.includes("SILICONFLOW_API_KEY"), "硅基流动没显示自己的 key 名");
 
   const systemOne = await render(
     stateWith({ provider: "systemone", providerLabel: "system one", baseUrl: "https://api.typesafe.ai/v1/systemone" }),
   );
   assert.ok(systemOne.text.includes("TYPESAFE_API_KEY"), "system one 没显示自己的 key 名");
   assert.equal(
-    systemOne.text.includes("BAMBOO_API_KEY"),
+    systemOne.text.includes("SILICONFLOW_API_KEY"),
     false,
-    "system one 界面不应出现 bamboonode 的 key 名",
+    "system one 界面不应出现硅基流动的 key 名",
   );
 });
 
@@ -703,12 +746,12 @@ test("keyStorage=config 时显示配置文件的字段名，不显示凭据变�
       keyStorage: "config",
       keyStatus: {
         systemone: {
-          configured: false, hint: "", refName: "TYPESAFE_API_KEY", keyField: "systemoneApiKey",
-          source: "none", sourceLabel: "未配置",
+          configured: true, hint: "…abcd", refName: "TYPESAFE_API_KEY", keyField: "systemoneApiKey",
+          source: "config", sourceLabel: "配置文件 config.yml 的 systemoneApiKey",
         },
-        bamboonode: {
-          configured: true, hint: "…abcd", refName: "BAMBOO_API_KEY", keyField: "bamboonodeApiKey",
-          source: "config", sourceLabel: "配置文件 config.yml 的 bamboonodeApiKey",
+        siliconflow: {
+          configured: false, hint: "", refName: "SILICONFLOW_API_KEY", keyField: "siliconflowApiKey",
+          source: "none", sourceLabel: "未配置",
         },
         custom: {
           configured: false, hint: "", refName: "DECISION_ENGINE_CUSTOM_KEY", keyField: "customApiKey",
@@ -718,7 +761,7 @@ test("keyStorage=config 时显示配置文件的字段名，不显示凭据变�
     }),
   );
   assert.ok(
-    text.includes("密钥来源 配置文件 config.yml 的 bamboonodeApiKey"),
+    text.includes("密钥来源 配置文件 config.yml 的 systemoneApiKey"),
     `应显示真实来源（配置字段），实际文案：\n${text.slice(0, 1200)}`,
   );
   // 关键断言：不能把未被读取的凭据变量名当成「密钥来源」展示。
@@ -732,7 +775,7 @@ test("keyStorage=config 时显示配置文件的字段名，不显示凭据变�
 test("凭据文件来源时显示 .credentials.yaml 与变量名", async () => {
   const { text } = await render(stateWith({ keyStorage: "credentials" }));
   assert.ok(
-    text.includes("密钥来源 ~/.dsh/.credentials.yaml 的 BAMBOO_API_KEY"),
+    text.includes("密钥来源 ~/.dsh/.credentials.yaml 的 TYPESAFE_API_KEY"),
     `应显示凭据文件来源，实际：\n${text.slice(0, 1200)}`,
   );
 });
@@ -742,12 +785,12 @@ test("环境变量来源时明确标注是环境变量", async () => {
     stateWith({
       keyStatus: {
         systemone: {
-          configured: false, hint: "", refName: "TYPESAFE_API_KEY", keyField: "systemoneApiKey",
-          source: "none", sourceLabel: "未配置",
+          configured: true, hint: "…abcd", refName: "TYPESAFE_API_KEY", keyField: "systemoneApiKey",
+          source: "env", sourceLabel: "环境变量 TYPESAFE_API_KEY",
         },
-        bamboonode: {
-          configured: true, hint: "…abcd", refName: "BAMBOO_API_KEY", keyField: "bamboonodeApiKey",
-          source: "env", sourceLabel: "环境变量 BAMBOO_API_KEY",
+        siliconflow: {
+          configured: false, hint: "", refName: "SILICONFLOW_API_KEY", keyField: "siliconflowApiKey",
+          source: "none", sourceLabel: "未配置",
         },
         custom: {
           configured: false, hint: "", refName: "DECISION_ENGINE_CUSTOM_KEY", keyField: "customApiKey",
@@ -756,7 +799,7 @@ test("环境变量来源时明确标注是环境变量", async () => {
       },
     }),
   );
-  assert.ok(text.includes("密钥来源 环境变量 BAMBOO_API_KEY"), `实际：\n${text.slice(0, 1200)}`);
+  assert.ok(text.includes("密钥来源 环境变量 TYPESAFE_API_KEY"), `实际：\n${text.slice(0, 1200)}`);
 });
 
 test("未配置时来源显示「未配置」并标注未读到", async () => {
@@ -767,8 +810,8 @@ test("未配置时来源显示「未配置」并标注未读到", async () => {
           configured: false, hint: "", refName: "TYPESAFE_API_KEY", keyField: "systemoneApiKey",
           source: "none", sourceLabel: "未配置",
         },
-        bamboonode: {
-          configured: false, hint: "", refName: "BAMBOO_API_KEY", keyField: "bamboonodeApiKey",
+        siliconflow: {
+          configured: false, hint: "", refName: "SILICONFLOW_API_KEY", keyField: "siliconflowApiKey",
           source: "none", sourceLabel: "未配置",
         },
         custom: {
@@ -790,9 +833,9 @@ test("存到插件配置时提示的是字段名，而不是凭据变量名", as
           configured: false, hint: "", refName: "TYPESAFE_API_KEY", keyField: "systemoneApiKey",
           source: "none", sourceLabel: "未配置",
         },
-        bamboonode: {
-          configured: true, hint: "…abcd", refName: "BAMBOO_API_KEY", keyField: "bamboonodeApiKey",
-          source: "config", sourceLabel: "配置文件 config.yml 的 bamboonodeApiKey",
+        siliconflow: {
+          configured: false, hint: "", refName: "SILICONFLOW_API_KEY", keyField: "siliconflowApiKey",
+          source: "none", sourceLabel: "未配置",
         },
         custom: {
           configured: false, hint: "", refName: "DECISION_ENGINE_CUSTOM_KEY", keyField: "customApiKey",
@@ -802,13 +845,13 @@ test("存到插件配置时提示的是字段名，而不是凭据变量名", as
     }),
   );
   assert.ok(
-    text.includes("存到插件配置 config.yml 的 bamboonodeApiKey"),
+    text.includes("存到插件配置 config.yml 的 systemoneApiKey"),
     `保存目标应说明字段名，实际：\n${text.slice(0, 1200)}`,
   );
   assert.equal(
-    text.includes("存到「插件配置」的 BAMBOO_API_KEY"),
+    text.includes("存到「插件配置」的 TYPESAFE_API_KEY"),
     false,
-    "不应再出现「存到插件配置的 BAMBOO_API_KEY」这种自相矛盾的文案",
+    "不应再出现「存到插件配置的 TYPESAFE_API_KEY」这种自相矛盾的文案",
   );
 });
 
@@ -1253,3 +1296,200 @@ test("决策历史关闭时仍然只有一行，且提示说明「不写文件�
   );
 });
 
+
+test("custom 时模型行移入「自定义 provider」区，自动项改为「不发送 model 字段」", async () => {
+  const { text, tree } = await render(
+    stateWith({
+      provider: "custom",
+      providerLabel: "custom",
+      baseUrl: "",
+      customBaseUrl: "https://gw.example.com/v1",
+    }),
+  );
+  // 位置：模型行必须出现在「自定义 provider」小节里（小节标题之后），
+  // 而不是通用区域——清单来自用户自己的服务，与 Base URL 是一组的。
+  const sectionAt = text.indexOf("自定义 provider");
+  const modelAt = text.indexOf("自动（不发送 model 字段）");
+  assert.ok(sectionAt >= 0, "缺少「自定义 provider」小节");
+  assert.ok(modelAt > sectionAt, "模型选择器应位于自定义 provider 区内");
+  // 文案：custom 没有「服务端默认」可言，自动项必须说清真实语义。
+  // 只看下拉选项本身（页面别处——如底部状态行——会回显状态里的模型字样，不算）。
+  const optionTexts = [];
+  (function collect(node) {
+    if (node === null || node === undefined || typeof node !== "object") return;
+    if (node.type === "option") {
+      optionTexts.push((node.children ?? []).filter((c) => typeof c === "string").join(""));
+    }
+    for (const child of node.children ?? []) collect(child);
+  })(tree);
+  assert.ok(optionTexts.includes("自动（不发送 model 字段）"), "custom 的自动项应说明是省略 model 字段");
+  assert.equal(
+    optionTexts.includes("自动（服务端默认）"),
+    false,
+    "custom 不应出现「服务端默认」的误导文案",
+  );
+});
+
+test("内置预设的模型行留在通用区域，自动项仍是「服务端默认」", async () => {
+  const { text } = await render(stateWith({ provider: "systemone" }));
+  const modelAt = text.indexOf("自动（服务端默认）");
+  const apiKeyAt = text.indexOf("API Key");
+  assert.ok(modelAt >= 0, "缺少模型下拉");
+  assert.ok(apiKeyAt < 0 || modelAt < apiKeyAt, "非 custom 的模型行应留在通用区域（API Key 之前）");
+});
+
+// ------------------------------------------- 跟随服务端下发（DEC-030）
+
+// 这一组测的是「服务端下发的值真的用上了，且没有一次把明文 key 送到界面上」。
+// 前者靠文案断言（界面显示的就是生效值）；后者只能靠**反断言**——
+// 用一个醒目的假 key 铺满所有下发字段，然后确认整棵树里找不到它。
+
+/** 一份「服务端已下发」的 status 片段。 */
+function serverProviderWith(over) {
+  return {
+    enabled: true,
+    active: true,
+    endpoint: "https://dsh.zuos.us/api/provider-config",
+    label: "服务端下发",
+    status: "ready",
+    usable: true,
+    error: "",
+    keyHint: "…1234",
+    baseUrl: "https://api.example.com/v1",
+    model: "Kev-4B",
+    endpointStyle: "systemone",
+    fetchedAt: Date.UTC(2026, 10, 3, 6, 30),
+    expiresAt: Date.UTC(2026, 10, 3, 6, 40),
+    expired: false,
+    ...over,
+  };
+}
+
+test("「跟随服务端下发」开关默认关，且说明用的是本地配置", async () => {
+  // 默认关是产品约束（不是风格）：装了插件的人可能已经在用自己的 key，
+  // 默认开启会把他们悄悄换成服务商的账号，而他们只会看到「key 好像失效了」。
+  const { text, tree } = await render(stateWith({}));
+  assert.ok(text.includes("跟随服务端下发"), `缺少开关行：\n${text.slice(0, 600)}`);
+  const toggle = toggleOfRow(tree, "跟随服务端下发");
+  assert.ok(toggle !== undefined, "没有找到「跟随服务端下发」的开关控件");
+  assert.equal(toggle.props["aria-pressed"], false, "开关默认必须是关");
+  assert.ok(
+    text.includes("关闭：使用下方的本地配置（与现在完全一致）"),
+    `关闭时未说明回落行为：\n${text.slice(0, 600)}`,
+  );
+  // 关着的时候不该有「重新获取」——它此时什么也不会改变。
+  assert.equal(hasButtonLabeled(tree, "重新获取"), false, "关闭时不该出现「重新获取」按钮");
+});
+
+test("服务端下发生效时显示地址、模型与 key 末四位，且树里没有明文 key", async () => {
+  const { text, tree } = await render(
+    stateWith({
+      // 生效值来自服务端：面板的这两行本来就取「生效值」。
+      baseUrl: "https://api.example.com/v1/systemone",
+      model: "Kev-4B",
+      keyHint: "…1234",
+      serverProvider: serverProviderWith({}),
+    }),
+  );
+  // 一行说明就够：地址 + 模型 + key 末四位 + 「仅内存」这句承诺。
+  assert.ok(text.includes("https://api.example.com/v1"), `未显示下发地址：\n${text.slice(0, 600)}`);
+  assert.ok(text.includes("Kev-4B"), "未显示下发模型");
+  assert.ok(text.includes("…1234"), "未显示 key 末四位");
+  assert.ok(text.includes("仅内存，不落盘"), "缺少「只驻内存」的说明");
+  assert.ok(text.includes("（地址与密钥来自服务端下发）"), "生效端点行缺少来源角标");
+  assert.ok(hasButtonLabeled(tree, "重新获取"), "开启时应出现「重新获取」按钮");
+});
+
+test("服务端不可用时说明原因，并明确已回落到本地配置", async () => {
+  // 「静默回落」的代价是用户不知道发生了什么；所以回落本身可以静默，
+  // 但**必须有地方说**——否则一次下发失败会表现成「key 突然不管用了」。
+  const { text } = await render(
+    stateWith({
+      serverProvider: serverProviderWith({
+        active: false,
+        status: "error",
+        usable: false,
+        error: "服务端返回 HTTP 404",
+      }),
+    }),
+  );
+  assert.ok(
+    text.includes("服务端不可用：服务端返回 HTTP 404；已回落到本地手动配置"),
+    `未说明回落与原因：\n${text.slice(0, 700)}`,
+  );
+});
+
+test("下发值过期时额外说明「已过期」", async () => {
+  // 过期与「从没取到」是两件事：前者说明这台机器曾经正常工作过，
+  // 排查方向是网络/服务端；后者更像是从没配对过。文案必须区分。
+  const { text } = await render(
+    stateWith({
+      serverProvider: serverProviderWith({ active: false, status: "error", usable: false, expired: true }),
+    }),
+  );
+  assert.ok(text.includes("（服务端下发的值已过期）"), `未提示过期：\n${text.slice(0, 700)}`);
+});
+
+test("「重新获取」发的是 POST /server-provider，不是又存一次配置", async () => {
+  // 它表达的是「现在就要一份新的下发值」，而不是「保存当前表单」。
+  // 发成 PUT /config 会看起来什么都没变（服务端按缓存决定拉不拉）。
+  const { tree } = await render(stateWith({ serverProvider: serverProviderWith({}) }));
+  const button = findNode(
+    tree,
+    (node) =>
+      node.type === "button" && collectText(node).join("").includes("重新获取"),
+  );
+  assert.ok(button !== null && button !== undefined, "没有找到「重新获取」按钮");
+
+  const stub = stubFetch();
+  try {
+    button.props.onClick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  } finally {
+    stub.restore();
+  }
+  const call = stub.calls.find((item) => item.url.endsWith("/api/decision-engine/server-provider"));
+  assert.ok(call !== undefined, `应 POST /server-provider，实际：${stub.calls.map((c) => c.url).join(", ")}`);
+  assert.equal(call.init.method, "POST", "强制刷新应走 POST");
+});
+
+test("服务端生效时，手动输入 key 与 provider 下拉都还在（手动方案不变）", async () => {
+  // 这条是 DEC-030 的验收核心之一：新功能**不得**以任何方式削弱手工路径。
+  // 不 disable、不隐藏——服务端一旦不可用，用户要靠这些控件自己救场。
+  const { tree } = await render(stateWith({ serverProvider: serverProviderWith({}) }));
+  const keyInput = findNode(tree, (node) => node.type === "input" && node.props.type === "password");
+  assert.ok(keyInput !== null && keyInput !== undefined, "服务端生效时 API Key 输入框被隐藏了");
+  const select = findNode(tree, (node) => node.type === "select" && node.props.value === "systemone");
+  assert.ok(select !== null && select !== undefined, "服务端生效时 provider 下拉消失或不再回显当前值");
+});
+
+test("播开关会 PUT /config 且带上 serverProvider: true", async () => {
+  const { tree } = await render(stateWith({}));
+  const toggle = toggleOfRow(tree, "跟随服务端下发");
+  assert.ok(toggle !== undefined, "没有找到「跟随服务端下发」的开关");
+
+  const stub = stubFetch();
+  try {
+    toggle.props.onClick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  } finally {
+    stub.restore();
+  }
+  const call = stub.calls.find((item) => item.url.endsWith("/api/decision-engine/config"));
+  assert.ok(call !== undefined, `应 PUT /config，实际：${stub.calls.map((c) => c.url).join(", ")}`);
+  const body = JSON.parse(call.init.body);
+  assert.equal(body.serverProvider, true, `patch 应带上 serverProvider: true，实际：${call.init.body}`);
+});
+
+test("即使服务端误把明文 key 塞进响应，界面也不会显示它", async () => {
+  // 界面这一侧的最后一道闸。服务端的契约里只有 keyHint，但契约是靠人守的；
+  // 这里模拟「后端某天顺手多回了 key 字段」，确认渲染路径不会把它带出来——
+  // 面板文本会进日志、截图、用户复制，明文一旦出现在这里就不再可控。
+  const LEAK = "sk-LEAK-CANARY-9f8e7d6c5b4a";
+  const { text } = await render(
+    stateWith({
+      serverProvider: { ...serverProviderWith({}), key: LEAK, apiKey: LEAK },
+    }),
+  );
+  assert.equal(text.includes(LEAK), false, `明文 key 泄漏到了面板文本里：\n${text.slice(0, 800)}`);
+});

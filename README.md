@@ -151,8 +151,11 @@ telemetryEndpoint: ""     # 留空用内置端点
 **插件 → 已安装 → dsh-decision-engine → 点进该插件**，上方出现 Decision Engine 卡片
 （内置 `enabled: false`，不会擅自介入）：
 
-- **服务提供方**：`system one` / `bamboonode` / `硅基流动` / `Silicon Flow` / `custom`，
-  下一行显示当前生效端点
+- **服务提供方**：`system one`（默认）/ `硅基流动` / `Silicon Flow` / `custom`，
+  下一行显示当前生效端点；老配置里的 `bamboonode` 预设已下线，加载时自动迁移到
+  `custom`（DEC-031），设置页会提示迁移来源
+- **跟随服务端下发**（默认关）：打开后地址 / 模型 / key 改由 `dsh.zuos.us` 下发，
+  key **只驻内存、不落盘**；服务端不可用时自动回落到下面的本地配置，并显示一行原因
 - 两个开关：`启用守卫`、`真正拦截`
 - **思考模式**：`never`（默认）/ `auto` / `always`
 - **模型**下拉（来自当前 provider 的 `/v1/models`，含「自动（服务端默认）」）
@@ -203,7 +206,6 @@ content-type: application/json
 | provider | 默认地址 | 端点 | 密钥变量名 | 默认模型 |
 |---|---|---|---|---|
 | `system one` | `https://api.typesafe.ai/v1` | `/v1/systemone` | `TYPESAFE_API_KEY` | 服务端默认（`jev-latest`） |
-| `bamboonode` | `https://api.bamboonode.dev/v1` | `/v1/decisions` | `BAMBOO_API_KEY` | 服务端默认（`startlux-decision-27b-autothink`） |
 | `siliconflow`（国内站） | `https://api.siliconflow.cn/v1` | `/v1/systemone` | `SILICONFLOW_API_KEY` | `Kev-4B`（可改 `SemIf`） |
 | `siliconflow-intl`（国际站） | `https://api.siliconflow.com/v1` | `/v1/systemone` | `SILICONFLOW_INTL_API_KEY` | `Kev-4B`（可改 `SemIf`） |
 | `custom` | 用户填写（必填） | 按 `端点风格` 拼 | `customApiKeyEnv`（缺省 `DECISION_ENGINE_CUSTOM_KEY`） | `customModel` |
@@ -245,9 +247,52 @@ once and remembers the one that works (keyed by base URL). Only 404 triggers a s
 清空即删除该键；写入失败整体报错，不会出现「配置说存了、实际没存」。
 已有 key 不会随存储位置切换被悄悄搬家，需要时重新粘贴一次。
 
-**密钥优先级**：该 provider 的显式 key 字段 > 所选存储位置里的对应键 > 环境变量。
-Key precedence: explicit key field > the matching key at the chosen storage location >
-environment variables.
+**密钥优先级**：跟随服务端下发**生效时，下发的 key（仅内存）优先级最高**；否则
+该 provider 的显式 key 字段 > 所选存储位置里的对应键 > 环境变量。
+When the server-provided mode is active, the delivered key (memory only) wins; otherwise:
+explicit key field > the matching key at the chosen storage location > environment variables.
+
+### 服务端下发模式 / Server-provided config
+
+**默认关闭。** 打开配置页的「跟随服务端下发」后，地址、模型与 key 都由
+`https://dsh.zuos.us/api/provider-config`（**内置地址，不可配置**）下发并直接使用：
+
+- **key 只保存在插件进程的内存里，永不落盘**：不写 `config.yml`、不写
+  `.credentials.yaml`、不进遥测 / 统计 / 决策明细，任何接口只回传末四位（`…abcd`）；
+- 生效时「生效端点」行会出现「服务端下发」角标与实际地址；
+- **服务端不可用（含 404 / 403 / 超时 / 载荷非法）时静默回落到下面的本地配置**
+  （包括你自己的 key），配置页显示一行原因；
+- 关掉开关会**立即从内存里清掉**下发的 key；
+- 手动填写 provider / base URL / 模型 / key 的整套流程**完全不变**；服务端生效期间这些
+  本地值只是暂不生效，关掉开关或服务端不可用时立刻回到它们。
+
+服务端换 key 后客户端多久跟上：下发带 TTL（默认 600 秒），插件在**启动**、**打开配置页**与
+点「重新获取」时刷新；决策热路径**不会**为刷新等待网络。
+
+维护者侧（Worker）需要在部署时配置的 secret：
+
+```sh
+npx wrangler secret put PROVIDER_BASE_URL        # 下发的基础地址，例如 https://api.example.com/v1
+npx wrangler secret put PROVIDER_MODEL           # 下发的模型名；留空 = 不发送 model 字段（服务端默认）
+npx wrangler secret put PROVIDER_ENDPOINT_STYLE  # auto（默认）/ decisions / systemone
+npx wrangler secret put PROVIDER_KEY             # 真正下游服务商的 api-key
+```
+
+未配置 `PROVIDER_KEY` 时这条路由返回 404（功能等同不存在）。可选门禁：再设
+`PROVIDER_CONFIG_TOKEN` 后，插件必须带 `x-provider-token` 才拿得到配置（插件从环境变量
+`DECISION_SERVER_CONFIG_TOKEN`，或 `.credentials.yaml` 的 `refs:` 同名键读取）。
+
+> ⚠️ **这不是鉴权**：任何知道地址的人 GET 一次就能拿到 api-key。请只放**专用、低额度**的
+> key；轮换靠改 Worker secret（客户端会在 TTL 内自动跟上，不需要发版）。
+
+Off by default. When enabled, the address, model and key are delivered by the built-in endpoint
+and used directly. The key lives **only in the plugin process's memory** — never written to
+`config.yml`, `.credentials.yaml`, telemetry, stats or decision logs, and no route ever returns
+more than its last four characters. If the server is unreachable the plugin silently falls back
+to your local configuration; switching the mode off clears the delivered key immediately.
+Manual configuration is completely unchanged. Note this endpoint is **not authentication**:
+anyone who knows the URL can fetch the key — use a dedicated low-quota key and rotate it by
+updating the Worker secret.
 
 ### 模型默认「自动」
 

@@ -2,6 +2,59 @@
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
 
+## DEC-031 移除 bamboonode 预设：provider 默认改 systemone，老配置自动迁移到 custom（2026-11-03）
+
+**背景**：bamboonode.dev（StartLux 官方端点）作为预设 provider 下线。它此前是
+`DEFAULT_PROVIDER`，预设表里还有一个完整条目（地址 `https://api.bamboonode.dev/v1`、
+key 名 `BAMBOO_API_KEY`、默认模型 `startlux-decision-27b-autothink`）。
+
+**决定**：
+
+1. **预设表与可选清单里彻底移除**：`PROVIDER_IDS = ["systemone", "siliconflow",
+   "siliconflow-intl", "custom"]`，`DEFAULT_PROVIDER = "systemone"`。
+   默认值不能指向一个不可用的服务；不写 provider 键的新配置与老 yml 里没写过的
+   安装都落到 systemone。
+2. **解析点不为已下线的服务保留特例**：`resolveProvider` 不再读历史字段
+   `baseUrl` / `model` / `apiKey` / `apiKeyEnv`（它们只对 bamboonode 有过
+   覆盖语义），读取它们的兼容分支一并删除——迁移负责搬运，解析点保持单一形状。
+3. **新增 `migrateLegacyProviderConfig(cfg)`（纯函数，providers.js）**，宿主层在
+   `reloadOwnConfig` 合并配置之后、`resolveProvider` 之前调用：
+   - `provider: bamboonode` → `custom`；
+   - 用户自己的 `baseUrl` / `model` / key（`bamboonodeApiKey`，历史共享字段
+     `apiKey` 兜底）原样搬进 `customBaseUrl` / `customModel` / `customApiKey`；
+   - **等于老预设默认值的 baseUrl / model 按「残留」处理，不搬**：老版本把预设
+     默认值注入 DEFAULTS，配置里出现默认地址不代表用户选过它；搬过去等于让用户
+     继续指向已下线的服务还以为插件给它挑的；
+   - **没有自己的 baseUrl 时拒绝静默迁移**：迁成 base URL 为空的 custom，
+     `resolveProvider` 给出 `valid=false` 与中文原因，设置页把「不可用」亮给
+     用户。替用户决定「迁移到哪家服务」超出配置迁移的职权，宁可显式不可用；
+   - 变量名：用户自定义过的（`bamboonodeApiKeyEnv` / `apiKeyEnv` 里的非默认值）
+     搬到 `customApiKeyEnv`；全是默认残留时**落回 `BAMBOO_API_KEY`**——key 存在
+     环境变量或凭据文件旧默认名下的用户，升级后不断供；
+   - 迁移发生与否通过 `statusPayload` 新增的 `providerMigratedFrom` 下发给设置页，
+     界面提示「provider 为什么变成了 custom」——沉默地换掉生效服务，看起来就像
+     配置被损坏。
+4. **历史统计归属保留**（lib/stats-store.js）：老统计/遥测里大量行属于 bamboonode，
+   `providerByEndpoint` 继续认识 `api.bamboonode.dev` 主机名，
+   `defaultModelOf("bamboonode")` 仍返回 `startlux-decision-27b-autothink`，
+   模型名反推表（`startlux-*` → bamboonode）原样保留——历史行不因此变成 unknown。
+5. **已知的取舍**：曾短暂用过 `DECISION_ENGINE_KEY` 变量名的极老安装，迁移后
+   key 不再被自动读到（custom 只认一个变量名），需在设置页重填；模型默认值残留
+   不搬运，指向自建兼容服务且依赖旧模型名的用户需在设置页重选一次。
+6. **文档 / 站点 / 校验脚本同步**：README、config.example.yml、site 双语文档改为
+   四预设 + 迁移说明；`verify-wiring.mjs` 增加迁移行为检查（迁移搬运、残留不搬）。
+7. **跟进（同日反馈）**：迁移后设置页模型下拉只剩「自动」。两个根因一起修：
+   `loadModels` 此前只有「获取」按钮一个调用点，打开页面从不自动拉取——现在
+   状态加载完成、provider / 生效地址变化时自动拉；模型行在 custom 下移入
+   「自定义 provider」区（清单来自用户自己的服务，「自动」= 不发送 model 字段，
+   语义在文案里说清）；`/models` 对 custom 不再做 StartLux 类型过滤——用户
+   网关声明的类型五花八门，过滤会把列表清空，请求本身仍有 404/400 回退兜底。
+
+**为什么不在解析点兼容读取 `provider: bamboonode`**：那会让「已下线的服务」永远
+留在可选值里，设置界面也能再次选中它；迁移一次性把状态搬干净，之后代码里只剩
+四个 provider。
+
+
 ## DEC-029 ⛔️ 取消 decisionsCapture 档位：「决策历史」开关全权决定是否记录内容（2026-11-03）
 
 **背景**：用户反馈「决策历史的表格里，决策内容都没记录，只有元数据，这是不对的」。

@@ -225,13 +225,6 @@ const providersTable = table(
       "服务端默认",
     ],
     [
-      "<code>bamboonode</code>",
-      "<code>https://api.bamboonode.dev/v1</code>",
-      "<code>/v1/decisions</code>",
-      "<code>BAMBOO_API_KEY</code>",
-      "服务端默认",
-    ],
-    [
       "<code>siliconflow</code><br><span class='badge gray'>国内站</span>",
       "<code>https://api.siliconflow.cn/v1</code>",
       "<code>/v1/systemone</code>",
@@ -343,11 +336,12 @@ const pluginBody = `
   <div class="note">
     <strong>接任意决策服务。</strong>
     请求形状只有一个——<code>{ model, state, questions, think_mode }</code> 发过去，
-    拿回 <code>answers</code>。内置五个 provider 预设（<code>system one</code> /
-    <code>bamboonode</code> / <code>siliconflow</code> / <code>siliconflow-intl</code>），
+    拿回 <code>answers</code>。内置四个 provider 预设（<code>system one</code> /
+    <code>siliconflow</code> / <code>siliconflow-intl</code>），
     也可以填任意 <code>custom</code> base URL（自建 llama.cpp / vLLM、企业网关、
     第三方中转）。哪些服务商提供这个端点、走哪条路径、用谁的 key，都由 provider 决定，
-    与各决策点的解析逻辑无关。
+    与各决策点的解析逻辑无关。老版本的 <code>bamboonode</code> 预设已下线，
+    老配置会在加载时自动迁移到 <code>custom</code>。
   </div>
 </section>
 
@@ -503,9 +497,7 @@ const pluginBody = `
   ${table(
     ["服务商", "模型", "<code>/v1/decisions</code>", "<code>/v1/systemone</code>"],
     [
-      ["SiliconFlow", "<code>Kev-4B</code>", "<strong>404 Not Found</strong>", '<span class="badge green">200 ✓</span>'],
-      ["bamboonode", "<code>startlux-decision-27b-autothink</code>", '<span class="badge green">200 ✓</span>', '<span class="badge green">200 ✓</span>'],
-    ]
+      ["SiliconFlow", "<code>Kev-4B</code>", "<strong>404 Not Found</strong>", '<span class="badge green">200 ✓</span>'],    ]
   )}
   <p style="color:var(--fg-dim)">
     所以「端点风格」只是<strong>首选</strong>：先打首选路径；收到 404 时自动改用
