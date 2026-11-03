@@ -69,44 +69,50 @@ Windows 上形如 `C:\Users\<name>\.dsh\`）。解析顺序与宿主一致：显
 ## 决策历史 / The Decisions tab
 
 开启后，会话的标签栏会在「对话」「轨迹」之后多出一个 **决策历史** 标签页，
-按时间顺序列出**当前会话**里经本插件做出的每一次决策：时间、决策点、
-provider、model、裁决、耗时，以及是否命中缓存 / 降级。点任意一行展开，
-能看到这次决策的完整现场——发给决策模型的 `state` 与 `questions`，以及
-它回来的 `answers` 和本地算出的 `scores`。
+按时间顺序列出**当前会话**里经本插件做出的每一次决策，共八列：
+时间 / 决策点 / provider / model / 裁决 / 耗时 / **内容**（有内容 / 仅元数据）/
+**标记**（缓存命中、已降级）。点任意一行展开，能看到这次决策的完整现场——
+发给决策模型的 `state` 与 `questions`，以及它回来的 `answers` 和本地算出的
+`scores`。
 
 **列表滚动时表头（时间 / 决策点 / …）保持冻结**，记录多了也看得到列名。
 **每一列表头都可点排序**（再点切换升降序；默认按时间升序）。
 
 With the feature on, each session gains a **Decisions** tab right after
-Chat and Trajectory. It lists every decision this plugin made in *that* session,
-in time order — decision point, provider, model, verdict, latency, cache/degrade
-flags — and expanding a row reveals the full context sent to the decision model,
-the questions, its answers, and the locally computed scores.
+Chat and Trajectory. It lists every decision this plugin made in *that* session
+in time order, in eight columns: time / decision point / provider / model /
+verdict / latency / **content** (has content, metadata only) / **flags** (cache
+hit, degraded). Expanding a row reveals the full context sent to the decision
+model, the questions, its answers, and the locally computed scores.
 
 **默认开启**，可在配置页关掉（`decisionsTabEnabled`）：
 
 Default **on**; turn it off on the config page (`decisionsTabEnabled`):
 
 ```yaml
-# 配置页上只有这一个开关（关掉后不写任何明细文件，标签页也消失）
+# 唯一的开关：开 = 记录明细（含决策内容）；关 = 不写任何明细文件，标签页也消失
 decisionsTabEnabled: true
 
 # 以下是高级档位，配置页上没有开关，需要时手改 config.yml：
-decisionsCapture: true           # false = 只存元数据，不保存任何会话正文
 decisionsMaxContentChars: 4000   # 单条内容上限
 decisionsMaxBytes: 8388608       # 明细文件体积上限（到顶轮转，只留一代）
 ```
 
 **隐私边界 / Privacy**：明细只写本机 `decisions.jsonl`，**不发网络请求**，
-也**不进匿名统计**。写盘前会做一层密钥兜底替换（`sk-…`、`Bearer …`、
-JSON 里的 `apiKey`/`token` 字段），单条内容超 4000 字符时按
-「工具参数 → 对话摘要 → 整个 state」依次裁剪。关掉开关时**完全不写这个
-文件**——不是「写了藏起来」。
+也**不进匿名统计**。开关开着时**一定记录决策内容**（现场与回答），只有当
+内容大到超出上限、连裁剪后的问题与回答都装不下时，该条才退化成「仅元数据」。
+所以想不保留内容，唯一的办法是**关掉整个开关**——关掉后**完全不写这个文件**，
+不采集、不落盘、不占磁盘，**没有**「只存元数据」的中间档。写盘前会做一层
+密钥兜底替换（`sk-…`、`Bearer …`、JSON 里的 `apiKey`/`token` 字段），单条
+内容超 4000 字符时按「工具参数 → 对话摘要 → 整个 state」依次裁剪。
 
 The detail file never leaves the machine and is never part of anonymous
-telemetry. Secrets matching common key shapes are masked before the line hits
-disk, and oversized content is trimmed in a fixed order. Turning the feature
-off writes nothing at all.
+telemetry. With the switch on the decision content is **always** recorded — a row
+only degrades to "metadata only" when its content is too large to fit even after
+trimming. So the only way to keep content off disk is to turn the whole feature
+off, which writes nothing at all: nothing collected, nothing stored, no disk
+footprint. Secrets matching common key shapes are masked before the line hits
+disk, and oversized content is trimmed in a fixed order.
 
 **为什么单独一个文件**：`telemetry.jsonl` 是给人 `tail` 的结论流水账，
 平均每行几百字节，而且被历史回填消费；把会话正文与完整现场塞进去会让它

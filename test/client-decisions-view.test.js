@@ -15,6 +15,22 @@
  * `conversation.view` 组件，用固定顺序的 useState 注入数据，然后渲染。
  */
 
+/**
+ * 时间列渲染的是**运行环境本地时间**，不是 ISO 串的 UTC 挂钟。
+ *
+ * 所以「夹具里的 `08:00:00Z` 应该显示成几点」取决于机器时区。断言里写死
+ * 字面量就必须先把时区钉住，否则同一份测试在北京过、在伦敦挂——那是最难查的
+ * 一类失败。这里钉到 **Asia/Shanghai（+8，且刻意不是 UTC）**：
+ *
+ *   1. 夹具 ISO 里的 08:xx 恒等于本地 16:xx，期望值稳定且与机器无关；
+ *   2. 因为**本地 ≠ UTC**，一旦有人把时间列退回「切一刀 ISO 串」的 UTC 挂钟
+ *      渲染，这些用例会立刻变红——钉 UTC 就抓不到这一点（两者恰好相等）。
+ *
+ * 时区对 `Date` 的影响是进程级的，Node 在 `process.env.TZ` 赋值后即生效
+ * （本地取值器读到新时区）。必须在加载 client bundle 之前设置。
+ */
+process.env.TZ = "Asia/Shanghai";
+
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -446,7 +462,7 @@ async function renderDecisions({
   };
 
   /**
-   * tbody 里各行的**实际顺序**，形如 `["row:08:00", "row:08:01", "detail:…", "row:08:02"]`。
+   * tbody 里各行的**实际顺序**，形如 `["row:16:00", "row:16:01", "detail:…", "row:16:02"]`。
    *
    * 存在的理由：判断「点第 n 行、详情插在第 n 行后面」必须看**行的先后**，
    * 而收集所有行会把顺序信息丢掉——真机上那个错位正是顺序问题
@@ -513,6 +529,24 @@ async function renderDecisions({
     },
     /** tbody 里各行的实际先后顺序（见函数定义处的说明）。 */
     tbodySequence,
+    /**
+     * 每条数据行的**单元格文本**（按列顺序）。
+     *
+     * 存在的理由：`text` 是整个表格拼起来的文本，「缓存命中」出现在哪一列
+     * 是看不出来的——而 DEC-029 修的正是「表头写着内容、格子里却是缓存标记」
+     * 这种**列与值错位**。要断言列，就必须按 `td` 取。
+     */
+    rowCells() {
+      return dataRows().map((tr) =>
+        (tr.children ?? [])
+          .filter((td) => td && typeof td === "object" && td.type === "td")
+          .map((td) => collectText(td).join("")),
+      );
+    },
+    /** 表头文本（按列顺序）。 */
+    thTexts() {
+      return findNodes(current, "th").map((th) => collectText(th).join(""));
+    },
   };
 }
 /** 递归收集渲染树里的文本。 */
@@ -548,7 +582,7 @@ test("列出本会话的决策：时间、决策点、提供方、模型、裁�
   assert.match(text, /startlux-decision-27b-autothink/, "应显示模型");
   assert.match(text, /delegate/, "应显示裁决");
   assert.match(text, /1689ms/, "应显示耗时");
-  assert.match(text, /2026-11-03 08:30:00/, "应显示时间");
+  assert.match(text, /2026-11-03 16:30:00/, "应显示时间");
 });
 
 test("多条记录按时间顺序列出", async () => {
@@ -564,8 +598,8 @@ test("多条记录按时间顺序列出", async () => {
       [SLOTS.loading]: false,
     },
   });
-  const firstAt = text.indexOf("2026-11-03 08:00:00");
-  const secondAt = text.indexOf("2026-11-03 08:10:00");
+  const firstAt = text.indexOf("2026-11-03 16:00:00");
+  const secondAt = text.indexOf("2026-11-03 16:10:00");
   assert.ok(firstAt >= 0 && secondAt >= 0, "两条时间都要出现");
   assert.ok(firstAt < secondAt, "应按时间升序");
 });
@@ -668,6 +702,113 @@ test("缓存命中与降级各有标记", async () => {
   });
   assert.match(text, /缓存命中/);
   assert.match(text, /已降级/);
+});
+
+test("「内容」列显示捕获状态：有内容 / 仅元数据", async () => {
+  const view = await renderDecisions({
+    slots: {
+      [SLOTS.page]: {
+        entries: [
+          entry({ seq: 1, id: "rec-full", capture: "full" }),
+          entry({ seq: 2, id: "rec-meta", capture: "meta" }),
+        ],
+        total: 2,
+      },
+      [SLOTS.loading]: false,
+    },
+  });
+  // 断言这一列的表头与它的语义一致（箭头只画在当前排序列，默认在时间列，
+  // 「内容」列因此不带箭头——这正是「箭头只画在当前列」的既有约定）。
+  assert.equal(view.thTexts()[COL.capture], "内容", `内容列表头：${view.thTexts()[COL.capture]}`);
+  const cells = view.rowCells();
+  assert.equal(cells[0][COL.capture], "有内容", `第 1 行内容列：${cells[0][COL.capture]}`);
+  assert.equal(cells[1][COL.capture], "仅元数据", `第 2 行内容列：${cells[1][COL.capture]}`);
+});
+
+test("缓存/降级标记只在「标记」列，「内容」列不再兼报它们", async () => {
+  // DEC-029 修的就是这个错位：表头叫「内容」，格子里却是缓存命中/已降级，
+  // 而排序键又是「有没有内容」——名、值、排序三样对不上。
+  const view = await renderDecisions({
+    slots: {
+      [SLOTS.page]: {
+        entries: [
+          entry({ seq: 1, cached: true }),
+          entry({ seq: 2, degraded: true }),
+          entry({ seq: 3 }),
+        ],
+        total: 3,
+      },
+      [SLOTS.loading]: false,
+    },
+  });
+  assert.equal(view.thTexts()[COL.flags], "标记");
+  const cells = view.rowCells();
+  assert.deepEqual(
+    cells.map((row) => row[COL.capture]),
+    ["有内容", "有内容", "有内容"],
+    "「内容」列只回答捕获状态",
+  );
+  assert.deepEqual(
+    cells.map((row) => row[COL.flags]),
+    ["缓存命中", "已降级", ""],
+    "「标记」列回答缓存/降级",
+  );
+});
+
+test("「内容」表头按有没有内容排序（与列语义一致）", async () => {
+  const view = await renderDecisions({
+    slots: {
+      [SLOTS.page]: {
+        entries: [
+          entry({ seq: 1, id: "rec-a", ts: "2026-11-03T08:00:00.000Z", capture: "meta" }),
+          entry({ seq: 2, id: "rec-b", ts: "2026-11-03T08:01:00.000Z", capture: "full" }),
+        ],
+        total: 2,
+      },
+      [SLOTS.loading]: false,
+    },
+  });
+  // 首次点非时间列 → 从降序起（有内容在前）；再点翻成升序。
+  await view.clickTh(COL.capture);
+  assert.deepEqual(
+    view.tbodySequence(),
+    ["row:16:01:00", "row:16:00:00"],
+    `首次点应降序（有内容在前），实际：${view.tbodySequence().join(" | ")}`,
+  );
+  await view.clickTh(COL.capture);
+  assert.deepEqual(
+    view.tbodySequence(),
+    ["row:16:00:00", "row:16:01:00"],
+    `再点应升序（仅元数据在前），实际：${view.tbodySequence().join(" | ")}`,
+  );
+});
+
+test("「标记」表头按状态分组排序（无 → 已降级 → 缓存命中）", async () => {
+  const view = await renderDecisions({
+    slots: {
+      [SLOTS.page]: {
+        entries: [
+          entry({ seq: 1, id: "rec-cache", ts: "2026-11-03T08:00:00.000Z", cached: true }),
+          entry({ seq: 2, id: "rec-plain", ts: "2026-11-03T08:01:00.000Z" }),
+          entry({ seq: 3, id: "rec-deg", ts: "2026-11-03T08:02:00.000Z", degraded: true }),
+        ],
+        total: 3,
+      },
+      [SLOTS.loading]: false,
+    },
+  });
+  await view.clickTh(COL.flags);
+  assert.deepEqual(
+    view.tbodySequence(),
+    ["row:16:00:00", "row:16:02:00", "row:16:01:00"],
+    `降序应是 缓存 → 已降级 → 无，实际：${view.tbodySequence().join(" | ")}`,
+  );
+  await view.clickTh(COL.flags);
+  assert.deepEqual(
+    view.tbodySequence(),
+    ["row:16:01:00", "row:16:02:00", "row:16:00:00"],
+    `升序应是 无 → 已降级 → 缓存，实际：${view.tbodySequence().join(" | ")}`,
+  );
 });
 
 test("英文界面里没有中文残留（UI 文案；记录内容是数据，不算）", async () => {
@@ -973,14 +1114,14 @@ const SORT_FIXTURE = {
   total: 3,
 };
 
-/** 列定义顺序：时间(0) 决策点(1) 提供方(2) 模型(3) 裁决(4) 耗时(5) 内容(6)。 */
-const COL = { ts: 0, point: 1, provider: 2, model: 3, action: 4, latencyMs: 5, capture: 6 };
+/** 列定义顺序：时间(0) 决策点(1) 提供方(2) 模型(3) 裁决(4) 耗时(5) 内容(6) 标记(7)。 */
+const COL = { ts: 0, point: 1, provider: 2, model: 3, action: 4, latencyMs: 5, capture: 6, flags: 7 };
 
 test("默认按时间升序", async () => {
   const view = await renderDecisions({ page: SORT_FIXTURE });
   assert.deepEqual(
     view.tbodySequence(),
-    ["row:08:00:00", "row:08:01:00", "row:08:02:00"],
+    ["row:16:00:00", "row:16:01:00", "row:16:02:00"],
     `默认应是时间升序，实际：${view.tbodySequence().join(" | ")}`,
   );
 });
@@ -996,7 +1137,7 @@ test("点「时间」表头：升序降序交替，箭头只画在当前列", as
   await view.clickTh(COL.ts); // 已是升序 → 翻成降序
   assert.deepEqual(
     view.tbodySequence(),
-    ["row:08:02:00", "row:08:01:00", "row:08:00:00"],
+    ["row:16:02:00", "row:16:01:00", "row:16:00:00"],
     `点一次应变降序，实际：${view.tbodySequence().join(" | ")}`,
   );
   assert.match(thTexts()[COL.ts], /↓/, "降序应带 ↓");
@@ -1004,7 +1145,7 @@ test("点「时间」表头：升序降序交替，箭头只画在当前列", as
   await view.clickTh(COL.ts); // 再点 → 回到升序
   assert.deepEqual(
     view.tbodySequence(),
-    ["row:08:00:00", "row:08:01:00", "row:08:02:00"],
+    ["row:16:00:00", "row:16:01:00", "row:16:02:00"],
     `再点应变回升序，实际：${view.tbodySequence().join(" | ")}`,
   );
 });
@@ -1014,13 +1155,13 @@ test("点「耗时」表头：首次降序（最慢在前），再点升序", as
   await view.clickTh(COL.latencyMs);
   assert.deepEqual(
     view.tbodySequence(),
-    ["row:08:00:00", "row:08:02:00", "row:08:01:00"],
+    ["row:16:00:00", "row:16:02:00", "row:16:01:00"],
     `首次点耗时应变降序（3000/2000/1000），实际：${view.tbodySequence().join(" | ")}`,
   );
   await view.clickTh(COL.latencyMs);
   assert.deepEqual(
     view.tbodySequence(),
-    ["row:08:01:00", "row:08:02:00", "row:08:00:00"],
+    ["row:16:01:00", "row:16:02:00", "row:16:00:00"],
     `再点应变升序（1000/2000/3000），实际：${view.tbodySequence().join(" | ")}`,
   );
 });
@@ -1036,7 +1177,7 @@ test("排完别的列再点「时间」：从升序起，且箭头跟着切换",
   await view.clickTh(COL.ts); // 首次点时间：升序
   assert.deepEqual(
     view.tbodySequence(),
-    ["row:08:00:00", "row:08:01:00", "row:08:02:00"],
+    ["row:16:00:00", "row:16:01:00", "row:16:02:00"],
     `换列首次点击应从升序起，实际：${view.tbodySequence().join(" | ")}`,
   );
   assert.match(thTexts()[COL.ts], /↑/, "箭头应回到时间列");

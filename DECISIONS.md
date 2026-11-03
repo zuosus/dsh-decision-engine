@@ -2,6 +2,64 @@
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
 
+## DEC-029 ⛔️ 取消 decisionsCapture 档位：「决策历史」开关全权决定是否记录内容（2026-11-03）
+
+**背景**：用户反馈「决策历史的表格里，决策内容都没记录，只有元数据，这是不对的」。
+
+**排查**：真机 `~/.dsh/dsh-decision-engine/decisions.jsonl` 488 条——244 条
+`capture:"full"` 带 `content`（截至 02:37Z），其后 244 条全部 `capture:"meta"`
+且没有 `content` 字段；分界点与 `config.yml` 的 mtime（10:40 本地时间）一致。
+配置里留着 `decisionsCapture: false`，而 `decisionsTabEnabled: true`。
+`DecisionStore.record()` 在该键为 false 时删掉 `content`、强制 `capture:"meta"`，
+于是**开关显示「开」、记录却只有元数据**。这个 false 已无法从配置页回溯出自谁手
+（DEC-026 合并两行开关之后它就没有界面入口了），无论它当初是刻意设的还是中途
+版本兜底值留下的，结论都一样：**一项用户看不见的配置正在静默否决用户看得见的开关**。
+
+**为什么这是设计缺陷而不是配置问题**：DEC-026 已把配置页的两个 toggle 合并成一行
+「决策历史」，并写明「开 = 记录明细（含内容）」。但 `decisionsCapture` 作为「高级
+档位」既不出现在配置页，也不在任何提示里回显——它成了一项**界面无法表达、用户无法
+发现**的隐藏否决权。用户看到的开关状态与真实行为不一致，而 DEC-022 的隐私承诺本来
+就可以用「关掉开关 = 完全不写文件」表达。一个能静默否决用户可见状态的隐藏档位，
+比它带来的那点灵活性更贵。
+
+**决定**：
+
+1. **`decisionsCapture` 退役**：从 `DEFAULTS` / Config schema / `PUT /config` 白名单 /
+   `statusPayload` / 客户端 patch·diff·draft / `DecisionStore` 构造函数（`getCapture`）
+   上一并删除。
+2. **唯一开关是 `decisionsTabEnabled`**：开 = 记录明细**且一定记录内容**；关 = 不建
+   文件、不占磁盘、不采集内容（DEC-022 #5 的隐私承诺不变）。
+3. **每条记录上的 `capture` 字段保留，语义不变但来源收窄**：它现在只反映
+   `truncateContent()` 的结果——`full` = 内容装得下，`meta` = 内容超限被丢弃
+   （`too-large` / `serialize-error` / `no-content`）。没有任何配置能再把它强制成 `meta`。
+4. **旧配置里的 `decisionsCapture: false` 自然失效**（未知键被忽略），不动用户的
+   `config.yml`——这正是「退役而不是迁移」的理由：迁移得猜这个 false 是刻意的还是
+   残留的，而它已经不可见，猜错就是继续静默。
+5. **`/session-decisions` 响应去掉 `page.capture`**：它回答的是「这个功能有没有开」，
+   而那是 `enabled` 的语义。
+
+**顺带修正**：表格「内容」列此前渲染的是「缓存命中 / 已降级」标记，而它的表头叫
+「内容」、排序键却按有没有内容排（DEC-028 自己也把这两件事混写了）。现在：
+「内容」列 = 有内容 / 仅元数据；新增「标记」列（在其后）= 缓存命中 / 已降级。
+
+**测试**：全量 445 项通过（本次新增 8 项：服务端「开关开启时内容一定落盘」
+「capture:meta 只可能来自超限裁剪」「已退役的 decisionsCapture 只提交它应被拒」
+「config.yml 里遗留的退役键不再影响任何行为（旧配置平滑升级）」
++ 客户端「内容列显示捕获状态」「缓存/降级标记只在标记列」「内容表头按有无内容排序」
+「标记表头按状态分组排序」；另把旧的三条 decisionsCapture 断言改成**反向断言**
+「该字段不该再出现」——断言「它不在」比断言「它是 true」更能防它悄悄回来）。
+变异验证（各变异后立刻还原）：`DecisionStore.record()` 忽略 `content` → 服务端新断言变红；
+「内容」列渲染退回缓存/降级 → 客户端 2 项变红；时间列退回「切一刀 ISO 串」的 UTC
+渲染 → 8 项变红。另外把时间列的期望值改成 TZ 无关的写法（测试进程钉在
+`Asia/Shanghai`，本地≠UTC），把上一个任务遗留的本地时间改动也纳入了回归。
+
+**改动文件**：`lib/index.js`（DEFAULTS / schema / PUT 白名单 / statusPayload /
+DecisionStore 接线 / session-decisions 响应）、`lib/decision-store.js`（去 `getCapture`
+与降级分支、注释改写）、`lib/client.js`（去接线、「内容/标记」两列、`EN_MISC` 三条新词条）、
+`test/decision-store.test.js`、`test/decisions-route.test.js`、
+`test/client-decisions-view.test.js`（新增 4 项 + 时区无关化）、`README.md`、
+`config.example.yml`、`DECISIONS.md`。
+
 ## DEC-028 决策历史：表头逐列可排序；裁决配色一词一色（2026-11-03）
 
 **背景**：同一轮里用户提了两件事——

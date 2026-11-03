@@ -283,23 +283,53 @@ test("关闭开关后完全不写（不建文件、不占磁盘）", async () =>
   }
 });
 
-test("关闭内容采集时只留元数据，不落任何内容", async () => {
+test("开关开启时内容一定落盘（decisionsCapture 不再能静默降级）", async () => {
   const { dir, cleanup } = tempDir();
   try {
-    const store = new DecisionStore({ dir, getCapture: () => false });
+    // DEC-029：这里曾经能传 `getCapture: () => false`，让元数据照记、内容
+    // 被删掉。真机后果是「配置页开关显示开、记录却只有元数据」——用户报的
+    // 就是这个。现在构造函数里没有这个选项，开关开着就一定带内容。
+    const store = new DecisionStore({ dir });
     store.record(
       buildDecisionRecord({
         sessionId: "s",
         point: "authorize",
-        content: { state: { secret: "会话正文" }, questions: {} },
+        content: { state: { text: "会话正文" }, questions: { q: ["a"] } },
       }),
     );
     await store.flush();
     const raw = readFileSync(join(dir, DECISIONS_FILE_NAME), "utf8");
-    assert.equal(raw.includes("会话正文"), false, "内容不该落盘");
+    assert.ok(raw.includes("会话正文"), "开关开着时内容必须落盘");
     const page = await store.readForSession("s");
-    assert.equal(page.entries[0].capture, "meta");
+    assert.equal(page.entries[0].capture, "full");
+    assert.equal(page.entries[0].content.state.text, "会话正文");
+    assert.equal(page.entries[0].contentNote, undefined, "未裁剪时不该有 contentNote");
+  } finally {
+    cleanup();
+  }
+});
+
+test("capture:meta 只可能来自超限裁剪，不是任何配置档位", async () => {
+  const { dir, cleanup } = tempDir();
+  try {
+    const store = new DecisionStore({ dir });
+    // 问题与回答本身就超过上限：连「最后退回元数据」那一档都要走到。
+    store.record(
+      buildDecisionRecord({
+        sessionId: "s",
+        point: "authorize",
+        maxContentChars: 200,
+        content: {
+          state: { args_preview: "x".repeat(20000) },
+          questions: { q: ["y".repeat(20000)] },
+        },
+      }),
+    );
+    await store.flush();
+    const page = await store.readForSession("s");
+    assert.equal(page.entries[0].capture, "meta", "超限裁剪才产生 meta");
     assert.equal(page.entries[0].content, undefined);
+    assert.equal(page.entries[0].contentNote, "too-large");
   } finally {
     cleanup();
   }

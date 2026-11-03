@@ -16,7 +16,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, rmSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -198,7 +198,7 @@ test("超大的 limit 被压到上限之内", async () => {
   }
 });
 
-test("返回体带上界面需要的元信息（文件路径、开关、内容采集）", async () => {
+test("返回体带上界面需要的元信息（文件路径、开关）", async () => {
   const { home, routes } = setup();
   try {
     seed(join(home, "dsh-decision-engine"), [entry()]);
@@ -210,7 +210,13 @@ test("返回体带上界面需要的元信息（文件路径、开关、内容�
     assert.equal(typeof data.file, "string");
     assert.ok(data.file.includes("decisions.jsonl"), "应回报明细文件路径");
     assert.equal(data.enabled, true, "默认开启");
-    assert.equal(data.capture, true, "默认采集内容");
+    // DEC-029：「采不采内容」不再是独立档位，响应里就该没有这个字段。
+    // 断言「它不在」比断言「它是 true」更能防止它悄悄回来。
+    assert.equal(
+      Object.hasOwn(data, "capture"),
+      false,
+      "内容采集不是独立档位，响应里不该再有 capture",
+    );
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
@@ -245,7 +251,13 @@ test("状态接口回报开关的生效值（默认开）", async () => {
     const { status, data } = await get(routes, "/api/decision-engine/status");
     assert.equal(status, 200);
     assert.equal(data.decisionsTabEnabled, true, "默认应开启");
-    assert.equal(data.decisionsCapture, true, "默认应采集内容");
+    // DEC-029：decisionsCapture 已退役——它曾经能在配置页之外把每条记录
+    // 静默降级成元数据，现在状态接口不再回传它。
+    assert.equal(
+      Object.hasOwn(data, "decisionsCapture"),
+      false,
+      "退役的 decisionsCapture 不该再出现在状态里",
+    );
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
@@ -256,17 +268,98 @@ test("开关能被保存并回显（配置页的开关链路）", async () => {
   try {
     const res = await routes["/api/decision-engine/config"].fetch({
       method: "PUT",
-      text: async () => JSON.stringify({ decisionsTabEnabled: false, decisionsCapture: false }),
+      text: async () => JSON.stringify({ decisionsTabEnabled: false }),
     });
     assert.equal(res.status, 200);
     const payload = await res.json();
     assert.equal(payload.decisionsTabEnabled, false, "保存后应立刻回显新值");
-    assert.equal(payload.decisionsCapture, false);
 
     // 落盘检查：值真的写进了 config.yml。
     const raw = readFileSync(join(home, "dsh-decision-engine", "config.yml"), "utf8");
     assert.ok(raw.includes("decisionsTabEnabled: false"), `配置内容：${raw}`);
-    assert.ok(raw.includes("decisionsCapture: false"), `配置内容：${raw}`);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("config.yml 里遗留的退役键不再影响任何行为（旧配置平滑升级）", async () => {
+  // 真机上就是这个形态：config.yml 里留着 `decisionsCapture: false`
+  // （合并开关后的残留），而 decisionsTabEnabled 是 true。DEC-029 之前
+  // 这一行让每条记录都退化成「只有元数据」；退役之后它必须变成**惰性键**——
+  // 插件照常启动，开关照常生效，并且它不会从任何出口再冒出来。
+  const home = mkdtempSync(join(tmpdir(), "dsh-decroute-legacy-"));
+  process.env.DSH_HOME = home;
+  const dataDir = join(home, "dsh-decision-engine");
+  mkdirSync(dataDir, { recursive: true });
+  const legacy = [
+    "enabled: true",
+    "mode: enforce",
+    "decisionsTabEnabled: true",
+    "decisionsCapture: false",
+    "",
+  ].join("\n");
+  writeFileSync(join(dataDir, "config.yml"), legacy, "utf8");
+
+  const routes = {};
+  const connection = {
+    fetch: {
+      register(entry) {
+        routes[entry.path] = entry;
+      },
+    },
+  };
+  const ctx = {
+    logger: { info() {}, warn() {}, debug() {} },
+    on() {},
+    get(name) {
+      return name === "connection" ? connection : undefined;
+    },
+    inject(_names, fn) {
+      fn();
+    },
+    plugin() {},
+    effect() {},
+  };
+  try {
+    // 不抛 = 带惰性键的旧配置仍能启动。
+    apply(ctx, {});
+
+    const { status, data } = await get(routes, "/api/decision-engine/status");
+    assert.equal(status, 200, "带遗留键的配置应照常启动");
+    assert.equal(data.decisionsTabEnabled, true, "开关照常生效");
+    assert.equal(
+      Object.hasOwn(data, "decisionsCapture"),
+      false,
+      "退役键不该再出现在状态回显里",
+    );
+
+    // 惰性键不被回写、也不被清除：退役是「不再读」，不是「偷偷改用户的文件」。
+    assert.equal(readFileSync(join(dataDir, "config.yml"), "utf8"), legacy, "不该改写用户的配置");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("已退役的 decisionsCapture 不再是一个可写配置（PUT 只带它应被拒）", async () => {
+  const { home, routes } = setup();
+  try {
+    // DEC-029：这个键曾经能落盘，并让「开关显示开、记录只有元数据」。
+    // 退役之后它既不在白名单里也不在 schema 里，只提交它应当被拒——
+    // 而不是「静默接受一个没人再读的值」。
+    const res = await routes["/api/decision-engine/config"].fetch({
+      method: "PUT",
+      text: async () => JSON.stringify({ decisionsCapture: false }),
+    });
+    assert.equal(res.status, 400, "只提交退役键应被拒");
+    const payload = await res.json();
+    assert.match(String(payload.error), /no updatable fields/, `实际：${payload.error}`);
+
+    // 而且什么都没落盘。
+    assert.equal(
+      existsSync(join(home, "dsh-decision-engine", "config.yml")),
+      false,
+      "被拒的请求不该写出配置文件",
+    );
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
