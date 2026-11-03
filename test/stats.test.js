@@ -738,7 +738,7 @@ test("降级时遥测也带 provider 与 model：失败也要归因到发起失�
       state: { tool: "bash" },
       questions: { x: { type: "noul", instructions: "?" } },
     });
-    assert.equal(result, null, "端点报错时应降级");
+    assert.equal(result?.degraded, "http-500", "端点报错时应降级（返回降级原因而非 null）");
     const telemetry = await readFile(join(dir, "telemetry.jsonl"), "utf8");
     const entry = JSON.parse(telemetry.split("\n").find((l) => l.trim().length > 0));
     assert.equal(entry.action, "degraded");

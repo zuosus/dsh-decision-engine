@@ -733,7 +733,7 @@ test("缓存/降级标记只在「标记」列，「内容」列不再兼报它�
       [SLOTS.page]: {
         entries: [
           entry({ seq: 1, cached: true }),
-          entry({ seq: 2, degraded: true }),
+          entry({ seq: 2, degraded: true, detail: "http-404" }),
           entry({ seq: 3 }),
         ],
         total: 3,
@@ -750,8 +750,8 @@ test("缓存/降级标记只在「标记」列，「内容」列不再兼报它�
   );
   assert.deepEqual(
     cells.map((row) => row[COL.flags]),
-    ["缓存命中", "已降级", ""],
-    "「标记」列回答缓存/降级",
+    ["缓存命中", "已降级 · http-404", ""],
+    "「标记」列回答缓存/降级，并附失败原因",
   );
 });
 
@@ -1182,4 +1182,25 @@ test("排完别的列再点「时间」：从升序起，且箭头跟着切换",
   );
   assert.match(thTexts()[COL.ts], /↑/, "箭头应回到时间列");
   assert.equal(/↑|↓/.test(thTexts()[COL.latencyMs]), false, "耗时列不该再有箭头");
+});
+
+
+test("降级「标记」列写出失败原因与状态码", async () => {
+  const view = await renderDecisions({
+    slots: {
+      [SLOTS.page]: {
+        entries: [
+          entry({ seq: 1, id: "rec-http", degraded: true, detail: "http-404" }),
+          entry({ seq: 2, id: "rec-auth", degraded: true, detail: "auth-failed", status: 401 }),
+          entry({ seq: 3, id: "rec-plain", degraded: true, detail: "" }),
+        ],
+        total: 3,
+      },
+      [SLOTS.loading]: false,
+    },
+  });
+  const cells = view.rowCells();
+  assert.equal(cells[0][COL.flags], "已降级 · http-404", "HTTP 错误直接在标记列带状态码");
+  assert.equal(cells[1][COL.flags], "已降级 · auth-failed (HTTP 401)", "401 也带状态码，且不跟 detail 里的码重复");
+  assert.equal(cells[2][COL.flags], "已降级", "无 detail 时只写已降级");
 });

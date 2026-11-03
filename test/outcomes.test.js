@@ -350,7 +350,7 @@ test("写入路径：降级也记统计（否则历史降级会凭空消失）",
       state: {},
       questions: {},
     });
-    assert.equal(result, null, "失败时降级");
+    assert.equal(result?.degraded, "http-500", "失败时降级（返回降级原因而非 null）");
     await store.flush();
     const records = await store.read();
     assert.equal(records.length, 1, "降级也要留下痕迹");
