@@ -2,6 +2,110 @@
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
 
+## DEC-032 ⛔️ 取消 DEC-031：bamboonode 恢复为内置预设与默认 provider（2026-11-04）
+
+**背景**：DEC-031（2026-11-03）以「bamboonode.dev 作为预设 provider 已下线」为
+唯一前提，从预设表里移除 bamboonode、把 `DEFAULT_PROVIDER` 改成 systemone，并给
+老配置加了 bamboonode → custom 的加载期自动迁移。撤销它有两个理由。
+
+**理由一：前提经复核不成立——端点今天仍然在线。**
+
+2026-11-04 直接复核该服务：
+
+| 请求 | 结果 |
+| --- | --- |
+| `GET https://api.bamboonode.dev/v1/models` | **HTTP 401** |
+| `POST https://api.bamboonode.dev/v1/decisions` | **HTTP 401**，`{"error":{"code":"invalid_api_key","type":"new_api_error"}}` |
+| 对照：`GET https://api.openai.com/v1/models` | HTTP 401（同样是在线的鉴权失败） |
+| 对照：`GET https://nonexistent-xyz-12345.invalid/v1/models` | HTTP 000，`SSL_ERROR_SYSCALL` |
+
+响应头里有 `server: nginx/1.30.5`、`via: 1.1 Caddy`、`x-new-api-version` 与
+`x-oneapi-request-id`：网关在跑，请求进到了应用层并生成了 request id。
+**401 的含义是「服务活着、密钥不对」**，与「服务已下线」是两回事——真下线的
+表现是连不上（HTTP 000 / DNS 失败 / TLS 断），就像上面那个对照组。DEC-031 把
+一次未带凭据的探测读成了服务退役，前提从一开始就是错的。
+
+**理由二：迁移把「本来能用的配置」变成了明确不可用。**
+
+DEC-031 的迁移规则刻意不给「没有自己 baseUrl 的用户」补地址（怕静默指向已下线
+服务），于是产出 `provider: custom` + 空 `customBaseUrl`，`resolveProvider` 回
+`valid=false`。对这批用户，升级把「能跑」变成「不能跑、且必须手工填 base URL
+才能救回来」。既然目标服务其实在线，这份代价没有换来任何东西。
+
+**决定**：
+
+1. **bamboonode 回到预设表并重新成为默认**：`PROVIDER_IDS` 恢复五家
+   （systemone / bamboonode / siliconflow / siliconflow-intl / custom），
+   `DEFAULT_PROVIDER = "bamboonode"`。不写 provider 键的老配置，行为与 DEC-031
+   之前逐字一致：端点 `https://api.bamboonode.dev/v1/decisions`、key 变量
+   `BAMBOO_API_KEY`、默认模型 `startlux-decision-27b-autothink`。
+2. **恢复 bamboonode 的解析特例**：`baseUrl` 覆盖（`/v1` 与 `/v1/decisions`
+   两种写法都接受，`source` 记为 `legacy`）、历史字段 `apiKeyEnv` 的变量名覆盖、
+   `bamboonodeApiKeyEnv` 的显式覆盖优先于 `apiKeyEnv`、以及历史共享字段
+   `apiKey` 的兼容读取。
+3. **删除迁移机制**：`migrateLegacyProviderConfig` 与四个 `LEGACY_*` 常量、
+   `/status` 的 `providerMigratedFrom` 字段、设置页的「已自动迁移」提示，
+   README / config.example.yml / 站点双语里的对应表述一并撤回。
+4. **不做反向迁移**（见下）。
+
+**明确保留的部分——这次撤销不牵连它们**：
+
+- **DEC-030（服务端下发配置）全量保留**：`SERVER_PROVIDER_*`、
+  `buildServerProvider`、`resolveKey` 与 `memoryKey` 优先级、`serverProvider`
+  开关、`/server-provider` 路由、设置页的「地址与密钥来自服务端下发」角标、
+  `lib/server-config.js`、`test/server-*.test.js`，以及站点侧
+  `/api/provider-config` 文档与打包接线。
+- **DEC-031 同日「跟进修复」的三项独立改进保留**：打开配置页自动拉取模型列表、
+  custom 下模型行移入「自定义 provider」区（「自动」= 不发送 model 字段）、
+  `/models` 对 custom 不做 StartLux 类型过滤。第三项在 `lib/index.js` 里与恢复
+  的 `typedOnly`（bamboonode 严格过滤）合并成 if / else if 两条分支：bamboonode
+  照旧严格、custom 照旧全收、其余 provider 维持「有人声明类型才过滤」。只把
+  DEC-031 之前的写法抄回来会重新清空用户网关的模型列表——那是
+  `test/save-path.test.js` 明确覆盖过的真实故障，不是假想风险。
+- **DEC-031 第 4 条（历史统计归属）依然成立**，但实现回退为「bamboonode 回到
+  预设表，由预设表统一负责归属」。`lib/stats-store.js` 现在与 DEC-031 之前
+  逐字节相同（`git diff e4e3128^ -- lib/stats-store.js` 为空）；其中
+  `LEGACY_MODEL_PROVIDERS` 属于 DEC-011 的模型名反推，与本次无关，未改动。
+
+**为什么这次不能整文件回滚**：`e4e3128` 把 DEC-031 与 DEC-030 写进了同一个提交。
+`git revert` 或 `git checkout e4e3128^ -- <file>` 在纠缠文件上会连带抹掉 DEC-030
+与后续提交的改动，所以只有「纯 DEC-031」的文件才允许整文件回滚（`README.md`、
+`config.example.yml`、`lib/stats-store.js`、`test/cache-regression.test.js`、
+`site/build.mjs`、`site/lib/content-en.mjs`），其余一律逐块手改。
+
+**为什么不做反向迁移（custom → bamboonode）**：
+
+DEC-031 的迁移是**纯内存**的，从不回写 `config.yml`。所以绝大多数用户在本次撤销
+之后自动恢复 bamboonode，不需要任何迁移动作。唯一例外是在 v1.0 之后**打开并保存
+过设置页**的用户：保存会把内存里迁移后的 `provider: custom` + 空
+`customBaseUrl` 落盘，升级后他们停在 `valid=false`。刻意不为他们加自动反向迁移，
+理由是：`provider: custom` 是完全合法的用户选择，插件没有任何依据把一个正在用
+custom 的用户改成别的服务——猜错就是静默换掉生效服务，正是 DEC-031 自己反对的
+那类行为。出路现成且一步到位：设置页的 provider 下拉恢复包含 bamboonode，选中
+即回到预设默认（地址、模型、key 变量名都由预设给），保存生效。若后续真收到
+「升级后不可用」的反馈，再考虑只在「custom 且 base URL 为空且 customApiKey 未
+配置」这个三重条件下加**提示**（提示而非改写）——条件足够窄，碰不到真正在用
+custom 的用户。
+
+**取舍与风险**：
+
+- 若 bamboonode 之后真的下线，正确做法是把它做成**可下线的预设**（由服务端或
+  预设表标注 retired，设置页显式提示并引导迁移），而不是在默认值层面硬切——
+  硬切会同时打断「老配置行为不变」这条不变量，这次就是被它反噬。
+- 迁移机制本身不是错的设计，错的是把它用在端点仍然可用的服务上。本次删掉的代码
+  随时可从 `e4e3128` 取回。
+- 默认 provider 已在 bamboonode / systemone 之间翻转过两次。凡是「依赖当前默认
+  值」的检查与测试都应显式钉住 provider：本次据此修正了
+  `scripts/verify-wiring.mjs` 的空 `memoryKey` 检查与
+  `test/client-ui.test.js` 的服务端生效下拉检查，并新增一条默认 provider 的
+  key 链路检查，补回被默认值翻转消掉的覆盖。
+
+**验证**：`npm test` 495 通过 / 0 失败（比 DEC-031 版本的 497 少 2 条，少的正是
+被删掉的两个迁移测试）；`node scripts/verify-wiring.mjs` 全部通过；`/status`
+实测返回 `provider=bamboonode`、端点 `/v1/decisions`、`keyEnvName=BAMBOO_API_KEY`、
+`providerCatalog` 五家、且响应里不再有 `providerMigratedFrom` 键。
+
+
 ## DEC-031 移除 bamboonode 预设：provider 默认改 systemone，老配置自动迁移到 custom（2026-11-03）
 
 **背景**：bamboonode.dev（StartLux 官方端点）作为预设 provider 下线。它此前是

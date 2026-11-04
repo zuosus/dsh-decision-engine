@@ -151,9 +151,8 @@ telemetryEndpoint: ""     # 留空用内置端点
 **插件 → 已安装 → dsh-decision-engine → 点进该插件**，上方出现 Decision Engine 卡片
 （内置 `enabled: false`，不会擅自介入）：
 
-- **服务提供方**：`system one`（默认）/ `硅基流动` / `Silicon Flow` / `custom`，
-  下一行显示当前生效端点；老配置里的 `bamboonode` 预设已下线，加载时自动迁移到
-  `custom`（DEC-031），设置页会提示迁移来源
+- **服务提供方**：`system one` / `bamboonode` / `硅基流动` / `Silicon Flow` / `custom`，
+  下一行显示当前生效端点
 - **跟随服务端下发**（默认关）：打开后地址 / 模型 / key 改由 `dsh.zuos.us` 下发，
   key **只驻内存、不落盘**；服务端不可用时自动回落到下面的本地配置，并显示一行原因
 - 两个开关：`启用守卫`、`真正拦截`
@@ -206,6 +205,7 @@ content-type: application/json
 | provider | 默认地址 | 端点 | 密钥变量名 | 默认模型 |
 |---|---|---|---|---|
 | `system one` | `https://api.typesafe.ai/v1` | `/v1/systemone` | `TYPESAFE_API_KEY` | 服务端默认（`jev-latest`） |
+| `bamboonode` | `https://api.bamboonode.dev/v1` | `/v1/decisions` | `BAMBOO_API_KEY` | 服务端默认（`startlux-decision-27b-autothink`） |
 | `siliconflow`（国内站） | `https://api.siliconflow.cn/v1` | `/v1/systemone` | `SILICONFLOW_API_KEY` | `Kev-4B`（可改 `SemIf`） |
 | `siliconflow-intl`（国际站） | `https://api.siliconflow.com/v1` | `/v1/systemone` | `SILICONFLOW_INTL_API_KEY` | `Kev-4B`（可改 `SemIf`） |
 | `custom` | 用户填写（必填） | 按 `端点风格` 拼 | `customApiKeyEnv`（缺省 `DECISION_ENGINE_CUSTOM_KEY`） | `customModel` |

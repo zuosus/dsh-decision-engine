@@ -666,8 +666,8 @@ test("遥测只记 API 报的数字，估算值只进统计", async () => {
     // 服务方**不返回 usage**：只有估算值可用。
     const client = new StartluxClient({
       getConfig: () => ({
-        provider: "systemone",
-        systemoneApiKey: "test-key",
+        provider: "bamboonode",
+        bamboonodeApiKey: "test-key",
         cacheSize: 256,
         cacheTtlMs: 600000,
         timeoutMs: 5000,
@@ -706,7 +706,7 @@ test("遥测只记 API 报的数字，估算值只进统计", async () => {
       `遥测不应含估算的 inputTokens，实际：${JSON.stringify(written[0])}`,
     );
     // 但**必须**带 provider：回填历史统计时它是唯一可靠的归因来源。
-    assert.equal(written[0].provider, "systemone", "遥测必须自带 provider");
+    assert.equal(written[0].provider, "bamboonode", "遥测必须自带 provider");
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -721,8 +721,8 @@ test("降级时遥测也带 provider 与 model：失败也要归因到发起失�
   try {
     const client = new StartluxClient({
       getConfig: () => ({
-        provider: "systemone",
-        systemoneApiKey: "test-key",
+        provider: "bamboonode",
+        bamboonodeApiKey: "test-key",
         cacheSize: 256,
         cacheTtlMs: 600000,
         timeoutMs: 5000,
@@ -742,7 +742,7 @@ test("降级时遥测也带 provider 与 model：失败也要归因到发起失�
     const telemetry = await readFile(join(dir, "telemetry.jsonl"), "utf8");
     const entry = JSON.parse(telemetry.split("\n").find((l) => l.trim().length > 0));
     assert.equal(entry.action, "degraded");
-    assert.equal(entry.provider, "systemone", "降级遥测必须带 provider");
+    assert.equal(entry.provider, "bamboonode", "降级遥测必须带 provider");
     assert.equal(
       typeof entry.model === "string" && entry.model.length > 0,
       true,

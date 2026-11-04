@@ -227,8 +227,8 @@ test("写入路径：裁决在拿到裁决之后才写进统计记录", async ()
     const store = new StatsStore({ dir });
     const client = new StartluxClient({
       getConfig: () => ({
-        provider: "systemone",
-        systemoneApiKey: "k",
+        provider: "bamboonode",
+        bamboonodeApiKey: "k",
         cacheSize: 256,
         cacheTtlMs: 600000,
         timeoutMs: 5000,
@@ -283,8 +283,8 @@ test("写入路径：答案形状不符时记「未裁决」，不记成放行",
     const store = new StatsStore({ dir });
     const client = new StartluxClient({
       getConfig: () => ({
-        provider: "systemone",
-        systemoneApiKey: "k",
+        provider: "bamboonode",
+        bamboonodeApiKey: "k",
         cacheSize: 256,
         cacheTtlMs: 600000,
         timeoutMs: 5000,
@@ -331,8 +331,8 @@ test("写入路径：降级也记统计（否则历史降级会凭空消失）",
     const store = new StatsStore({ dir });
     const client = new StartluxClient({
       getConfig: () => ({
-        provider: "systemone",
-        systemoneApiKey: "k",
+        provider: "bamboonode",
+        bamboonodeApiKey: "k",
         cacheSize: 256,
         cacheTtlMs: 600000,
         timeoutMs: 5000,

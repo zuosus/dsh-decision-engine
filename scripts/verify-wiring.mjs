@@ -234,47 +234,20 @@ check("导出 PROVIDER_IDS", Array.isArray(plugin.PROVIDER_IDS), `实际 ${typeo
 // 整轮字段检查静默跳过——检查脚本自己静默失败比没有检查更危险。
 check("导出 PROVIDER_PRESETS", typeof plugin.PROVIDER_PRESETS === "object", `实际 ${typeof plugin.PROVIDER_PRESETS}`);
 check(
-  "provider 预设覆盖四家（systemone / siliconflow / siliconflow-intl / custom），且不再有 bamboonode",
-  ["systemone", "siliconflow", "siliconflow-intl", "custom"].every((id) =>
+  "provider 预设覆盖五家（systemone / bamboonode / siliconflow / siliconflow-intl / custom）",
+  ["systemone", "bamboonode", "siliconflow", "siliconflow-intl", "custom"].every((id) =>
     (plugin.PROVIDER_IDS ?? []).includes(id),
-  ) && !(plugin.PROVIDER_IDS ?? []).includes("bamboonode"),
+  ),
   `实际 ${JSON.stringify(plugin.PROVIDER_IDS)}`,
 );
-check("默认 provider 是 systemone（bamboonode 预设已下线，DEC-031）", defaults.provider === "systemone", `实际 ${defaults.provider}`);
+check("默认 provider 保持 bamboonode（升级不改变行为）", defaults.provider === "bamboonode", `实际 ${defaults.provider}`);
 
 // 用真实 schema 默认值解析一次：内置 provider 必须给出可请求的端点。
 const defaultProvider = plugin.resolveProvider(defaults);
 check(
-  "默认 provider 解析出 /v1/systemone 端点",
-  defaultProvider.id === "systemone" && defaultProvider.endpoint.endsWith("/systemone"),
+  "默认 provider 解析出 bamboonode 端点",
+  defaultProvider.id === "bamboonode" && defaultProvider.endpoint.endsWith("/decisions"),
   `实际 ${defaultProvider.id} / ${defaultProvider.endpoint}`,
-);
-
-// 迁移函数（DEC-031）：老配置的 provider: bamboonode 必须迁到 custom，
-// 没有自己的 baseUrl 时不许静默换地址。
-const migrated = plugin.migrateLegacyProviderConfig({
-  provider: "bamboonode",
-  baseUrl: "https://relay.example.com/v1",
-  model: "m-bamboo",
-  bamboonodeApiKey: "sk-legacy",
-});
-check(
-  "遗留 bamboonode 配置迁移到 custom 并带走地址/模型/key",
-  migrated.migratedFrom === "bamboonode"
-    && migrated.config.provider === "custom"
-    && migrated.config.customBaseUrl === "https://relay.example.com/v1"
-    && migrated.config.customModel === "m-bamboo"
-    && migrated.config.customApiKey === "sk-legacy",
-  `实际 ${JSON.stringify(migrated)}`,
-);
-const residue = plugin.migrateLegacyProviderConfig({
-  provider: "bamboonode",
-  baseUrl: "https://api.bamboonode.dev/v1",
-});
-check(
-  "默认地址残留不迁移（不静默指向已下线服务）",
-  residue.migratedFrom === "bamboonode" && residue.config.customBaseUrl === "",
-  `实际 ${JSON.stringify(residue)}`,
 );
 
 const systemOneProvider = plugin.resolveProvider({ ...defaults, provider: "systemone" });
@@ -364,10 +337,22 @@ check(
 check(
   "memoryKey 为空串时退回既有来源",
   plugin.resolveKeyFor(
-    plugin.resolveProvider({ ...defaults, systemoneApiKey: "sk-explicit" }),
+    plugin.resolveProvider({ ...defaults, provider: "systemone", systemoneApiKey: "sk-explicit" }),
     { memoryKey: "", credentialReader: () => "sk-from-credentials" },
   ) === "sk-explicit",
   "空 memoryKey 没有退回既有优先级链",
+);
+// 同一条优先级链在**默认 provider** 上也必须成立：默认值刚从 systemone 换回
+// bamboonode（撤销 DEC-031），而 bamboonode 的显式 key 字段是另一个名字
+//（bamboonodeApiKey）。漏了这条，「默认 provider 的 key 字段接错」这种回归
+// 不会被任何检查抓到。
+check(
+  "默认 provider（bamboonode）的显式 key 与空 memoryKey 链路一致",
+  plugin.resolveKeyFor(
+    plugin.resolveProvider({ ...defaults, bamboonodeApiKey: "sk-bamboo-explicit" }),
+    { memoryKey: "", credentialReader: () => "sk-from-credentials" },
+  ) === "sk-bamboo-explicit",
+  "默认 provider 的 keyField 没有走通既有优先级链",
 );
 
 // 落盘前的校验函数必须真的拦住非法输入。
@@ -386,7 +371,7 @@ const customProvider = plugin.resolveProvider({
   customBaseUrl: "https://gw.example.com/v1",
 });
 check(
-  "custom 请求构造不残留已下线服务的域名",
+  "custom 请求构造不残留 bamboonode 域名",
   !customProvider.endpoint.includes("bamboonode"),
   `实际 ${customProvider.endpoint}`,
 );
