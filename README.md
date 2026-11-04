@@ -208,6 +208,8 @@ content-type: application/json
 | `bamboonode` | `https://api.bamboonode.dev/v1` | `/v1/decisions` | `BAMBOO_API_KEY` | 服务端默认（`startlux-decision-27b-autothink`） |
 | `siliconflow`（国内站） | `https://api.siliconflow.cn/v1` | `/v1/systemone` | `SILICONFLOW_API_KEY` | `Kev-4B`（可改 `SemIf`） |
 | `siliconflow-intl`（国际站） | `https://api.siliconflow.com/v1` | `/v1/systemone` | `SILICONFLOW_INTL_API_KEY` | `Kev-4B`（可改 `SemIf`） |
+| `perplexity` | `https://api.perplexity.ai` | auto（未实测） | `PERPLEXITY_API_KEY` | `sonar`（占位，待实测） |
+| `openrouter` | `https://openrouter.ai/api/v1` | auto（未实测） | `OPENROUTER_API_KEY` | `openai/gpt-4o-mini`（占位，待实测） |
 | `custom` | 用户填写（必填） | 按 `端点风格` 拼 | `customApiKeyEnv`（缺省 `DECISION_ENGINE_CUSTOM_KEY`） | `customModel` |
 
 硅基流动接入文档：[国内站](https://api-docs.siliconflow.cn/docs/api/systemone-post) ·

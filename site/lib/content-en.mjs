@@ -190,6 +190,20 @@ const providersTableEn = table(
       "<code>Kev-4B</code>",
     ],
     [
+      "<code>perplexity</code><br><span class='badge gray'>unverified</span>",
+      "<code>https://api.perplexity.ai</code>",
+      "auto (404 fallback)",
+      "<code>PERPLEXITY_API_KEY</code>",
+      "<code>sonar</code> (placeholder)",
+    ],
+    [
+      "<code>openrouter</code><br><span class='badge gray'>unverified</span>",
+      "<code>https://openrouter.ai/api/v1</code>",
+      "auto (404 fallback)",
+      "<code>OPENROUTER_API_KEY</code>",
+      "<code>openai/gpt-4o-mini</code> (placeholder)",
+    ],
+    [
       "<code>custom</code>",
       "user-provided (required)",
       "per endpoint style",
@@ -294,8 +308,9 @@ export const pluginBodyEn = `
     There is exactly one request shape —
     <code>{ model, state, questions, think_mode }</code> in,
     <code>answers</code> out. Built-in presets for <code>system one</code>,
-    <code>bamboonode</code>, <code>siliconflow</code> and
-    <code>siliconflow-intl</code>, or any <code>custom</code> base URL
+    <code>bamboonode</code>, <code>siliconflow</code>,
+    <code>siliconflow-intl</code>, <code>perplexity</code> and
+    <code>openrouter</code>, or any <code>custom</code> base URL
     (self-hosted llama.cpp / vLLM, corporate gateways, relays). Which service
     provides the endpoint, which path it sits on and whose key it uses are the
     provider's business and never touch the per-point parsing logic.

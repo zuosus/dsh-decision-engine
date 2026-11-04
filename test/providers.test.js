@@ -42,8 +42,11 @@ import {
 
 // ---------------------------------------------------------------- 1. 内置预设
 
-test("内置预设齐备：systemone / bamboonode / siliconflow / siliconflow-intl / custom", () => {
-  assert.deepEqual([...PROVIDER_IDS], ["systemone", "bamboonode", "siliconflow", "siliconflow-intl", "custom"]);
+test("内置预设齐备：systemone / bamboonode / siliconflow / siliconflow-intl / perplexity / openrouter / custom", () => {
+  assert.deepEqual(
+    [...PROVIDER_IDS],
+    ["systemone", "bamboonode", "siliconflow", "siliconflow-intl", "perplexity", "openrouter", "custom"],
+  );
   for (const id of PROVIDER_IDS) {
     assert.ok(PROVIDER_PRESETS[id] !== undefined, `缺少预设 ${id}`);
   }
@@ -137,6 +140,8 @@ test("providerCatalog 覆盖全部 provider 且带展示信息", () => {
     "bamboonodeApiKey",
     "siliconflowApiKey",
     "siliconflowIntlApiKey",
+    "perplexityApiKey",
+    "openrouterApiKey",
     "customApiKey",
   ]);
   // 字段必须互不相同：共用一格会导致切换 provider 时互相覆盖。
@@ -148,6 +153,8 @@ test("providerCatalog 覆盖全部 provider 且带展示信息", () => {
     "model",
     "siliconflowModel",
     "siliconflowIntlModel",
+    "perplexityModel",
+    "openrouterModel",
     "customModel",
   ]);
   assert.equal(new Set(modelFields).size, modelFields.length);
@@ -629,6 +636,20 @@ test("requiresModel 只对声明了的预设生效：其它 provider 留空仍�
   assert.equal(resolveProvider({ provider: "bamboonode", model: "" }).model, "");
   assert.equal(resolveProvider({ provider: "systemone" }).model, "");
   assert.equal("model" in buildRequestBody(resolveProvider({ provider: "systemone" }), { state: {}, questions: {} }), false);
+});
+
+test("perplexity / openrouter 预设：地址、key 名与默认模型各自独立", () => {
+  const p = resolveProvider({ provider: "perplexity" });
+  assert.equal(p.baseUrl, "https://api.perplexity.ai");
+  assert.equal(p.apiKeyEnv, "PERPLEXITY_API_KEY");
+  // requiresModel：模型留空回落预设默认，而不是发出省略 model 的请求。
+  assert.equal(p.model, "sonar");
+  assert.equal(p.preset.keyField, "perplexityApiKey");
+  const o = resolveProvider({ provider: "openrouter" });
+  assert.equal(o.baseUrl, "https://openrouter.ai/api/v1");
+  assert.equal(o.apiKeyEnv, "OPENROUTER_API_KEY");
+  assert.equal(o.model, "openai/gpt-4o-mini");
+  assert.equal(o.preset.keyField, "openrouterApiKey");
 });
 
 test("五个 provider 各读各的 key，同时配好也互不串用", () => {
