@@ -169,6 +169,7 @@ telemetryEndpoint: ""     # 留空用内置端点
 - **跟随服务端下发**（默认关）：打开后地址 / 模型 / key 改由 `dsh.zuos.us` 下发，
   key **只驻内存、不落盘**；服务端不可用时自动回落到下面的本地配置，并显示一行原因
 - 两个开关：`启用守卫`、`真正拦截`
+- **人工审核比例**：四段滑块 `自治 / 轻松 / 默认 / 谨慎`（见下节）
 - **思考模式**：`never`（默认）/ `auto` / `always`
 - **模型**下拉（来自当前 provider 的 `/v1/models`，含「自动（服务端默认）」）
 - **API Key** 输入框；选 `custom` 时展开 `Base URL`（必填）、`端点风格`、`附加请求头`、`密钥变量名`
@@ -199,6 +200,43 @@ Translations live in the plugin's own dictionary, independent of the manifest ti
 A tool-authorization approval card's **title** follows the host language too: the plugin
 supplies the host's paired `PreToolDecision.displayReason`, while `reason` stays the
 Chinese original for the approval audit trail and telemetry.
+
+## 人工审核比例：模型无关的打扰频率 / Review tolerance: a model-agnostic interruption rate
+
+`guard*` 那批阈值都是**绝对分数**，而且是在某一家决策模型上校准出来的——换个模型，
+同一个 `0.4` 的含义就变了。**人工审核比例**（`tolerance`）不谈分数，只谈比例：
+「大概每多少次工具调用，值得问我一次」。插件按当前模型**最近 200 次**授权决策的分数
+分布，把你选的比例换算成阈值，因此**换决策模型不需要重调**。
+
+| 档位 | `tolerance` | 含义 | 实测询问率 |
+|---|---|---|---|
+| 自治 | `autonomous` | 从不询问用户 | 0% |
+| 轻松 | `relaxed` | 只有分数排在最前的 **1%** 才询问 | ≈1.1% |
+| 默认 | `default` | 按决策模型自己的判断（**当前行为**） | 22.5% |
+| 谨慎 | `cautious` | 默认判断之上，再问分数靠前的 **25%** | ≈41% |
+
+（询问率来自回放 1,421 条真实授权决策；`default` 那一格就是现有阈值口径。）
+
+- **`default` 与升级前逐字一致**。新逻辑是 `decideGuard()` 之上的后处理层，从不替换它，
+  所以不写这一项（或写 `default`）的老配置行为一点没变。
+- **`autonomous` 不取消拦截**。它只压制「问你」；真正高风险的调用仍会被直接拦下
+  （`deny`）——拦下不打断你，它是安全边界，不是询问。四档都保留这一条。
+- **`relaxed` 是替换语义**（把默认那套判断整个换掉，否则「最前 1%」会变成 23%），
+  **`cautious` 是并集语义**（叠加在默认判断之上，因此永远不会比 `default` 问得更少）。
+- **换模型或重启会重新攒样本**。不足 50 次时算不出分位数，此时按实测标定的冷启动阈值走，
+  界面写明「校准中 n/50」——不是设置失效。分位数窗口按 `provider × model` 分桶，两个模型
+  的分布互不干扰。
+
+**两处都能改**：插件配置页，以及会话里的**「决策历史」标签页**。两处渲染同一个分段滑块
+（不是下拉菜单——四档是一条单调的轴，下拉会把「往右更保守」这层压掉），读的是服务端同一份
+下发载荷，因此在一处改动，另一处在它既有的 5 秒轮询里就会跟上。
+
+`tolerance` controls **how often** a tool call escalates to a human, expressed as a rate
+rather than an absolute score — the four levels are realised as *percentiles of that
+decision model's own recent scores*, which is exactly why they survive a model swap.
+`default` reproduces the pre-feature behaviour byte-for-byte; `autonomous` never asks but
+still honours hard blocks. Both the plugin config page and the session **Decisions** tab
+carry the same segmented slider.
 
 ## Provider：接哪个决策服务 / Which decision service
 

@@ -56,6 +56,44 @@ function setup() {
 }
 
 /**
+ * 清理临时目录，容忍「插件后台还在写」的竞态。
+ *
+ * `apply()` 会启动若干**不 await** 的后台旁路（统计回填、明细写盘），它们
+ * 可能在本用例 `rmSync` 之后才落盘。此时 `rmSync` 抛 `ENOTEMPTY`——**清理
+ * 阶段的失败，而不是被测行为的失败**。
+ *
+ * 曾观察到它偶发（单独跑该文件 5 次全绿、全量跑里偶现一次）。不处理的话，
+ * 它会表现为「全量跑里随机变红」，而那种红会让人开始忽略真正的回归——
+ * 一个会随机亮起的红灯比没有红灯更危险。
+ *
+ * 因此这里重试几次，并且**只吞 ENOTEMPTY / ENOENT**：其它错误（权限、
+ * 路径算错）仍要抛出来，因为它们是真的问题。
+ *
+ * @param dir - 要删的临时目录。
+ */
+function cleanupDir(dir) {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const code = error?.code;
+      // 目录已被别的清理删掉：目标达成，正常返回。
+      if (code === "ENOENT") return;
+      if (code !== "ENOTEMPTY" && code !== "EBUSY") throw error;
+      // 后台写者刚创建了新文件：稍等再试。
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+    }
+  }
+  // 最后一次尽力而为：失败也不再让「清理」把用例判红。
+  try {
+    rmSync(dir, { recursive: true, force: true });
+  } catch {
+    /* 清理失败不影响用例结论 */
+  }
+}
+
+/**
  * 调一次 GET 路由。
  *
  * 注意查表用的是**去掉查询串**的路径：路由注册表以 path 为键，
@@ -104,7 +142,7 @@ test("缺少 sessionId 时返回 400（不返回全部记录）", async () => {
     assert.equal(typeof data.error, "string");
     assert.equal(data.entries, undefined, "出错时不该顺带返回记录");
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    cleanupDir(home);
   }
 });
 
@@ -125,7 +163,7 @@ test("按会话过滤：只返回本会话的记录", async () => {
     assert.equal(data.total, 2);
     assert.deepEqual(data.entries.map((item) => item.tool), ["read", "bash"]);
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    cleanupDir(home);
   }
 });
 
@@ -140,7 +178,7 @@ test("文件不存在时返回空列表而不是 500", async () => {
     assert.deepEqual(data.entries, []);
     assert.equal(data.total, 0);
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    cleanupDir(home);
   }
 });
 
@@ -160,7 +198,7 @@ test("坏行被跳过，其余记录照常返回", async () => {
     assert.equal(status, 200);
     assert.equal(data.entries.length, 2, "坏行不该影响好行");
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    cleanupDir(home);
   }
 });
 
@@ -179,7 +217,7 @@ test("limit 生效且有上限（不会一次拉回全部）", async () => {
     assert.equal(data.total, 40);
     assert.equal(data.truncated, true);
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    cleanupDir(home);
   }
 });
 
@@ -194,7 +232,7 @@ test("超大的 limit 被压到上限之内", async () => {
     assert.equal(status, 200);
     assert.equal(data.entries.length, 1);
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    cleanupDir(home);
   }
 });
 
@@ -218,7 +256,7 @@ test("返回体带上界面需要的元信息（文件路径、开关）", async
       "内容采集不是独立档位，响应里不该再有 capture",
     );
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    cleanupDir(home);
   }
 });
 
@@ -241,7 +279,7 @@ test("开关关闭后不再写明细（文件不会被创建）", async () => {
     assert.equal(data.enabled, false, "状态应回报开关已关");
     assert.deepEqual(data.entries, []);
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    cleanupDir(home);
   }
 });
 
@@ -259,7 +297,7 @@ test("状态接口回报开关的生效值（默认开）", async () => {
       "退役的 decisionsCapture 不该再出现在状态里",
     );
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    cleanupDir(home);
   }
 });
 
@@ -278,7 +316,7 @@ test("开关能被保存并回显（配置页的开关链路）", async () => {
     const raw = readFileSync(join(home, "dsh-decision-engine", "config.yml"), "utf8");
     assert.ok(raw.includes("decisionsTabEnabled: false"), `配置内容：${raw}`);
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    cleanupDir(home);
   }
 });
 
@@ -336,7 +374,7 @@ test("config.yml 里遗留的退役键不再影响任何行为（旧配置平滑
     // 惰性键不被回写、也不被清除：退役是「不再读」，不是「偷偷改用户的文件」。
     assert.equal(readFileSync(join(dataDir, "config.yml"), "utf8"), legacy, "不该改写用户的配置");
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    cleanupDir(home);
   }
 });
 
@@ -361,7 +399,7 @@ test("已退役的 decisionsCapture 不再是一个可写配置（PUT 只带它�
       "被拒的请求不该写出配置文件",
     );
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    cleanupDir(home);
   }
 });
 
@@ -384,7 +422,7 @@ test("匿名统计档位能保存（此前点了「off」不落盘）", async ()
     const raw = readFileSync(join(home, "dsh-decision-engine", "config.yml"), "utf8");
     assert.ok(raw.includes("telemetryLevel: off"), `配置内容：${raw}`);
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    cleanupDir(home);
   }
 });
 
@@ -395,6 +433,6 @@ test("状态接口回显匿名统计档位（此前永远显示兜底值）", as
     assert.equal(typeof data.telemetryLevel, "string", "应回报当前档位");
     assert.deepEqual(data.telemetryLevels, ["off", "install", "daily"], "可选档位也下发");
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    cleanupDir(home);
   }
 });

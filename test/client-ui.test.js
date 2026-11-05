@@ -69,6 +69,35 @@ const SLOTS = {
  * 统计页的裁决分账表靠它显示决策点的**中文名**：没有它，
  * pointLabels 为空，界面会退回显示裸 id（authorize / retrieval）。
  */
+/**
+ * 人工审核比例的下发载荷（DEC-035）。
+ *
+ * 形状照抄 `lib/index.js` 的 `tolerancePayload()`：四档元数据由**服务端**下发，
+ * 前端不抄一份，所以夹具也必须给全 label / summary / percentile——只给 id
+ * 的话测试会通过，但界面上的标签会是裸 id，真机上就是「四个英文内部名」。
+ */
+const toleranceFixture = (over = {}) => ({
+  level: "default",
+  levels: ["autonomous", "relaxed", "default", "cautious"],
+  presets: [
+    { id: "autonomous", label: "自治", labelEn: "Autonomous", summary: "自治：从不询问用户，只有高风险调用会被直接拦下", summaryEn: "x", percentile: null },
+    { id: "relaxed", label: "轻松", labelEn: "Relaxed", summary: "轻松：只有严重度排在最前的 1% 才询问用户", summaryEn: "x", percentile: 0.99 },
+    { id: "default", label: "默认", labelEn: "Default", summary: "默认：按决策模型自己的判断提问（当前的默认行为）", summaryEn: "x", percentile: null },
+    { id: "cautious", label: "谨慎", labelEn: "Cautious", summary: "谨慎：在默认判断之外，再把严重度靠前的 25% 也拿来询问", summaryEn: "x", percentile: 0.75 },
+  ],
+  calibration: {
+    provider: "bamboonode",
+    model: "test-model",
+    samples: 0,
+    ready: false,
+    minSamples: 50,
+    windowSize: 200,
+    threshold: null,
+    fallbackSeverity: null,
+  },
+  ...over,
+});
+
 const decisionsFixture = {
   points: [
     { id: "authorize", label: "工具授权", mode: "enforce", available: true, mounted: true },
@@ -76,6 +105,7 @@ const decisionsFixture = {
   ],
   modes: ["off", "observe", "enforce"],
   cache: { size: 0, exactHits: 0, softHits: 0, stores: 0, hitRate: 0 },
+  tolerance: toleranceFixture(),
 };
 
 async function render(status, options = {}) {
@@ -1516,4 +1546,222 @@ test("即使服务端误把明文 key 塞进响应，界面也不会显示它", 
     }),
   );
   assert.equal(text.includes(LEAK), false, `明文 key 泄漏到了面板文本里：\n${text.slice(0, 800)}`);
+});
+
+
+// ===========================================================================
+// 人工审核比例（DEC-035）：四段滑块
+// ===========================================================================
+//
+// 这一组防的是「控件存在但用户用不了 / 看见的是内部 id / 点了不落盘」。
+// 同时守一条曾经的**真实回归**：滑块曾经只在服务端下发 `tolerance` 时渲染，
+// 后端一旦漏配（少拼一个字段），界面上就整块消失、用户以为功能被砍掉了。
+// 所以「无数据时安静消失」与「有数据时四个段都在」必须同时钉住。
+
+/** 收集渲染树里所有 button 节点的显示文字。 */
+function buttonLabels(node, out = []) {
+  if (node === null || node === undefined || node === false) return out;
+  if (typeof node !== "object") return out;
+  if (node.type === "button") {
+    const parts = [];
+    const walk = (child) => {
+      if (child === null || child === undefined || child === false) return;
+      if (typeof child === "string" || typeof child === "number") {
+        parts.push(String(child));
+        return;
+      }
+      (child.children ?? []).forEach(walk);
+    };
+    walk(node);
+    if (parts.join("").length > 0) out.push(parts.join(""));
+  }
+  (node.children ?? []).forEach((child) => buttonLabels(child, out));
+  return out;
+}
+
+test("配置页渲染四段滑块，且四个段依次是 自治 / 轻松 / 默认 / 谨慎", async () => {
+  const { tree, text, controls } = await render(stateWith({}), {
+    slots: { [SLOTS.decisions]: decisionsFixture },
+  });
+
+  assert.ok(text.includes("人工审核比例"), `配置页缺少「人工审核比例」这一行：\n${text.slice(0, 800)}`);
+
+  // 四段必须都在。用「包含」而不是「等于」：标签带语义尾注
+  //（「轻松（只问最前 1%）」），那正是让用户看懂「往右更常问」的那半句。
+  const labels = buttonLabels(tree);
+  const segment = (name) => labels.some((label) => label.includes(name));
+  for (const name of ["自治", "轻松", "默认", "谨慎"]) {
+    assert.ok(segment(name), `滑块缺少「${name}」段；实际按钮文字：${JSON.stringify(labels)}`);
+  }
+
+  // 比例说明必须出现在轨道下方那一行——它取代了原本挤在落点上的尾注
+  //（落点放不下「轻松（只问最前 1%）」，在 620px 面板里只能换行叠成一团）。
+  // 断言「当前档位」这一行：默认档不按比例，所以说的是模型自己的判断。
+  assert.ok(
+    text.includes("默认：按决策模型自己的判断"),
+    `应说明当前档位的语义，实际：\n${text.slice(0, 900)}`,
+  );
+});
+
+test("滑块不是下拉菜单：四档不是 select 的选项", async () => {
+  // 用户明确要求「不要 dropdown menu，要 segmented slider」。
+  // 这条防的是有人图省事把滑块换回 select——那样四个档位会被压成
+  // 四个互不相干的选项，「往右更保守」这层语义就没了。
+  const { controls, text } = await render(stateWith({}), {
+    slots: { [SLOTS.decisions]: decisionsFixture },
+  });
+  const selectOptionTexts = controls
+    .filter((node) => node.type === "select")
+    .flatMap((node) => (node.children ?? []).filter((child) => child?.type === "option"))
+    .map((node) => collectText(node).join(""));
+  for (const name of ["自治", "轻松", "谨慎"]) {
+    assert.ok(
+      !selectOptionTexts.some((option) => option.includes(name)),
+      `「${name}」不应出现在 select 的选项里（要求是分段滑块，不是下拉）`,
+    );
+  }
+});
+
+test("当前档位被打勾（aria-pressed），其余为 false", async () => {
+  // 无障碍与「我到底选了哪个」都靠它：只靠颜色的话，色觉障碍用户与
+  // 深浅色主题下都读不出来。
+  const { tree } = await render(stateWith({}), {
+    slots: {
+      [SLOTS.decisions]: { ...decisionsFixture, tolerance: toleranceFixture({ level: "relaxed" }) },
+    },
+  });
+  const pressed = [];
+  const walk = (node) => {
+    if (node === null || typeof node !== "object") return;
+    if (node.type === "button" && node.props?.["aria-pressed"] !== undefined) {
+      const label = collectText(node).join("");
+      if (["自治", "轻松", "默认", "谨慎"].some((name) => label.includes(name))) {
+        pressed.push({ label, pressed: node.props["aria-pressed"] });
+      }
+    }
+    (node.children ?? []).forEach(walk);
+  };
+  walk(tree);
+  assert.equal(pressed.length, 4, `应有四个带 aria-pressed 的段，实际 ${pressed.length}`);
+  const active = pressed.filter((item) => item.pressed === true);
+  assert.equal(active.length, 1, `只能有一个选中段，实际 ${JSON.stringify(active)}`);
+  assert.ok(active[0].label.includes("轻松"), `选中段应为轻松，实际 ${active[0].label}`);
+});
+
+test("服务端不下发 tolerance 时，配置页照常渲染且不出现滑块（曾经的回归）", async () => {
+  // 这是一条**回归守卫**：滑块渲染的条件里带了 `decisions?.tolerance`
+  // 判断，后端漏拼这个字段时控件会整块消失。只要页面不崩、其它字段还在，
+  // 这个降级是可接受的——但绝不能整页报错。
+  const withoutTolerance = {
+    points: decisionsFixture.points,
+    modes: decisionsFixture.modes,
+    cache: decisionsFixture.cache,
+  };
+  const { text } = await render(stateWith({}), {
+    slots: { [SLOTS.decisions]: withoutTolerance },
+  });
+  assert.ok(!text.includes("人工审核比例"), "没有下发数据时不该画出滑块");
+  // 页面其余部分必须仍在（证明是「少了一块」，不是「整页挂了」）。
+  assert.ok(text.includes("启用守卫"), `页面其它内容应正常，实际：\n${text.slice(0, 600)}`);
+});
+
+test("校准脚注：未就绪时写「校准中 n/50」，就绪后写实际阈值", async () => {
+  // 冷启动与「设置失效」在界面上必须能区分开。用户看到「校准中 0/50」
+  // 就知道是样本不够，而不是以为滑块没生效。
+  const notReady = await render(stateWith({}), {
+    slots: {
+      [SLOTS.decisions]: {
+        ...decisionsFixture,
+        tolerance: toleranceFixture({
+          level: "relaxed",
+          calibration: {
+            ...toleranceFixture().calibration,
+            samples: 12,
+            ready: false,
+            fallbackSeverity: 0.6,
+          },
+        }),
+      },
+    },
+  });
+  assert.ok(notReady.text.includes("校准中 12/50"), `未就绪时应写明进度，实际：\n${notReady.text.slice(0, 900)}`);
+
+  const ready = await render(stateWith({}), {
+    slots: {
+      [SLOTS.decisions]: {
+        ...decisionsFixture,
+        tolerance: toleranceFixture({
+          level: "relaxed",
+          calibration: {
+            ...toleranceFixture().calibration,
+            samples: 120,
+            ready: true,
+            threshold: 0.4321,
+          },
+        }),
+      },
+    },
+  });
+  assert.ok(ready.text.includes("已按这个模型校准"), `就绪后应写已校准，实际：\n${ready.text.slice(0, 900)}`);
+  assert.ok(ready.text.includes("0.432"), `应显示出实际阈值，实际：\n${ready.text.slice(0, 900)}`);
+});
+
+
+test("滑块独占一整行，没被塞进 rowLine 的右半边（真机竖排事故的回归守卫）", async () => {
+  // 事故现场：滑块被当成 row() 的**右侧控件**放进 `rowLine`（一个
+  // `justify-content: space-between` 的两列布局）。四段在里面各自
+  // `flex: 1 1 0` + `minWidth: 0`，被压到每个只有一个字宽，中文标签逐字
+  // 换行，四个段叠成一团竖排，整个页面看着像坏了。
+  //
+  // 因此这里断言两件事：
+  //   1. 滑块**不在**任何 rowLine 容器里（它自成一块 `toleranceSection`）；
+  //   2. 四个落点各自 `minWidth: max-content` 且 `whiteSpace: nowrap`
+  //      ——这两条是「标签永不换行」的实现手段，少了任何一条就会重现竖排。
+  const { tree } = await render(stateWith({}), {
+    slots: { [SLOTS.decisions]: decisionsFixture },
+  });
+
+  // 收集「段按钮」：带 aria-pressed 且文案是四档之一的 button。
+  const NAMES = ["自治", "轻松", "默认", "谨慎"];
+  const stopButtons = [];
+  const rowLineContainers = [];
+  const walk = (node, ancestors) => {
+    if (node === null || node === undefined || typeof node !== "object") return;
+    const style = node.props?.style ?? {};
+    // 事故的形状专指 `rowLine`：两列 space-between，且**没有** relative 定位
+    // ——滑块自己的轨道也用 space-between 来等距排列四个落点，但它是
+    // `position: relative`（为轨道细线提供定位上下文），是正当用法。
+    if (
+      style.justifyContent === "space-between"
+      && style.display === "flex"
+      && style.position !== "relative"
+    ) {
+      rowLineContainers.push(node);
+    }
+    if (node.type === "button" && node.props?.["aria-pressed"] !== undefined) {
+      const label = collectText(node).join("");
+      if (NAMES.some((name) => label.includes(name))) stopButtons.push(node);
+    }
+    (node.children ?? []).forEach((child) => walk(child, [...ancestors, node]));
+  };
+  walk(tree, []);
+
+  assert.equal(stopButtons.length, 4, `应有四个落点按钮，实际 ${stopButtons.length}`);
+  for (const button of stopButtons) {
+    assert.equal(button.props.style.whiteSpace, "nowrap", "落点必须禁止换行（否则中文会竖着叠成一列）");
+    assert.equal(
+      button.props.style.minWidth,
+      "max-content",
+      "落点必须用 max-content（纯 minWidth:0 会让标签逐字换行）",
+    );
+  }
+
+  // 每个落点都不能落在 rowLine 里（那就是事故的形状）。
+  for (const line of rowLineContainers) {
+    const texts = collectText(line).join("");
+    assert.ok(
+      !NAMES.every((name) => texts.includes(name)),
+      `四个段不该整组出现在 rowLine（两列布局）里；这里出现了：${texts.slice(0, 200)}`,
+    );
+  }
 });

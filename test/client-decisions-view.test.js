@@ -56,6 +56,14 @@ const SLOTS = {
   // 往中间插一个新槽位会把后面全部挪位，测试会静默断言错对象。
   labels: 4,
   sort: 5,
+  // 人工审核比例（DEC-035）的三个状态同样**追加在末尾**，理由同上：
+  // 往中间插会挪走 labels / sort，测试会静默断言错对象。
+  //   toleranceDraft   6  用户刚点的档位（乐观更新）
+  //   toleranceSaving  7  正在 PUT
+  //   toleranceError   8  保存失败原因
+  toleranceDraft: 6,
+  toleranceSaving: 7,
+  toleranceError: 8,
 };
 
 /** 一条最小明细记录（与服务端返回的形状一致）。 */
@@ -1321,3 +1329,116 @@ test("裁决列按中文名排序，不按机器词的字母序", async () => {
   );
 });
 
+
+// ===========================================================================
+// 人工审核比例（DEC-035）：决策历史页的那个滑块
+// ===========================================================================
+//
+// 这个页面上放滑块的理由：用户正是在这里看到「刚才又问我了」，于是想调
+// 打扰频率的那个瞬间就在这里。让他为此切到插件配置页，等于承认这两处
+// 说的是同一件事却要跳一次。
+//
+// 两条格外重要的契约：
+//
+//   1. **空态也必须有滑块**——「一条记录都没有」恰恰可能是「档位太吵、
+//      我把决策点关了」的结果，那才是最想调低档位的一刻；
+//   2. **没有下发数据时安静消失**——后端少拼字段时不能整页崩。
+
+/** 决策历史页看到的那份 tolerance 载荷（与 /session-decisions 下发同形）。 */
+function tolerancePage(over = {}) {
+  return {
+    level: "default",
+    levels: ["autonomous", "relaxed", "default", "cautious"],
+    presets: [
+      { id: "autonomous", label: "自治", labelEn: "Autonomous", summary: "自治：从不询问用户，只有高风险调用会被直接拦下", summaryEn: "x", percentile: null },
+      { id: "relaxed", label: "轻松", labelEn: "Relaxed", summary: "轻松：只有严重度排在最前的 1% 才询问用户", summaryEn: "x", percentile: 0.99 },
+      { id: "default", label: "默认", labelEn: "Default", summary: "默认：按决策模型自己的判断提问（当前的默认行为）", summaryEn: "x", percentile: null },
+      { id: "cautious", label: "谨慎", labelEn: "Cautious", summary: "谨慎：在默认判断之外，再把严重度靠前的 25% 也拿来询问", summaryEn: "x", percentile: 0.75 },
+    ],
+    calibration: {
+      provider: "bamboonode",
+      model: "test-model",
+      samples: 0,
+      ready: false,
+      minSamples: 50,
+      windowSize: 200,
+      threshold: null,
+      fallbackSeverity: null,
+    },
+    ...over,
+  };
+}
+
+test("决策历史页渲染四段滑块（车厢里就能调，不用跳去配置页）", async () => {
+  const { text } = await renderDecisions({
+    page: { entries: threeRows().entries, tolerance: tolerancePage() },
+  });
+  assert.ok(text.includes("人工审核比例"), `决策历史页缺少滑块：\n${text.slice(0, 900)}`);
+  for (const name of ["自治", "轻松", "默认", "谨慎"]) {
+    assert.ok(text.includes(name), `缺少「${name}」段`);
+  }
+  // 不是下拉，且当前档位的比例说明必须在（它取代了挤在落点上的尾注）。
+  assert.ok(
+    text.includes("默认：按决策模型自己的判断"),
+    `应说明当前档位的语义，实际：\n${text.slice(0, 900)}`,
+  );
+});
+
+test("空态（本会话没有记录）仍然有滑块可调", async () => {
+  // 空态是最想调档位的一刻：一条记录都没有，很可能正是「太吵，我把决策点关了」。
+  const { text } = await renderDecisions({
+    page: { entries: [], tolerance: tolerancePage() },
+  });
+  assert.ok(text.includes("本会话还没有决策记录"), "应显示空态文案");
+  assert.ok(text.includes("人工审核比例"), "空态也必须能让用户改档位");
+});
+
+test("错误态：读取失败时如实报错，且不画一个没有数据支撑的滑块", async () => {
+  // 这里刻意**不**断言「错误态也要有滑块」：滑块需要「当前档位」才画得出来，
+  // 而读取失败意味着 `page` 从未被设置过——没有数据时硬画一个滑块，只能
+  // 猜一个档位给用户看，那是更坏的行为（显示一个可能不是真实生效值的控件）。
+  //
+  // 因此断言的是：页面不崩、错误原因可见、并且**没有**凭空出现的滑块。
+  // 四个提前 return 共用同一个 `header`，空态（有数据）那一条才要求滑块。
+  const { text } = await renderDecisions({
+    sessionFails: true,
+    page: { entries: [], tolerance: tolerancePage() },
+  });
+  assert.ok(text.includes("读取决策历史失败"), `应显示失败原因，实际：\n${text.slice(0, 900)}`);
+  assert.ok(!text.includes("人工审核比例"), "没有数据时不该画滑块（否则显示的可能不是真实生效值）");
+});
+
+test("服务端不下发 tolerance 时，决策历史页照常渲染（回归守卫）", async () => {
+  const { text } = await renderDecisions({
+    page: { entries: threeRows().entries },
+  });
+  assert.ok(!text.includes("人工审核比例"), "没有下发数据时不该画滑块");
+  // 但表格本身必须还在——证明是「少一块」，不是「整页挂了」。
+  assert.ok(text.includes("裁决") || text.includes("时间"), `表格应正常，实际：\n${text.slice(0, 900)}`);
+});
+
+test("英文界面下这个滑块不残留中文（服务端中文标签有词表兜着）", async () => {
+  // 四档的 label / summary 来自服务端（中文），界面在渲染边界翻译。
+  // 这条防的是「新增控件时忘了登记英文」——英文宿主上冒出四块中文。
+  const CJK = /[一-鿿　-〿＀-￯]/;
+  const { text } = await renderDecisions({
+    lang: "en",
+    page: {
+      entries: [
+        entry({
+          detail: "decision-engine: benign call allowed",
+          point: "authorize",
+        }),
+      ],
+      tolerance: tolerancePage(),
+    },
+  });
+  const offenders = text
+    .split("\n")
+    .filter((line) => CJK.test(line))
+    // detail 是**数据**（审计原文），英文界面下保持不变是正确行为。
+    .filter((line) => !line.includes("benign call allowed"));
+  assert.deepEqual(offenders, [], `英文界面里出现了中文：\n${offenders.join("\n")}`);
+  assert.match(text, /Review tolerance/, "滑块标题应显示英文");
+  assert.match(text, /Autonomous|Relaxed|Cautious/, "四个段应显示英文");
+});
