@@ -45,8 +45,10 @@ site/
 ## 服务端下发 provider 配置（DEC-030）
 
 `GET /api/provider-config` 把 baseUrl / model / endpointStyle / **key** 交给插件。
-插件的「跟随服务端下发」开关（默认关）打开后直接用它们，**key 只驻留插件进程内存、
-不落盘**（不写 config.yml / .credentials.yaml / 遥测 / 统计 / 决策明细）。
+插件的「使用免费模型」开关（默认关，原名「跟随服务端下发」）打开后直接用它们，
+**key 只驻留插件进程内存、不落盘**（不写 config.yml / .credentials.yaml / 遥测 /
+统计 / 决策明细）。配置页在这行说明下还挂了一行小字「可能会失效」——这条免费通道的额度
+由项目方自己掏，随时可能停用或换 key，界面上必须直说这个风险。
 地址写死在插件里（`lib/server-config.js` 的 `SERVER_CONFIG_ENDPOINT`），服务端不提供自定义路径。
 
 环境变量（全部部署时填，**不要写进仓库**）：

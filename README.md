@@ -164,18 +164,30 @@ telemetryEndpoint: ""     # 留空用内置端点
 **插件 → 已安装 → dsh-decision-engine → 点进该插件**，上方出现 Decision Engine 卡片
 （内置 `enabled: false`，不会擅自介入）：
 
-- **服务提供方**：`system one` / `bamboonode` / `硅基流动` / `Silicon Flow` / `custom`，
-  下一行显示当前生效端点
-- **跟随服务端下发**（默认关）：打开后地址 / 模型 / key 改由 `dsh.zuos.us` 下发，
-  key **只驻内存、不落盘**；服务端不可用时自动回落到下面的本地配置，并显示一行原因
-- 两个开关：`启用守卫`、`真正拦截`
-- **人工审核比例**：四段滑块 `自治 / 轻松 / 默认 / 谨慎`（见下节）
-- **思考模式**：`never`（默认）/ `auto` / `always`
-- **模型**下拉（来自当前 provider 的 `/v1/models`，含「自动（服务端默认）」）
-- **API Key** 输入框；选 `custom` 时展开 `Base URL`（必填）、`端点风格`、`附加请求头`、`密钥变量名`
-- `测试端点` 按钮：回显 provider、实际 POST 的完整地址、HTTP 码、请求 id 与响应体
-- **决策模型参与点**：每个决策点一行，`关闭 / 观察 / 生效` 三态
-- **统计与对比** tab：命中率、token / 耗时 / 节省量、裁决分账（见下）
+表单按**从上到下四组**排列，组与组之间画一条分隔线（分隔线只是分组，界面上不加「第几组」
+这样的标题）：
+
+1. **使用免费模型**（默认关，原名「跟随服务端下发」）：打开后地址 / 模型 / key 改由
+   `dsh.zuos.us` 下发，key **只驻内存、不落盘**；服务端不可用时自动回落到下面的本地配置，
+   并显示一行原因。说明下面多一行小字「**可能会失效**」——这条免费通道由项目方自掏额度
+   维护，随时可能停用或换 key，风险必须写在界面上
+2. **连接与鉴权**：**服务提供方**（`system one` / `bamboonode` / `硅基流动` /
+   `Silicon Flow` / `custom`）、**模型**下拉（来自当前 provider 的 `/v1/models`，
+   含「自动（服务端默认）」）、**API Key** 输入框、**生效端点**（当前实际打到的地址，
+   服务端下发生效时带来源角标）
+3. **守卫行为**：两个开关 `启用守卫`、`真正拦截`；**决策历史**开关；
+   **人工审核比例**四段滑块 `自治 / 轻松 / 默认 / 谨慎`（见下节）
+4. 其余选项：**思考模式**（`never`（默认）/ `auto` / `always`）、**匿名统计**、
+   **密钥保存位置**、**自定义 provider** 区（选 `custom` 时才展开：`Base URL`（必填）、
+   `端点风格`、`附加请求头`、`密钥变量名`，**模型下拉也在这里**——清单来自你自己的服务，
+   与 Base URL 同属一组）、provider 校验错误提示、**决策模型参与点**（每个决策点一行，
+   `关闭 / 观察 / 生效` 三态）、自动保存状态行（含 `测试端点` 按钮：回显 provider、
+   实际 POST 的完整地址、HTTP 码、请求 id 与响应体）与底部状态信息。
+   这一组界面上**没有**「其他选项」这样的字面标题：它只是「其余都在这里」，多一层标题
+   只会多一层不必要的视觉层级
+
+**统计与对比** 是第二个 tab（不是配置页末尾的一块）：命中率、token / 耗时 / 节省量、
+裁决分账（见下）。
 
 **改完即保存，没有「保存」按钮**：开关 / 下拉点一下即落盘；文本框停顿约 0.7 秒或失焦落盘；
 API Key 只在**失焦或回车**时落盘（半截 key 不会进凭据文件）。底部状态行实时显示
@@ -300,15 +312,19 @@ once and remembers the one that works (keyed by base URL). Only 404 triggers a s
 清空即删除该键；写入失败整体报错，不会出现「配置说存了、实际没存」。
 已有 key 不会随存储位置切换被悄悄搬家，需要时重新粘贴一次。
 
-**密钥优先级**：跟随服务端下发**生效时，下发的 key（仅内存）优先级最高**；否则
-该 provider 的显式 key 字段 > 所选存储位置里的对应键 > 环境变量。
-When the server-provided mode is active, the delivered key (memory only) wins; otherwise:
+**密钥优先级**：配置页的「使用免费模型」开关**生效时，下发的 key（仅内存）优先级最高**；
+否则该 provider 的显式 key 字段 > 所选存储位置里的对应键 > 环境变量。
+When the free-model switch is on, the delivered key (memory only) wins; otherwise:
 explicit key field > the matching key at the chosen storage location > environment variables.
+
+> 提醒：`keyStorage`（密钥保存位置）在配置页上属于最后那一组「其余选项」，不跟 API Key
+> 挨着。它是「key 存到哪」的账务设定，不是连接本身；放在连接组里会打断「provider → 模型
+> → key → 生效端点」这条阅读线。
 
 ### 服务端下发模式 / Server-provided config
 
-**默认关闭。** 打开配置页的「跟随服务端下发」后，地址、模型与 key 都由
-`https://dsh.zuos.us/api/provider-config`（**内置地址，不可配置**）下发并直接使用：
+**默认关闭。** 打开配置页的「使用免费模型」（原名「跟随服务端下发」）后，地址、模型与 key
+都由 `https://dsh.zuos.us/api/provider-config`（**内置地址，不可配置**）下发并直接使用：
 
 - **key 只保存在插件进程的内存里，永不落盘**：不写 `config.yml`、不写
   `.credentials.yaml`、不进遥测 / 统计 / 决策明细，任何接口只回传末四位（`…abcd`）；
@@ -318,6 +334,9 @@ explicit key field > the matching key at the chosen storage location > environme
 - 关掉开关会**立即从内存里清掉**下发的 key；
 - 手动填写 provider / base URL / 模型 / key 的整套流程**完全不变**；服务端生效期间这些
   本地值只是暂不生效，关掉开关或服务端不可用时立刻回到它们。
+- **这条通道「可能会失效」**（开关说明下那行小字就是这件事）：免费额度由项目方自掏
+  维护，可能随时停用或换 key。停用后插件自动回落到本地配置，不会中断守卫，但「免费」
+  这件事本身没有承诺——要把自己的 key 备好。
 
 服务端换 key 后客户端多久跟上：下发带 TTL（默认 600 秒），插件在**启动**、**打开配置页**与
 点「重新获取」时刷新；决策热路径**不会**为刷新等待网络。
@@ -338,14 +357,17 @@ npx wrangler secret put PROVIDER_KEY             # 真正下游服务商的 api-
 > ⚠️ **这不是鉴权**：任何知道地址的人 GET 一次就能拿到 api-key。请只放**专用、低额度**的
 > key；轮换靠改 Worker secret（客户端会在 TTL 内自动跟上，不需要发版）。
 
-Off by default. When enabled, the address, model and key are delivered by the built-in endpoint
-and used directly. The key lives **only in the plugin process's memory** — never written to
-`config.yml`, `.credentials.yaml`, telemetry, stats or decision logs, and no route ever returns
-more than its last four characters. If the server is unreachable the plugin silently falls back
-to your local configuration; switching the mode off clears the delivered key immediately.
-Manual configuration is completely unchanged. Note this endpoint is **not authentication**:
-anyone who knows the URL can fetch the key — use a dedicated low-quota key and rotate it by
-updating the Worker secret.
+Off by default. When enabled (the config page's **Use the free model** switch, formerly
+"follow the server-issued configuration"), the address, model and key are delivered by the
+built-in endpoint and used directly. The key lives **only in the plugin process's memory** —
+never written to `config.yml`, `.credentials.yaml`, telemetry, stats or decision logs, and no
+route ever returns more than its last four characters. If the server is unreachable the plugin
+silently falls back to your local configuration; switching the mode off clears the delivered
+key immediately. Manual configuration is completely unchanged. Note this endpoint is **not
+authentication**: anyone who knows the URL can fetch the key — use a dedicated low-quota key
+and rotate it by updating the Worker secret. The switch carries a small **"may stop working"**
+note underneath: the free quota is funded by the project itself and can be withdrawn or
+re-keyed at any time, so keep your own key ready.
 
 ### 模型默认「自动」
 

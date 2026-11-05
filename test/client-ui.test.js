@@ -411,9 +411,10 @@ function findNode(node, predicate) {
  *
  * 不能用「渲染树里第一个 toggle」定位：每加一个开关行，位置就会指到别人，
  * 而测试仍然会绿——它测的已经不是它名字里说的那个开关了（DEC-030 加
- * 「跟随服务端下发」时就发生过：那条「拨一下开关就发出 PUT」实际拨的是
- * 新增的那个）。行结构固定为 `div > [标题/说明, 控件]`（见 client.js 的 row()），
- * 因此按标题找到行节点，再取行内的 button[aria-pressed] 即可。
+ * 「跟随服务端下发」（DEC-037 改名为「使用免费模型」）时就发生过：那条
+ * 「拨一下开关就发出 PUT」实际拨的是新增的那个）。行结构固定为
+ * `div > [标题/说明, 控件]`（见 client.js 的 row()），因此按标题找到行节点，
+ * 再取行内的 button[aria-pressed] 即可。标题用**当前界面上的名字**。
  */
 function toggleOfRow(node, title) {
   const row = findNode(node, (item) => {
@@ -1388,7 +1389,194 @@ test("内置预设的模型行留在通用区域，自动项仍是「服务端�
   assert.ok(apiKeyAt < 0 || modelAt < apiKeyAt, "非 custom 的模型行应留在通用区域（API Key 之前）");
 });
 
-// ------------------------------------------- 跟随服务端下发（DEC-030）
+// ===========================================================================
+// 配置页重排（DEC-037）：四组、三条分隔线、改名与小字
+// ===========================================================================
+//
+// 这一组钉的是**结构**，不是「某个词出现过」：
+//
+//   - 顺序用渲染树的**同级兄弟下标**断言，而不是 `text.includes`。文本收集
+//     会把整棵树拍平，`includes` 能证明「在」，却证明不了「在哪」——把
+//     分隔线挪到页头、或把滑块挪回 API Key 隔壁，`includes` 全是绿的。
+//     去重后的拼接文本里大打折扣（页面上「Kev-4B」这类词多处出现时尤其糟）。
+//   - 分隔线用 `key`（divider-1/2/3）定位，同时断言它**不是** rowLine 形状
+//     ——那是「一行控件」的形状，拿来做分隔线会被读成空白控件，而且最后
+//     那组「滑块不许被塞进 rowLine」的用例正好收集这个形状。
+//   - 小字断言走**行内**定位：它必须在「使用免费模型」那一行的 rowText 里，
+//     而不是碰巧出现在页面某处。
+
+/**
+ * 配置页里 configBody 的顶层元素顺序（按渲染树的同级兄弟下标）。
+ *
+ * `h(type, props, siteLink, tabBar, configBody)` 里的 configBody 是一个数组，
+ * 桩的 `createElement` 会把 children `flat(Infinity)`，于是配置页各行**直接**
+ * 成为页面根 div 的孩子，排在 siteLink / tabBar 之后。这里跳过那两个页面级
+ * 节点，剩下的每块用它的标题文本或 key 认出来，返回 `Map<标识, 下标>`——
+ * 后续断言比的是**下标**，不是字符串位置。
+ */
+function configBlocks(tree) {
+  const PAGE_LEVEL_KEYS = new Set(["site-link", "tabs"]);
+  const body = tree.children.filter(
+    (child) => child !== null && child !== undefined && !PAGE_LEVEL_KEYS.has(child?.props?.key),
+  );
+  assert.ok(body.length > 10, `配置页主体行太少（${body.length}），渲染树形状变了？`);
+
+  /**
+   * 取一「行」的**标题**：row() 的形状是
+   * `div > [div.rowText > [div.rowTitle, div.rowHint, div.rowNote], 控件]`，
+   * 所以标题是「第一个孩子 → 第一个孩子」。整块容器（`tolerance` / custom /
+   * points / actions）的第一孩子同样是标题节点，规则通用。
+   *
+   * 刻意**不**把整段 rowText 都拼进来：说明与小字会一起粘在标题后面，
+   * 于是「使用免费模型」变成「使用免费模型关闭：…可能会失效」，按标题找就
+   * 永远找不到。标题必须只取 rowTitle 那一个节点。
+   */
+  const titleOf = (node) => {
+    const kids = Array.isArray(node.children) ? node.children : [];
+    const head = kids[0];
+    if (head === null || head === undefined) return "";
+    const headKids = Array.isArray(head?.children) ? head.children : [];
+    const text = collectText(headKids.length > 0 ? headKids[0] : head).join("");
+    // 有些标题带**动态后缀**（「API Key」+「（已配置 …abcd）」由服务端下发的
+    // key 末四位拼成）。截到第一个全角括号为止，剩下的才是稳定标题——
+    // 否则这条断言会随夹具里 key 的提示文本变化而红。
+    const cut = text.indexOf("（");
+    return (cut >= 0 ? text.slice(0, cut) : text).trim();
+  };
+
+  const at = new Map();
+  body.forEach((node, index) => {
+    const key = typeof node.props?.key === "string" ? node.props.key : "";
+    // 分隔线：有 divider-N 的 key，且没有子节点。
+    if (key.startsWith("divider-")) {
+      at.set(key, index);
+      return;
+    }
+    const title = titleOf(node);
+    if (title.length > 0) at.set(title, index);
+    // 整块容器另外用自己的 key 记一份（custom / tolerance / points 等）。
+    if (key.length > 0) at.set(`#${key}`, index);
+  });
+  return at;
+}
+
+/**
+ * 取一块的下标。行优先按标题找（`Map` 里键是标题），找不到再按 key 找
+ * （分隔线、整块容器）。
+ */
+function blockAt(at, label) {
+  return at.has(label) ? at.get(label) : at.get(`#${label}`);
+}
+
+test("配置页四组顺序 + 三条分隔线都在正确的位置（DEC-037）", async () => {
+  const { tree } = await render(stateWith({}), { slots: { [SLOTS.decisions]: decisionsFixture } });
+  const at = configBlocks(tree);
+
+  // 期望的**完整**顺序。数组顺序即页面顺序；`divider-N` 是分隔线节点。
+  // 分组：
+  //   ① 使用免费模型
+  //   ② 服务提供方 / 模型 / API Key / 生效端点
+  //   ③ 启用守卫 / 真正拦截 / 决策历史 / 人工审核比例
+  //   ④ 思考模式 / 匿名统计 / 密钥保存位置 / custom / 诊断 / 状态
+  const EXPECTED = [
+    "使用免费模型",
+    "divider-1",
+    "服务提供方",
+    "模型",
+    "API Key",
+    "生效端点",
+    "divider-2",
+    "启用守卫",
+    "真正拦截",
+    "决策历史",
+    "人工审核比例",
+    "divider-3",
+    "思考模式",
+    "匿名统计",
+    "密钥保存位置",
+  ];
+
+  for (const label of EXPECTED) {
+    assert.ok(blockAt(at, label) !== undefined, `配置页缺少「${label}」这一块；实际顺序：${JSON.stringify([...at.keys()])}`);
+  }
+
+  // 逐对断言相对顺序：用 Map 下标，不用文本位置。
+  for (let i = 1; i < EXPECTED.length; i += 1) {
+    const prev = EXPECTED[i - 1];
+    const curr = EXPECTED[i];
+    assert.ok(
+      blockAt(at, prev) < blockAt(at, curr),
+      `「${prev}」应在「${curr}」之前（实际下标 ${blockAt(at, prev)} vs ${blockAt(at, curr)}）`,
+    );
+  }
+
+  // 第 ④ 组的收尾项也要在分隔线 3 之后（它们不进 EXPECTED 是因为
+  // custom / points 的出现依赖数据，状态行是固定块）。
+  for (const label of ["自定义 provider", "决策模型参与点", "改动即保存"]) {
+    const index = blockAt(at, label);
+    if (index !== undefined) {
+      assert.ok(index > blockAt(at, "divider-3"), `「${label}」应落在分隔线 3 之后`);
+    }
+  }
+});
+
+test("分隔线是独立的一根细线，不是 rowLine 那种两列布局（DEC-037）", async () => {
+  const { tree } = await render(stateWith({}), { slots: { [SLOTS.decisions]: decisionsFixture } });
+  const dividers = [];
+  (function walk(node) {
+    if (node === null || node === undefined || typeof node !== "object") return;
+    if (typeof node.props?.key === "string" && node.props.key.startsWith("divider-")) {
+      dividers.push(node);
+    }
+    for (const child of node.children ?? []) walk(child);
+  })(tree);
+
+  assert.deepEqual(
+    dividers.map((node) => node.props.key),
+    ["divider-1", "divider-2", "divider-3"],
+    "三条分隔线都要在，顺序必须是 1 / 2 / 3",
+  );
+
+  for (const node of dividers) {
+    const style = node.props.style ?? {};
+    // 事故形状：rowLine = display:flex + justifyContent:space-between。
+    // 分隔线不许借用它——它不是一行控件，也不该被那条滑块用例当成
+    // 「两列布局容器」收集走。
+    assert.equal(
+      style.display === "flex" && style.justifyContent === "space-between",
+      false,
+      `${node.props.key} 用了 rowLine 的两列布局形状`,
+    );
+    assert.equal(style.borderTop, "1px solid rgba(128,128,128,.32)", `${node.props.key} 应画一条顶边细线`);
+    // 没有子节点：它只是一根线，不承载任何文案。
+    assert.deepEqual(node.children, [], `${node.props.key} 不该有子节点`);
+  }
+});
+
+test("「使用免费模型」下面有一行小字「可能会失效」，且就在这一行里（DEC-037）", async () => {
+  const { tree } = await render(stateWith({}));
+  const row = findNode(tree, (item) => {
+    const children = Array.isArray(item?.children) ? item.children : [];
+    const head = children[0];
+    return head !== undefined && head !== null && collectText(head).includes("使用免费模型");
+  });
+  assert.ok(row !== null && row !== undefined, "没有找到「使用免费模型」这一行");
+  const rowText = row.children[0];
+  const lines = collectText(rowText);
+  const noteIndex = lines.indexOf("可能会失效");
+  assert.ok(noteIndex >= 0, `小字不在「使用免费模型」的 rowText 里；实际：${JSON.stringify(lines)}`);
+  // 标题 → 说明（serverHint）→ 小字：小字必须排在说明**之后**，不能抢在
+  // 说明前面（那句说明才是「这个开关干什么」，小字是它的风险注脚）。
+  assert.ok(
+    noteIndex > lines.indexOf("使用免费模型"),
+    "小字应排在标题之后",
+  );
+  // 而且它只出现一次（不是页面上某个别的地方也有这个词）。
+  assert.equal(lines.filter((line) => line === "可能会失效").length, 1, "「可能会失效」在行内出现了多次");
+});
+
+
+// ------------------------------------------- 使用免费模型（DEC-030；原名「跟随服务端下发」，DEC-037 改名）
 
 // 这一组测的是「服务端下发的值真的用上了，且没有一次把明文 key 送到界面上」。
 // 前者靠文案断言（界面显示的就是生效值）；后者只能靠**反断言**——
@@ -1415,13 +1603,13 @@ function serverProviderWith(over) {
   };
 }
 
-test("「跟随服务端下发」开关默认关，且说明用的是本地配置", async () => {
+test("「使用免费模型」开关默认关，且说明用的是本地配置", async () => {
   // 默认关是产品约束（不是风格）：装了插件的人可能已经在用自己的 key，
   // 默认开启会把他们悄悄换成服务商的账号，而他们只会看到「key 好像失效了」。
   const { text, tree } = await render(stateWith({}));
-  assert.ok(text.includes("跟随服务端下发"), `缺少开关行：\n${text.slice(0, 600)}`);
-  const toggle = toggleOfRow(tree, "跟随服务端下发");
-  assert.ok(toggle !== undefined, "没有找到「跟随服务端下发」的开关控件");
+  assert.ok(text.includes("使用免费模型"), `缺少开关行：\n${text.slice(0, 600)}`);
+  const toggle = toggleOfRow(tree, "使用免费模型");
+  assert.ok(toggle !== undefined, "没有找到「使用免费模型」的开关控件");
   assert.equal(toggle.props["aria-pressed"], false, "开关默认必须是关");
   assert.ok(
     text.includes("关闭：使用下方的本地配置（与现在完全一致）"),
@@ -1519,8 +1707,8 @@ test("服务端生效时，手动输入 key 与 provider 下拉都还在（手�
 
 test("播开关会 PUT /config 且带上 serverProvider: true", async () => {
   const { tree } = await render(stateWith({}));
-  const toggle = toggleOfRow(tree, "跟随服务端下发");
-  assert.ok(toggle !== undefined, "没有找到「跟随服务端下发」的开关");
+  const toggle = toggleOfRow(tree, "使用免费模型");
+  assert.ok(toggle !== undefined, "没有找到「使用免费模型」的开关");
 
   const stub = stubFetch();
   try {
