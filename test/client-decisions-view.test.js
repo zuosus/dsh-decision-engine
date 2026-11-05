@@ -820,7 +820,7 @@ test("「标记」表头按状态分组排序（无 → 已降级 → 缓存命�
 });
 
 test("英文界面里没有中文残留（UI 文案；记录内容是数据，不算）", async () => {
-  const { text } = await renderDecisions({
+  const view = await renderDecisions({
     lang: "en",
     slots: {
       [SLOTS.page]: {
@@ -842,10 +842,14 @@ test("英文界面里没有中文残留（UI 文案；记录内容是数据，�
       [SLOTS.expanded]: "rec-1",
     },
   });
-  const offenders = text.split("\n").filter((line) => CJK.test(line));
+  const offenders = view.text.split("\n").filter((line) => CJK.test(line));
   assert.deepEqual(offenders, [], `英文界面的 UI 文案里出现了中文：\n${offenders.join("\n")}`);
-  assert.match(text, /Tool authorization/, "决策点应显示英文名");
-  assert.match(text, /Decisions|Refresh|Verdict/, "表头/按钮应显示英文");
+  assert.match(view.text, /Tool authorization/, "决策点应显示英文名");
+  // 表头必须真的翻成英文。这里只断言**表头**：原先那句用的是
+  // `/Decisions|Refresh|Verdict/`，而「刷新」按钮已在 DEC-036 里删掉——
+  // 一个含已不存在控件的 or 断言会一直靠另一半蒙过去，等于没测它。
+  const headers = view.thTexts().join(" | ");
+  assert.equal(CJK.test(headers), false, `表头不该残留中文：${headers}`);
 });
 
 test("原始审计文本原样输出，不被翻译（记录不被篡改）", async () => {
@@ -1010,12 +1014,26 @@ test("不再有决策点筛选控件（该功能已移除）", async () => {
   // 用户要求去掉：这个交互反复出问题，移除比修更干净。
   // 断言「没有筛选按钮」比断言「筛选能用」更能防止它悄悄回来。
   const view = await renderDecisions({ page: TWO_POINTS });
-  assert.deepEqual(
-    view.buttonTexts(),
-    ["刷新"],
-    `只应剩「刷新」按钮，实际：${view.buttonTexts().join(" / ")}`,
-  );
   assert.equal(/已筛选/.test(view.text), false, "不该残留筛选提示");
+});
+
+test("顶部那一排「会话 / 总数 / 刷新」整排移除（DEC-036）", async () => {
+  // 用户要求：「不需要显示会话名称，总数，刷新按钮；删除一整排」。
+  //
+  // 断言「整排不在」而不只是「按钮不在」：会话名与计数是 **span**，不是按钮，
+  // 只数按钮的话它们悄悄回来测试照样全绿。判据同时盯三件事：
+  //   1. 一个 button 都不剩（这页没有任何需要点击的头部控件了）；
+  //   2. 没有「会话 xxxx」这种会话名（短 id 形如 `sessio…3456789`）；
+  //   3. 没有「共 N 条决策」这种计数。
+  //
+  // 时间列里本来就有 `2026-11-03 16:00:00` 这类文本，所以「没有数字」这种
+  // 粗断言用不得——只针对被删的那两句模板。
+  const view = await renderDecisions({ page: threeRows() });
+  assert.deepEqual(view.buttonTexts(), [], `这页不该剩任何按钮，实际：${view.buttonTexts().join(" / ")}`);
+  assert.equal(/会话/.test(view.text), false, "不该再显示会话名称");
+  assert.equal(/条决策/.test(view.text), false, "不该再显示决策总数");
+  // 但表格本身必须还在——证明是「少一排」，不是整页被删空。
+  assert.ok(view.thTexts().length > 0, "表格应正常渲染");
 });
 
 // ------------------------------------------------------------------ 展开定位
