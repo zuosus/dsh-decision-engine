@@ -580,7 +580,7 @@ test("列出本会话的决策：时间、决策点、提供方、模型、裁�
   assert.match(text, /工具授权/, "应显示决策点的中文名");
   assert.match(text, /bamboonode/, "应显示提供方");
   assert.match(text, /startlux-decision-27b-autothink/, "应显示模型");
-  assert.match(text, /delegate/, "应显示裁决");
+  assert.match(text, /交给主模型/, "应显示裁决（中文名）");
   assert.match(text, /1689ms/, "应显示耗时");
   assert.match(text, /2026-11-03 16:30:00/, "应显示时间");
 });
@@ -1204,3 +1204,120 @@ test("降级「标记」列写出失败原因与状态码", async () => {
   assert.equal(cells[1][COL.flags], "已降级 · auth-failed (HTTP 401)", "401 也带状态码，且不跟 detail 里的码重复");
   assert.equal(cells[2][COL.flags], "已降级", "无 detail 时只写已降级");
 });
+
+// ------------------------------------------------------------------ 裁决词的中文显示
+//
+// 裁决词是**机器词**：明细文件、遥测、`detail` 原因串里写的都是
+// `delegate` / `inline` 这种英文。可这一列是整张表唯一还在说英文的地方，
+// 中文界面读这张表时最想看的就是它。用户要求（2026-11-05）：
+// 「裁决里的英文需要对应的中文翻译：inline, delegate 等」。
+//
+// 口径：**只换显示，不换数据**。`VERDICT_LABELS` 给中文名，
+// `EN_LABELS` 把中文名翻回**机器词本身**，所以英文界面与改前逐字一致。
+
+/** 全部 16 个裁决词 → 中文名（与 lib/client.js 的 VERDICT_LABELS 同源口径）。 */
+const VERDICT_ZH = {
+  allow: "照常放行",
+  keep: "保留原模型",
+  delegate: "交给主模型",
+  switch: "换模型",
+  redirect: "改用别的技能",
+  advise: "建议分派",
+  prune: "裁剪结果",
+  summarize: "摘要压缩",
+  continue: "续一轮",
+  translate: "翻译",
+  stop: "收束本轮",
+  inline: "自己接着做",
+  skip: "跳过",
+  ask: "转人工确认",
+  deny: "拒绝执行",
+  degraded: "降级未裁决",
+};
+
+/** 每个裁决词一条记录，用来逐列取「裁决」格。 */
+const ALL_VERDICTS = {
+  entries: Object.keys(VERDICT_ZH).map((action, index) =>
+    entry({
+      seq: index + 1,
+      id: `rec-verdict-${action}`,
+      ts: `2026-11-05T08:${String(index).padStart(2, "0")}:00.000Z`,
+      action,
+    }),
+  ),
+  total: Object.keys(VERDICT_ZH).length,
+};
+
+test("裁决列写中文名：16 个裁决词全覆盖", async () => {
+  const view = await renderDecisions({ page: ALL_VERDICTS });
+  const cells = view.rowCells();
+  assert.equal(cells.length, Object.keys(VERDICT_ZH).length, "每个裁决词都该有一行");
+  const shown = cells.map((row) => row[COL.action]);
+  assert.deepEqual(
+    shown,
+    Object.keys(VERDICT_ZH).map((action) => VERDICT_ZH[action]),
+    `裁决列应按词一一对应显示中文名，实际：${shown.join(" | ")}`,
+  );
+  // 机器词不该再出现在中文界面的这一列里。
+  const leaked = Object.keys(VERDICT_ZH).filter((action) =>
+    shown.some((cell) => cell === action),
+  );
+  assert.deepEqual(leaked, [], `这些裁决词还是英文：${leaked.join(", ")}`);
+});
+
+test("原始机器词留在裁决格的 title 上（对照明细文件与日志用）", async () => {
+  const view = await renderDecisions({ page: { entries: [entry({ seq: 1, action: "inline" })], total: 1 } });
+  const tags = findNodes(view.tree, "span");
+  const titles = tags.map((node) => node.props?.title).filter((value) => typeof value === "string");
+  assert.ok(titles.includes("inline"), `title 应带原始机器词，实际：${titles.join(" | ")}`);
+});
+
+test("英文界面：裁决列翻回机器词，且不残留中文", async () => {
+  const view = await renderDecisions({ page: ALL_VERDICTS, lang: "en" });
+  const shown = view.rowCells().map((row) => row[COL.action]);
+  assert.deepEqual(
+    shown,
+    Object.keys(VERDICT_ZH),
+    `英文界面就该显示机器词本身，实际：${shown.join(" | ")}`,
+  );
+  const leftover = view.text.split("\n").filter((line) => CJK.test(line.trim()));
+  assert.deepEqual(leftover, [], `英文界面残留中文：\n${leftover.join("\n")}`);
+});
+
+test("未登记的裁决词退回原词，不显示空格或 undefined", async () => {
+  // 新裁决词在 `lib/outcomes.js` 登记了、却忘了补中文名时，界面必须还能读。
+  const view = await renderDecisions({ page: { entries: [entry({ seq: 1, action: "brand-new-word" })], total: 1 } });
+  assert.equal(view.rowCells()[0][COL.action], "brand-new-word", "未登记的词应原样显示");
+});
+
+test("裁决列按中文名排序，不按机器词的字母序", async () => {
+  // keep / advise / allow 三个词：机器词字母序是 advise < allow < keep，
+  // 中文名序是 保留原模型 < 建议分派 < 照常放行，时间序又是第三种排列
+  // （夹具把 ts 排成 keep → allow → advise）——三条顺序互不相同，
+  // 排错任何一条都会显形。
+  const fixture = {
+    entries: [
+      entry({ seq: 1, id: "rec-advise", ts: "2026-11-05T08:02:00.000Z", action: "advise" }),
+      entry({ seq: 2, id: "rec-allow", ts: "2026-11-05T08:01:00.000Z", action: "allow" }),
+      entry({ seq: 3, id: "rec-keep", ts: "2026-11-05T08:00:00.000Z", action: "keep" }),
+    ],
+    total: 3,
+  };
+  const view = await renderDecisions({ page: fixture });
+  // 非时间列首点从降序起（DEC-028 的口径），再点才翻回升序。
+  await view.clickTh(COL.action);
+  const desc = view.rowCells().map((row) => row[COL.action]);
+  assert.deepEqual(
+    desc,
+    ["照常放行", "建议分派", "保留原模型"],
+    `首点应是中文名降序，实际：${desc.join(" | ")}`,
+  );
+  await view.clickTh(COL.action);
+  const asc = view.rowCells().map((row) => row[COL.action]);
+  assert.deepEqual(
+    asc,
+    ["保留原模型", "建议分派", "照常放行"],
+    `再点应翻回升序，实际：${asc.join(" | ")}`,
+  );
+});
+

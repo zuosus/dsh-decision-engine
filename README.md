@@ -78,6 +78,19 @@ Windows 上形如 `C:\Users\<name>\.dsh\`）。解析顺序与宿主一致：显
 **列表滚动时表头（时间 / 决策点 / …）保持冻结**，记录多了也看得到列名。
 **每一列表头都可点排序**（再点切换升降序；默认按时间升序）。
 
+**「裁决」列写中文**：`delegate` 交给主模型 · `ask` 转人工确认 · `deny` 拒绝执行 ·
+`keep` 保留原模型 · `switch` 换模型 · `inline` 自己接着做 · `advise` 建议分派 ·
+`summarize` 摘要压缩 · `prune` 裁剪结果 · `continue` 续一轮 · `stop` 收束本轮 ·
+`allow` 照常放行 · `skip` 跳过 · `redirect` 改用别的技能 · `translate` 翻译 ·
+`degraded` 降级未裁决。裁决词本身是**机器词**（明细文件、遥测、原因串里都写它），
+所以数据一个字节没动，只在渲染处换中文；鼠标停在标签上能看到原始词，英文界面
+显示的也仍是这些原词。这一列的排序按中文显示名排，与其它列同一口径。
+
+The **verdict** column is localized: the machine words (`delegate`, `inline`,
+`advise`, …) stay exactly as they are in `decisions.jsonl` and telemetry — only
+the display carries a Chinese gloss, with the raw word available on hover, and
+the English UI keeps showing the words themselves.
+
 With the feature on, each session gains a **Decisions** tab right after
 Chat and Trajectory. It lists every decision this plugin made in *that* session
 in time order, in eight columns: time / decision point / provider / model /
