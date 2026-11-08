@@ -337,6 +337,10 @@ test("轻松档：未达线但严重度够高的调用由 tolerance 升级，理
     // 而不是伪造一条模型结论。
     assert.match(decision.reason, /人工审核比例/, "档位触发的 ask 必须自称是档位要求");
     assert.ok(decision.displayReason !== undefined, "tolerance 触发的 ask 也必须带 displayReason（DEC-019）");
+    // DEC-041：标题给人读，只点名档位；`severity=` 与 0.xxx 只留在 reason 里。
+    assert.doesNotMatch(decision.displayReason.zh, /severity=/);
+    assert.doesNotMatch(decision.displayReason.zh, /\d\.\d/);
+    assert.match(decision.displayReason.zh, /轻松/, "标题应点名用户选的「轻松」档");
   } finally {
     env.restore();
   }

@@ -1,6 +1,139 @@
 # DECISIONS.md — 设计决策日志
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
+## DEC-042 审批卡正文可读化：接管宿主的 detail slot，摘要 + 可展开原文（默认关闭）（2026-11-08）
+
+**背景**：用户看到一张审批卡截图，原话是「**conversation.approval.detail 完全没有可读性**」。
+那张卡的正文里塞着一条十几行的 `python3 - <<'PY'` + 4 行脚本正文，**既不分行、也看不出在做什么**——
+一整块等宽文本糊在卡片中间。
+
+**这块归谁**：`conversation.approval.detail` 是**宿主**的 slot。卡片本身由
+`@deepseek-ai/dsh-client-ui-approval` 的 `ApprovalPanel` 渲染，标题下那块正文由
+`@deepseek-ai/dsh-client-ui-chat` 的 `ApprovalCommand` 填：它按 `callId` 从 chat 快照里找到
+那次 tool-call、取 `args.command` **原样**显示，样式是 `.ImxglW_command`
+（`word-break: break-all`、**没有** `white-space: pre-wrap`）。所以换行被折叠——
+
+**不是内容太长，是换行被吃掉了**。这是可读性问题的真正根因，与措辞无关。
+
+**决定**：把这块接管过来，做成「摘要 + 可展开的原文」，但**默认关闭**。
+
+- 新增配置 `approvalDetailReadable`（默认 `false`）。关闭时一行代码都不接管，行为与升级前**零差异**；
+  打开才注册到 `conversation.approval.detail`。
+- **为什么做成开关而不是直接改**：接管意味着这块 UI 的呈现由我们负责，宿主将来改它的样子
+  （换组件、加字段、改交互）时我们**不会自动跟上**。把它做成默认关闭的选项，是「想读得懂命令的人
+  自己打开」与「不想被插件牵着走的人维持现状」之间唯一诚实的取舍。
+- **接管机制**（对着宿主 runtime 核过）：single slot 在同一 `priority` 下**重复注册会直接抛错**，
+  排序按 `priority` **升序**（数值小的先渲染，即先赢）。宿主 `ApprovalCommand` 用默认 `priority: 0`，
+  所以我们必须显式给 **`-1`** 才盖得过它。注册走 `ctx.slots.inject(...)`，等宿主声明该 slot 后再登记。
+- **命令原文怎么拿到**：宿主 `ApprovalCommand` 自己就是从 chat 快照里捞的（`callId` → tool-call 节点
+  → `argsRaw` → `JSON.parse().command`）。我们注册在同一 session 作用域，宿主
+  `ctx.uiSession.provide({ hooks: ["chat"] })` 会把 `useChat` 合成到**每个** session-scope entry 上
+  （`standardHookPropName("chat") === "useChat"`），因此拿得到同一个快照源。拿不到时不抛、退回
+  `null`（等于什么都不做，最坏情况与关闭时一致）。
+- **摘要怎么做**：决策端点只有 `choice` / `score` / `noul` 三种题型、**没有自由文本**，所以
+  「让小模型写一句人话解释这条命令」架构上做不到。改为**确定性**切分（`lib/approval-detail.js`）：
+  按 `&&` / `||` / `;` / `|` / 换行切成步骤，引号内部不切；heredoc 整段识别成「执行一段脚本（N 行）」
+  而不是把脚本正文当命令切开；每个步骤过一遍危险规则（`rm -rf` / `mkfs` / `curl … | sh` / `sudo` …）。
+- **危险级别算两遍**：整条原文一遍、每个步骤一遍。只算步骤会漏掉 `curl https://x.sh | sh`——
+  切开后 `curl https://x.sh` 与 `sh` 单独看都无害，危险恰恰在它们的**组合**里。
+- **原文保真**：展开态显示的仍是 `args.command` 原文，只是 `white-space: pre-wrap`（保住换行）、
+  `word-break: break-word`（长 token 不撑破容器，不用 `break-all` 那种从词中间劈开的写法）、
+  `max-height: 220px` + 内部滚动。**摘要永远只是导读**：用户按「允许」后真正执行的是原文，
+  摘要与原文不一致就是欺骗。
+
+**没做的事**：
+
+- 没改宿主的包，也没动 `ApprovalCommand`（我们只是抢在它前面渲染同一个 slot）。
+- 没让摘要替代原文：原文必须可展开核对。
+- 没把危险标记接进裁决：那是 `decideGuard()` 的职责，这里只做「让人一眼看到」，不是判据
+  （`test/approval-detail.test.js` 不与被守卫语义耦合）。
+- 没有真的在真机上点开验证过（本轮只在 Node 里对着渲染树与注册行为断言）。
+
+**已知限制**：
+
+- `client.js` 的 `require` 只解析 shell 的共享模块表，加载不了本包其它文件，所以解析器**必须内联**
+  一份进 `lib/client.js`。两份实现有漂移风险，由 `test/approval-detail.test.js` 的
+  「逐字同源」用例守住（去掉注释/空白后比对函数体源码）。
+- 步骤清单是**启发式**：刻意不做完整 shell 解析（转义、变量展开、子 shell、函数定义都处理不了）。
+  切不准时把剩余部分并成一条，宁少说不多说。
+- 接管后宿主对这块的任何改进都不会自动生效，直到我们跟上。
+
+**验证**：`node --test test/` 579 项全绿（新增 `approval-detail.test.js` 11 项、
+`approval-detail-toggle.test.js` 4 项、`approval-detail-mount.test.js` 4 项），
+`node scripts/verify-wiring.mjs` 通过。
+
+**改动文件**：`lib/approval-detail.js`（新，确定性切分与危险识别）、`lib/client.js`（内联同一份实现 +
+`ApprovalDetailView` + 按开关挂载/卸载 + 配置页一行 + 中英词表）、`lib/index.js`（
+`approvalDetailReadable` 的 DEFAULTS / schema / status 回传 / 保存白名单）、
+`test/approval-detail.test.js`（新）、`test/approval-detail-toggle.test.js`（新）、
+`test/approval-detail-mount.test.js`（新）、`DECISIONS.md`。
+
+## DEC-041 审批卡标题改成人话：先说什么操作，再说为什么问（2026-11-08）
+## DEC-041 审批卡标题改成人话：先说什么操作，再说为什么问（2026-11-08）
+
+取代: DEC-019（**只取它「`displayReason.zh` 与 `reason` 逐字相同」那一条**；DEC-019 的双语
+通道、`en` 必须存在且可作回退值、deny / delegate 不带 `displayReason` 三条全部保留）。
+DEC-019 条目本身按 append-only 规则原样不动，失效由本条声明。
+
+**背景**：用户原话「审批内容对于人类没有可读性，有没有可能提升可读性？」。卡上真正的问题
+不是翻译，是**词本身不是给人看的**：标题正文是审计原文
+`decision-engine: 中风险调用，需人工确认（risk=medium p=0.84 irrev=0.74 task=0.78 inj=0.03）`，
+括号里五个 `key=值` 全是遥测字段名，用户既不知道 `p` 是什么，也不知道 0.84 该让他更放心还是
+更紧张。
+
+**机制（宿主只给我们一个文字渠道）**：宿主审批卡
+（`@deepseek-ai/dsh-client-ui-approval` 的 `ApprovalPanel`）上
+属于我们的文字只有**正文标题**——有 `displayReason` 就按宿主语言走
+`ctx.locale.resolveText()` 解析，否则回退到 `reason`。卡上其余文字都是宿主的：状态条
+「等待审批」、三个按钮，以及中间那条 detail 行——它由宿主的 `ApprovalCommand` 渲染，只从
+关联 tool call 的 `args.command` 取 bash 命令，所以 `write` / `edit` / `apply_patch` 这类工具
+的审批卡那一行是**空白**。于是对写文件这类操作，整张卡唯一的人类文字就是那串字段名。
+
+**为什么不动 `reason`**：`reason` 进宿主的 `approval/asked` 审计事件，也进本插件遥测的
+`detail`（DEC-019 已钉过这个口径，`test/guard-threshold.test.js` 还断言了其中的中文）。
+改写 `reason` 会让历史审计与遥测口径漂移。**只改标题、`reason` 逐字不动**，是唯一既提升
+可读性、又不制造历史漂移的做法。
+
+**决定**：
+
+- **拆表**。原来一张 `GUARD_ASK_COPY` 同时喂 `reason` 与 `displayReason.zh`（这就是 DEC-019
+  那条「逐字相同」的物理来源）。拆成两张：`GUARD_ASK_REASON`（**四条 reason 逐字不变**，
+  审计与遥测口径零漂移）与 `GUARD_ASK_TITLE`（新的日常语言标题正文，不含任何字段名、不含
+  裸小数）。
+- **标题点名操作对象**。新增 `toolHint(tool, args)`：`write` / `edit` / `apply_patch` →
+  「修改文件 <路径>」（`apply_patch` 从 patch 文本的 `*** Update File:` 行捞路径，它没有
+  `file_path` 字段）；`read` → 「读取文件 <路径>」；其它 → 「使用 <tool> 工具」。路径超
+  60 字符截断加「…」。这一节正好补上宿主 detail 行的空档——`write` / `edit` 在那里什么都
+  不显示。**`bash` / `shell` 刻意不加这一节**：它的 `args.command` 已经由宿主那行 detail
+  显示在标题正下方，标题再写「命令行操作」是同一件事说两遍。
+- **标题三节结构（中英同构）**：`decision-engine：<工具提示> · <为什么问> · 需要你确认`
+  （en: `decision-engine: <hint> · <copy> · needs your confirmation`）。模型判出来的四条
+  正文为：`输入里疑似藏着给 AI 的指令（提示注入）` / `高风险，可能删除内容、外传数据或越出
+  工作区` / `中风险，会改动可恢复的状态` / `风险低，但可能改不回来，也不像在服务当前任务`。
+- **tolerance 那条单独措辞**：它是档位设定要求问的，不是模型判出来的，所以
+  zh `decision-engine：<工具提示> · 你选的「<档位名>」档要求这次也确认一下`、
+  en `decision-engine: <hint> · your "<LevelName>" review setting asks to confirm this call`，
+  **不带**「需要你确认」（否则一句话说两遍）。
+- **没有工具上下文时省掉工具那一节**（纯函数单测直接调 `decideGuard(answers, cfg)` 就是这种
+  情形），其余结构不变。
+
+**取代 DEC-019 的哪一条**：只取代「`displayReason.zh` 与 `reason` 逐字相同」。保留的是：
+`displayReason` 仍是 `{ zh, en }` 成对、`en` 必须存在且不含 CJK（`resolveText` 需要回退值）、
+deny / delegate 不带 `displayReason`。
+
+**没做的事**：没改 `reason`（审计原文一字不动）；没接管宿主的
+`conversation.approval.detail` slot（那是宿主 chat 包的 single slot，抢过来等于和宿主版本
+耦合，宿主改一次渲染我们这边就崩）；没动会话侧栏「决策历史」页里的审计原文展示——那是
+诊断视图，本来就该看原文，不是给人日常读的。
+
+**验证**：`test/guard-display-reason.test.js` 改为新契约，含两条守卫——「`reason` 四条逐字
+未变」「标题里没有 `risk=` 之类的字段名、没有裸小数」；`node --test test/` 554+ 项全绿；
+`node scripts/verify-wiring.mjs` 通过。
+
+**改动文件**：`lib/index.js`（拆表 + `toolHint` + 标题拼装）、
+`test/guard-display-reason.test.js`（新契约）、`test/tolerance-guard.test.js`（tolerance 标题
+措辞）、`README.md`、`package.json`（1.5.1 → 1.5.2）、`DECISIONS.md`。
+
 ## DEC-040 ⛔️ 取消配置页 / 统计页容器的最大宽度：那 620px 不是留白，是一条横向滚动条（2026-11-08）
 
 取代: DEC-007（**只取它容器宽度那一句**——「统计页 1000px，配置页 620px」；统计独立成页
