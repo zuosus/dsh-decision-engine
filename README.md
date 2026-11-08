@@ -201,17 +201,44 @@ unsaved-with-reason.
 **界面语言跟随宿主 / UI language follows the host**：配置页与统计页会自动使用宿主
 （DSH 设置 → 语言）当前的语言：中文宿主显示中文，英文宿主显示英文，切换语言时面板
 即时跟随，无需重开。宿主未提供语言时按浏览器语言判断。文案由插件自带的词表提供，
-因此与插件信息页里的标题/描述独立。工具授权审批卡的**标题**同样跟随宿主语言：插件按
-宿主的 `PreToolDecision.displayReason` 契约成对给出中英两种文案，`reason` 保持中文
-原文，只用于审批审计与遥测。
+因此与插件信息页里的标题/描述独立。工具授权审批卡的**标题**同样跟随宿主语言，而且
+标题讲人话——它说明这次要做什么、为什么问，例如
+`decision-engine：修改文件 /path/a.ts · 中风险，会改动可恢复的状态 · 需要你确认`，
+不再把 `risk=… p=…` 这类遥测字段塞进标题（`write` / `edit` 这类工具在宿主卡上本来
+就没有命令那行 detail，标题是唯一的人类文字，所以标题里点名操作对象）。`reason`
+保持中文审计原文不动，只进审批审计与遥测。
+
+**审批卡正文**（标题下面那块命令）另有一个开关 **`approvalDetailReadable`**（配置页叫
+「审批卡正文可读化」，**默认关闭**）。打开后插件接管宿主的 `conversation.approval.detail`，
+把命令改成「摘要 + 可展开的原文」：先给出「几步、其中哪几步是危险动作」（`rm -rf` /
+`curl … | sh` / `sudo` 这类会被标出来），摘要下方列出每个步骤；原文默认收起，点开仍可
+逐字核对——**真正执行的永远是原文**。摘要由确定性规则切分（`&&` / `||` / `;` / `|` /
+换行，heredoc 整段识别成「执行一段脚本（N 行）」），不经过决策模型——端点只有
+`choice` / `score` / `noul` 三种题型、没有自由文本。关闭时完全不接管，与升级前零差异。
 
 The config and stats panels use the host language (DSH settings → Language): a Chinese
 host gets Chinese, an English host gets English, and the panel follows a live switch
 without reopening. When the host exposes no language, the browser language decides.
 Translations live in the plugin's own dictionary, independent of the manifest title.
-A tool-authorization approval card's **title** follows the host language too: the plugin
-supplies the host's paired `PreToolDecision.displayReason`, while `reason` stays the
-Chinese original for the approval audit trail and telemetry.
+A tool-authorization approval card's **title** follows the host language too, and it
+speaks plain language: it says what this call does and why it is asking, e.g.
+`decision-engine: modifying /path/a.ts · medium risk — modifies recoverable state · needs your confirmation`,
+instead of stuffing telemetry fields such as `risk=… p=…` into the title (`write` / `edit`
+calls have no command detail line on the host card, so the title is the only human text
+there). `reason` stays the Chinese audit original for the approval audit trail and
+telemetry.
+
+The **command block inside an approval card** (below the title) has its own switch,
+**`approvalDetailReadable`** (labelled "Readable approval-card command block" on the config
+page, **off by default**). When on, the plugin takes over the host's
+`conversation.approval.detail` and turns the raw command into a summary plus an expandable
+original: how many steps there are and which look risky (`rm -rf`, `curl … | sh`, `sudo`)
+come first, then each step on its own line; the original is collapsed by default and can be
+expanded to compare byte for byte — **the original is always what actually runs**. The
+summary is produced by deterministic rules (`&&`, `||`, `;`, `|`, newlines, with heredocs
+recognised as "runs a script (N lines)"), never by the decision model, whose endpoint only
+answers `choice` / `score` / `noul` and has no free text. When off, nothing is taken over
+and behaviour is identical to before.
 
 ## 人工审核比例：模型无关的打扰频率 / Review tolerance: a model-agnostic interruption rate
 
