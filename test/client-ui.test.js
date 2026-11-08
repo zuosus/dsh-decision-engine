@@ -1553,6 +1553,23 @@ test("分隔线是独立的一根细线，不是 rowLine 那种两列布局（DE
   }
 });
 
+test("配置页与统计页的容器不限制最大宽度（DEC-040）", async () => {
+  // 用户反馈：配置内容被框死在一个固定宽度里，比它宽的那部分要**手动左右拖**
+  // 才看得到。关键在于这一层同时是 `overflowY: auto`——CSS 规范里，一个轴不是
+  // visible 时另一个轴的 visible 按 auto 处理，所以 `maxWidth` 在这里不是「留白」，
+  // 而是货真价实的一条横向滚动条。这条用例防的是有人把像素上限改回来。
+  for (const tab of ["config", "stats"]) {
+    const { tree } = await render(stateWith({}), { slots: { [SLOTS.tab]: tab } });
+    const style = tree.props.style ?? {};
+    assert.ok(
+      style.maxWidth === undefined || style.maxWidth === "none",
+      `${tab} 页容器不应限制最大宽度，实际：${JSON.stringify(style.maxWidth)}`,
+    );
+    // 纵向滚动仍归这一层自己管（宿主那条链会长到内容高度，见 DEC-022）。
+    assert.equal(style.overflowY, "auto", `${tab} 页容器应保留纵向滚动`);
+  }
+});
+
 test("「使用免费模型」下面有一行小字「可能会失效」，且就在这一行里（DEC-037）", async () => {
   const { tree } = await render(stateWith({}));
   const row = findNode(tree, (item) => {
@@ -1783,7 +1800,8 @@ test("配置页渲染四段滑块，且四个段依次是 自治 / 轻松 / 默�
   }
 
   // 比例说明必须出现在轨道下方那一行——它取代了原本挤在落点上的尾注
-  //（落点放不下「轻松（只问最前 1%）」，在 620px 面板里只能换行叠成一团）。
+  //（落点放不下「轻松（只问最前 1%）」，窄面板里只能换行叠成一团；容器自 DEC-040
+  //  起不再限宽，但窗口窄的时候这条照样成立）。
   // 断言「当前档位」这一行：默认档不按比例，所以说的是模型自己的判断。
   assert.ok(
     text.includes("默认：按决策模型自己的判断"),
