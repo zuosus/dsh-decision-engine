@@ -1,6 +1,29 @@
 # DECISIONS.md — 设计决策日志
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
+## DEC-039 插件页连简介也不显示：DETAIL 文档置空（2026-11-08）
+
+**背景**：DEC-038 把 README 挡掉后，用户仍看到「详细介绍」区里那两行简介，明确要求**不显示任何简介**。
+
+**机制**：宿主取文档的顺序是 `meta.detail` → README → 仓库 README，三条路里没有任何一条能声明
+「我没有文档」——README.md 又被 npm **强制打进 tarball**（实测 `files` 删掉它仍在包里，`npm pack
+--dry-run` 可见）。所以唯一可控的出口是第一条：让 `meta.detail` 指向的文件**存在且为空**。
+`readPackageDocument` 返回 `{origin:'locale', markdown:''}`，宿主 `detailDocumentState` 拿到
+`found` + 空串，渲染出的 section 内容是零高的空 div——简介不再出现，README 也永远不会被兜底读到
+（`meta.detail` 一旦命中就不再走 README 那一步，哪怕文件是空的）。
+
+**为什么不改回 locale 里删掉 meta.detail**：那会立刻退回 DEC-038 的病灶——README 整个显示出来。
+**为什么不能指向一个不存在的文件**：宿主契约是 `invalid` 失败并显示「插件声明的详细介绍文件无效」
+红字，不是隐藏。
+
+版本仍在 1.5.1 内（npm 未发过 1.5.1，移动 tag 即可）。
+
+**验证**：本地实测 `readPackageDocument`（宿主同一套 `dsh-plugin-detail`）zh/en 两条语言链均返回
+`origin:'locale'`、`markdown:''`；`node --test test/` 553 项全绿；`npm pack --dry-run` 确认两个
+空 DETAIL 文件仍在包内。
+
+**改动文件**：`docs/DETAIL.zh.md`、`docs/DETAIL.md`（清空，保留文件本身）、`DECISIONS.md`。
+
 ## DEC-038 插件页不再显示整个 README：locale 声明 meta.detail 指向精简 DETAIL 文档（2026-11-08）
 
 **背景**：用户报告 DSH 插件页（配置入口所在页）的「详细介绍」区渲染了**整个 README**（36 kB、
