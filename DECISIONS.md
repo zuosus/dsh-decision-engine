@@ -1,6 +1,38 @@
 # DECISIONS.md — 设计决策日志
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
+## DEC-038 插件页不再显示整个 README：locale 声明 meta.detail 指向精简 DETAIL 文档（2026-11-08）
+
+**背景**：用户报告 DSH 插件页（配置入口所在页）的「详细介绍」区渲染了**整个 README**（36 kB、
+一百多节），要求修复后发布 1.5.1。
+
+**根因**：宿主的详细介绍取文档顺序（`@deepseek-ai/dsh-plugin-detail` 的 `readPackageDocument`）是
+「locale 的 `meta.detail` → 包 README → 仓库 README」。本插件的 `locale/zh.json` / `en.json` 只有
+`meta.title/description`、没有 `meta.detail`，于是宿主直接读 `README.md`。README 是给 GitHub /
+npm 首页写的完整文档，本来就不适合塞进设置页那一块——这不是渲染 bug，是**包没有声明该显示什么**。
+
+**决定**：按官方插件的同一做法（dsh-experimental-auto-review / agent-team 等都是 `docs/DETAIL.md`）
+补 `meta.detail` 声明：
+
+- `docs/DETAIL.zh.md` / `docs/DETAIL.md`：两三句定位 + provider 清单概述 + 文档站链接，一屏内读完；
+- `locale/zh.json` → `meta.detail: "docs/DETAIL.zh.md"`，`locale/en.json` → `"docs/DETAIL.md"`；
+- `package.json` 的 `files` 加 `docs/DETAIL.md`、`docs/DETAIL.zh.md`（只点名这两个文件，
+  `docs/lessons/` 不发）；README.md 照旧随包发布（npm 强制打包 README，去掉它只是徒劳），
+  但 `meta.detail` 命中后宿主**不会**再读它，所以配置页看到的就是 DETAIL 而不是 README。
+- 版本 1.5.0 → 1.5.1；顺带把此前工作区里未提交的 `engines.dsh: ">=0.2.0 <0.3.0"` 一并纳入本发布
+  （与 profile 里其它插件的 engines.dsh 门槛写法一致）。
+
+**为什么不直接删 README**：npm pack 无视 `files` 强制包含 README，仓库主页也依赖它；
+`meta.detail` 指向的文件若声明了但不存在会以 `invalid` 失败（且不会回落 README），所以两个
+DETAIL 文件必须进包——这是本条把 `files` 也改掉的原因。
+
+**验证**：`node --test test/` 553 项全绿（无改动测试）；`node scripts/verify-wiring.mjs` 全部通过；
+`npm pack --dry-run` 确认 `docs/DETAIL.md`、`docs/DETAIL.zh.md` 在包内。宿主侧取文档逻辑
+（`readPackageDocument` 对本地目录）实测 `meta.detail` 命中后 `origin=locale`、不再落 `readme`。
+
+**改动文件**：`docs/DETAIL.zh.md`、`docs/DETAIL.md`（新增）、`locale/zh.json`、`locale/en.json`、
+`package.json`（version / files / engines.dsh）、`DECISIONS.md`。
+
 ## DEC-037 配置页重排 + 改名：四组、三条分隔线、「跟随服务端下发」改叫「使用免费模型」（2026-11-05）
 
 **背景**：配置页长到十几行、十几个控件，全部平铺在一条竖直列表里，没有分组。用户的要求
