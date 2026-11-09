@@ -47,6 +47,7 @@ const baseCfg = (over = {}) => ({
   turnStopClosedFloor: 0.6,
   turnStopUnfinishedFloor: 0.6,
   turnStopValueFloor: 0.35,
+  turnStopAwaitingUserFloor: 0.5,
   retrievalCoveredFloor: 0.5,
   retrievalWouldAddCeiling: 0.8,
   skillPickCandidates: 8,
@@ -667,6 +668,83 @@ test("轮次：判 continue 时 steer 一次，且不再续第二次", async () 
   assert.equal(steered.length, 1, "每轮最多续一次");
   assert.equal(steered[0].source.kind, "turnStop");
   assert.equal(calls.length, 1, "已达上限后不再询问");
+});
+
+test("轮次：模型判出在等用户时**不 steer**（让位给用户，DEC-045）", async () => {
+  // 「你选 A 还是 B？」这一轮：unfinished 高、value 高——若不设边界，
+  // 插件会续一轮，等于替用户把选择顶掉。
+  const { runner } = makeRunner({
+    modes: { turnStop: "enforce" },
+    classify: () => ({
+      answers: {
+        unfinished: { type: "noul", noul: 0.9 },
+        value: { type: "noul", noul: 0.9 },
+        closed: { type: "noul", noul: 0.05 },
+        awaiting_user: { type: "noul", noul: 0.95 },
+      },
+      model: "m",
+      latencyMs: 8,
+      cached: false,
+    }),
+  });
+  const ctx = makeCtx();
+  mountAgentPoints(ctx, {
+    runner,
+    getConfig: () => baseCfg({ turnStopMaxSteers: 1 }),
+    digestRecent: () => "",
+    telemetry: { noteAdapterError() {} },
+    makeUserMessage: (text, kind) => ({ role: "user", content: [{ type: "text", text }], source: { kind } }),
+  });
+  const steered = [];
+  const agent = { session: makeSession(), steer: (message) => steered.push(message) };
+  await ctx.listener("agent/turn-stopping")({ turn: 1, agent });
+  assert.equal(steered.length, 0, "在等用户时绝不续轮");
+});
+
+test("轮次：新宿主形状（只有 snapshotEvents）也能读到助手最后一句话", async () => {
+  // 宿主把公开的 events 数组换成了 snapshotEvents()；插件原来的写法
+  // `session.events ?? []` 会静默拿到空数组（DEC-045 的两个真 bug 之一）。
+  const events = [
+    {
+      type: "assistant/message",
+      seq: 0,
+      data: { message: { role: "assistant", content: [{ type: "text", text: "你要选 A 还是 B？" }] } },
+    },
+  ];
+  const modernSession = {
+    snapshotEvents: () => events,
+    surface: { nodes: [] },
+    header: { cwd: "/tmp" },
+  };
+  let seenState;
+  const { runner } = makeRunner({
+    modes: { turnStop: "enforce" },
+    classify: (call) => {
+      seenState = call.state;
+      return {
+        answers: {
+          unfinished: { type: "noul", noul: 0.2 },
+          value: { type: "noul", noul: 0.2 },
+          closed: { type: "noul", noul: 0.9 },
+        },
+        model: "m",
+        latencyMs: 8,
+        cached: false,
+      };
+    },
+  });
+  const ctx = makeCtx();
+  mountAgentPoints(ctx, {
+    runner,
+    getConfig: () => baseCfg(),
+    digestRecent: () => "",
+    telemetry: { noteAdapterError() {} },
+    makeUserMessage: (text, kind) => ({ role: "user", content: [{ type: "text", text }], source: { kind } }),
+  });
+  const agent = { session: modernSession, steer: () => {} };
+  await ctx.listener("agent/turn-stopping")({ turn: 1, agent });
+  assert.ok(seenState !== undefined, "应当发过一次判断");
+  assert.equal(seenState.last, "你要选 A 还是 B？", "新宿主上必须读得到助手最后一句话");
 });
 
 test("轮次：observe 不 steer", async () => {

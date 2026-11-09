@@ -50,11 +50,11 @@ const range = () =>
 test("裁决矩阵覆盖九个决策点的全部裁决词", () => {
   // 映射表是「漏登记」的防线。少登记一个 kind，那一格的计数就静默偏小。
   const expected = {
-    authorize: ["delegate", "ask", "deny"],
+    authorize: ["delegate", "ask", "deny", "defer"],
     route: ["keep", "switch"],
     delegate: ["inline", "advise"],
     compact: ["summarize", "prune"],
-    turnStop: ["continue", "stop"],
+    turnStop: ["continue", "stop", "defer"],
     retrieval: ["allow", "skip"],
     skillPick: ["allow", "redirect"],
     cotTranslate: ["translate", "skip"],

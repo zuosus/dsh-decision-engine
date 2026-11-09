@@ -448,6 +448,33 @@ human review.
 本插件**不设每小时 token 预算**：命中缓存后几乎为零，而「超限即停止判断」会让守卫在最需要
 它的时候失效。
 
+### 作用域边界：哪些决定不归本插件管 / Scope boundary
+
+插件的定位是「便宜的判断层」，不是「替你拿主意」。有几类决定**天然不属于**它：
+
+| 场景 | 能不能分清 | 插件怎么做 |
+|---|---|---|
+| **写入工作区之外** | **能**（确定性） | 放行并把决定权留给宿主沙箱与你（`guardDeferOutsideWorkspace`，默认开） |
+| **模型给了几套方案让你挑** | **不能**（意图不可观测） | 交给模型判，但只用于**让位**：不替你选 |
+| **模型有关键问题没问清** | **不能**（意图不可观测） | 同上 |
+
+「能不能分清」的诚实答案是**分两种**：越界写入是纯路径计算（宿主的
+`ctx.sandboxPolicy` 给出写根清单，目标路径是参数里的字面量），不需要模型；
+而「这一轮是不是在等你」**只存在于模型的意图里**——宿主没有这个状态位
+（`turn/end` 的 reason 是封闭集合，没有 `ask` 成员；`agent/turn-stopping`
+的载荷里也没有 reason 字段）。
+
+所以后者交给决策模型判断，但模型的判断**只有一个方向**：`这一轮在等用户 → 插件退出`。
+它**不会**变成「所以我替你选了方案 A」或「所以我替你回答了这个问题」——
+插件没有任何「代替用户决定」的路。这条线由测试守住
+（`test/scope.test.js` 穷举输入组合，断言可返回的裁决词只有
+`continue` / `stop` / `defer`）。
+
+Two kinds here, not one: an out-of-workspace write is a pure path computation and is
+decided deterministically; whether the assistant is waiting on you lives only in the
+model's intent and cannot be observed from the host. Either way the plugin's answer is
+the same — it steps aside. It never picks for you.
+
 ## 省 token 的设计 / Token-saving design
 
 - **精确缓存**（唯一默认开启的层）：完整 `state` + 问题集一致即复用，命中即不发请求。

@@ -21,3 +21,6 @@ node_modules
 site/dist/
 site/worker/
 site/.env*
+
+# npm 凭据：含 auth token，绝不入库
+.npmrc

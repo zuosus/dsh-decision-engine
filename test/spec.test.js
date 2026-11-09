@@ -29,6 +29,7 @@ const CFG = {
   turnStopClosedFloor: 0.6,
   turnStopUnfinishedFloor: 0.6,
   turnStopValueFloor: 0.35,
+  turnStopAwaitingUserFloor: 0.5,
   retrievalCoveredFloor: 0.5,
   retrievalWouldAddCeiling: 0.8,
   skillPickConfidenceFloor: 0.5,
@@ -306,6 +307,28 @@ test("轮次：没增量价值则收束", () => {
     closed: noul(0.3),
   });
   assert.equal(POINT_SPECS.turnStop.decide(parsed, CFG).kind, "stop");
+});
+
+test("轮次：模型判出在等用户时让位（DEC-045 的边界）", () => {
+  // 这一轮模型在问用户 / 让用户从几套方案里挑：unfinished 高、closed 低，
+  // 但正是在等用户 —— 续轮就是替用户把选择顶掉。
+  const parsed = POINT_SPECS.turnStop.parse({
+    unfinished: noul(0.9),
+    value: noul(0.8),
+    closed: noul(0.05),
+    awaiting_user: noul(0.95),
+  });
+  assert.equal(POINT_SPECS.turnStop.decide(parsed, CFG).kind, "defer");
+});
+
+test("轮次：awaiting_user 缺席不改变原有行为（老端点兼容）", () => {
+  const parsed = POINT_SPECS.turnStop.parse({
+    unfinished: noul(0.85),
+    value: noul(0.8),
+    closed: noul(0.1),
+  });
+  assert.equal(parsed.awaitingUser, undefined);
+  assert.equal(POINT_SPECS.turnStop.decide(parsed, CFG).kind, "continue");
 });
 
 // ---------------------------------------------------------------- 检索必要性
