@@ -10,6 +10,11 @@
  *   4. **空态是空白**——没有记录时应该有一句可读的话，而不是一片空白。
  *   5. **英文界面残留中文**——切换语言后混着中文，比全英文更难读。
  *   6. **一条坏记录搞崩整页**——明细是用户可编辑的文件，不能信它。
+ *   7. **新记录「直接蹦出来」**——列表每 5 秒轮询一次，刚多出来的那一条要看得
+ *      见它出现（入场动画），而首屏那一整批和已有的行不能跟着动（DEC-044）。
+ *
+ *   第 1 条的「顺序」本身在 DEC-044 里改了口径：**默认按时间降序**（最新在上），
+ *   所以这一族用例的期望都是「上面是刚发生的」。
  *
  * 做法：把客户端 bundle 真正跑起来（提供最小 react 桩），拿到注册的
  * `conversation.view` 组件，用固定顺序的 useState 注入数据，然后渲染。
@@ -46,6 +51,12 @@ const CJK = /[一-鿿　-〿＀-￯]/;
  *
  *   0 page      1 error    2 loading
  *   3 expanded  4 labels   5 sort
+ *
+ * 核对结论（DEC-044）：**0~8 一个编号都没动**。新增的行入场动画里，「已经见过
+ * 哪些记录」的基线走 `useRef`（不占 useState 槽位）；「这一批要动画的 id」
+ * （`newIds`）是后期从「渲染时对着 ref 现算」改成「取数那一刻存进 state」的
+ * （动画挂在样式上，渲染时现算会被随后那次重绘掐断），它**追加在末尾** = 9，
+ * 与 `labels` / `sort` / 比例三态同一条规矩，所以本文件不需要挪任何槽位。
  */
 const SLOTS = {
   page: 0,
@@ -234,6 +245,8 @@ test("标签名是随语言重读的 thunk（切换语言不必重新注册）",
  * @param options.slots - 覆盖 useState 序号对应的初值。
  * @param options.lang - 宿主语言。
  * @param options.props - 传给组件的 props。
+ * @param options.reducedMotion - 模拟系统「减弱动态效果」开着（DEC-044）。
+ * @param options.sessionId - 传给视图的会话 id（测「换会话」时改它）。
  */
 async function renderDecisions({
   page,
@@ -241,6 +254,8 @@ async function renderDecisions({
   slots = {},
   lang = "zh",
   props = {},
+  reducedMotion = false,
+  sessionId = "session-abcdef0123456789",
   decisions = {
     points: [
       { id: "authorize", label: "工具授权" },
@@ -337,8 +352,27 @@ async function renderDecisions({
   const originalFetch = globalThis.fetch;
   // 注入的 page 优先；没给就退回「测试通过 slots[0] 注入的那一份」，
   // 否则 load() 会把注入的夹具覆盖成空列表，测试全部落空。
-  const pagePayload = page !== undefined ? page : (Object.hasOwn(slots, 0) ? slots[0] : { entries: [] });
-  globalThis.fetch = async (url) => {
+  //
+  // 用 `let`：`poll()` 要换掉它来模拟「下一轮轮询取到的数据不一样」
+  // （DEC-044 的新增行判定只有真的换一批数据才测得出来）。
+  let pagePayload = page !== undefined ? page : (Object.hasOwn(slots, 0) ? slots[0] : { entries: [] });
+  // 视图（与插件生命周期）登记的定时器回调。`setInterval` **不真的建定时器**
+  // （建了测试进程会挂着不退出），但回调要留着——否则「5 秒后又取了一次」
+  // 这条真实路径在测试里永远跑不到，`poll()` 就是手动触发它们。
+  //
+  // 用 Map（句柄 → 回调）而不是数组：**`clearInterval` 必须真的生效**。轮询
+  // effect 的依赖是 `load`，`load` 又只在换会话时换身份，所以 `switchSession`
+  // 会触发一次「清掉旧定时器、装一个新回调」。若 `clearInterval` 是空操作，
+  // 旧会话那个回调会留在表里，`poll()` 把两个都敲一遍 → 同一批数据被取两次，
+  // 第二次是「没有新增」，把第一次刚置上的 `newIds` 抹成 `null`，动画凭空消失。
+  // 这不是测试桩的洁癖：真机上浏览器**确实**会清掉旧定时器，桩不照做就是在
+  // 测一条真机不存在的路径。
+  const pollers = new Map();
+  let timerSeq = 0;
+  // 取数桩单独命名：挂载结束后 `globalThis.fetch` 会被还原（不污染别的文件），
+  // 而 `poll()` 要再跑一次 `load()`，那时得把**这一份**桩临时装回去——
+  // 用真的 fetch 去打相对地址会直接 reject，轮询落到 catch 分支，动画永远测不出。
+  const fetchStub = async (url) => {
     const text = String(url);
     if (text.includes("/session-decisions")) {
       if (sessionFails) return { ok: false, status: 500, text: async () => JSON.stringify({ error: "后台不可达" }) };
@@ -349,13 +383,28 @@ async function renderDecisions({
     }
     return { ok: true, status: 200, text: async () => JSON.stringify({ decisionsTabEnabled: true }) };
   };
+  globalThis.fetch = fetchStub;
 
   globalThis.window = {
     // 定时器**不真的建**：视图里有 5 秒轮询，真建了测试进程会一直挂着。
-    setInterval: () => 0,
-    clearInterval: () => {},
+    // 但回调要留在 `pollers` 里给 `poll()` 用。返回的是一个**数字句柄**而不是
+    // 0：句柄得能互相区分，`clearInterval` 才知道该撤掉哪一个（见 `pollers`）。
+    // 数字上取属性是 undefined，所以实现里的 `timer?.unref?.()` 是安全的空操作。
+    setInterval: (fn) => {
+      timerSeq += 1;
+      pollers.set(timerSeq, fn);
+      return timerSeq;
+    },
+    clearInterval: (handle) => {
+      pollers.delete(handle);
+    },
     addEventListener: () => {},
     removeEventListener: () => {},
+    // 新增行动画要读系统的「减弱动态效果」（DEC-044）。默认给一个「什么都没
+    // 命中」的 matchMedia：真实浏览器里这个查询在无偏好时就返回 matches:false，
+    // 桩不给 matchMedia 等于测的是「宿主没实现」那条兜底分支。
+    matchMedia: (query) => ({ matches: reducedMotion && /prefers-reduced-motion/.test(query), media: query }),
+
     __ModuleLoader__: {
       load({ factory }) {
         const bundle = factory((name) => {
@@ -400,6 +449,9 @@ async function renderDecisions({
 
   let current = null;
   const cleanups = [];
+  // 视图当前看到的会话 id。用 `let`：`switchSession()` 要换掉它来模拟宿主
+  // **复用同一个视图实例**切到另一个会话（DEC-044 的基线清空就挂在这条路径上）。
+  let activeSessionId = sessionId;
 
   /**
    * 渲染一轮并把它排队/触发的 effect 落定。
@@ -416,7 +468,7 @@ async function renderDecisions({
       refIndex = 0;
       effectIndex = 0;
       pendingEffects = [];
-      current = component({ sessionId: "session-abcdef0123456789", ...props });
+      current = component({ sessionId: activeSessionId, ...props });
       const queued = pendingEffects;
       if (queued.length === 0) break;
       // 只跑依赖变了的 effect（与 React 一致）。
@@ -426,9 +478,16 @@ async function renderDecisions({
       });
       if (toRun.length === 0) break;
       for (const item of toRun) {
-        effectValues[item.index] = { deps: item.deps };
-        const cleanup = item.fn();
-        if (typeof cleanup === "function") cleanups.push(cleanup);
+        // **先跑上一次的 cleanup，再跑这一次的 effect**——React 的顺序就是如此。
+        // 少了这一步，`clearInterval` 永远不会被调用，换会话后旧会话的轮询回调
+        // 还留在 `pollers` 里；更糟的是任何真实实现里「靠 cleanup 撤销上一轮」
+        // 的代码在测试里都撤不掉，测出来的行为与真机不一致。
+        const previous = effectValues[item.index];
+        if (typeof previous?.cleanup === "function") previous.cleanup();
+        effectValues[item.index] = { deps: item.deps, cleanup: item.fn() };
+        if (typeof effectValues[item.index].cleanup === "function") {
+          cleanups.push(effectValues[item.index].cleanup);
+        }
       }
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
@@ -468,6 +527,28 @@ async function renderDecisions({
     walk(current);
     return out;
   };
+
+  /**
+   * 每条数据行的**记录 id**（取自行上的 React `key`，形如 `row-<id>`），
+   * 顺序与 tbody 一致。
+   *
+   * 存在的理由：这一页默认按时间**降序**（DEC-044），而夹具是升序写的，于是
+   * 「第 n 行」与「第 n 条记录」正好相反。按列断言一旦写死下标，改一次排序
+   * 就得重算一遍下标，还会把「行序」这件事偷偷塞进本来只关心「某一列写了
+   * 什么」的用例里。那一类用例应当**按 id 定位行**，与怎么排无关。
+   */
+  const rowIds = () => dataRows().map((tr) => String(tr.props?.key ?? "").replace(/^row-/, ""));
+
+  /** 每条数据行的单元格文本（按列顺序）；`rowCells()` 的实现。 */
+  const collectRowCells = () =>
+    dataRows().map((tr) =>
+      (tr.children ?? [])
+        .filter((td) => td && typeof td === "object" && td.type === "td")
+        .map((td) => collectText(td).join("")),
+    );
+
+  /** 每条数据行的 `style.animation`（没动画 = 空串）；`rowAnimations()` 的实现。 */
+  const collectRowAnimations = () => dataRows().map((tr) => String(tr.props?.style?.animation ?? ""));
 
   /**
    * tbody 里各行的**实际顺序**，形如 `["row:16:00", "row:16:01", "detail:…", "row:16:02"]`。
@@ -545,11 +626,94 @@ async function renderDecisions({
      * 这种**列与值错位**。要断言列，就必须按 `td` 取。
      */
     rowCells() {
-      return dataRows().map((tr) =>
-        (tr.children ?? [])
-          .filter((td) => td && typeof td === "object" && td.type === "td")
-          .map((td) => collectText(td).join("")),
-      );
+      return collectRowCells();
+    },
+    /** 数据行的记录 id，顺序与 tbody 一致（用它按 id 定位行，别按下标猜）。 */
+    rowIds,
+    /**
+     * 按**记录 id** 取那一行的单元格文本。
+     *
+     * 与排序方式无关：行怎么排都能取到对的行；id 不在页面上就直接失败，
+     * 而不是静默地断言到另一行上去。
+     */
+    cellsOf(id) {
+      const ids = rowIds();
+      const index = ids.indexOf(id);
+      assert.ok(index >= 0, `页面上没有 id 为「${id}」的行，实际有：${ids.join(" | ")}`);
+      return collectRowCells()[index];
+    },
+    /**
+     * 每条数据行的 `style.animation`（没有入场动画就是空串），顺序与 tbody 一致。
+     *
+     * 存在的理由（DEC-044）：入场动画只体现在**行的内联样式**上，可见文本一个字
+     * 都不变——没有这个读法，「新行淡入」和「新行直接蹦出来」在测试里一模一样。
+     */
+    rowAnimations() {
+      return collectRowAnimations();
+    },
+    /** 带着入场动画的那些行的**记录 id**（配合降序后的行序做断言）。 */
+    animatedIds() {
+      const ids = rowIds();
+      return collectRowAnimations()
+        .map((animation, index) => (animation.length > 0 ? ids[index] : null))
+        .filter((id) => id !== null);
+    },
+    /**
+     * 模拟**下一轮轮询**：换成本批数据，跑一遍已登记的 `setInterval` 回调，
+     * 再落定渲染与 effect，返回渲染文本。
+     *
+     * 为什么需要它：桩把 `window.setInterval` 吞成了「记下回调、不真的等 5 秒」，
+     * 于是「轮询多出一条记录」这条真实路径原本一次也没被执行过——而 DEC-044 的
+     * 入场动画恰恰只在那一刻发生。
+     *
+     * @param nextPage - 这一轮 `/session-decisions` 返回的内容。
+     */
+    async poll(nextPage) {
+      assert.ok(pollers.size > 0, "视图没有登记任何轮询回调：poll() 将测不到真实路径");
+      pagePayload = nextPage;
+      // 挂载结束时 `renderDecisions` 把 `globalThis.fetch` 还原了（免得桩漏给
+      // 别的文件），所以轮询期间要把这一份桩临时装回去。
+      const previousFetch = globalThis.fetch;
+      globalThis.fetch = fetchStub;
+      try {
+        // 回调体是 `void load()`，同步返回 undefined，拿不到它的 promise →
+        // 只能空转宏任务等 `call()` 里那两个 await（fetch、res.text()）落定。
+        // 三轮是余量，一轮其实就够；跑全部回调与真机一致（插件自己也挂了一个
+        // 60 秒的 /status reconcile，它会安静地重新 mount 一次，不影响本视图）。
+        for (const tick of [...pollers.values()]) await tick();
+        for (let round = 0; round < 3; round += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+        await renderAndSettle();
+      } finally {
+        globalThis.fetch = previousFetch;
+      }
+      return textOf();
+    },
+    /**
+     * 模拟宿主**复用同一个视图实例**切到另一个会话，并让新会话的第一次取数落定。
+     *
+     * 为什么需要它（DEC-044）：新增判定的基线若不在换会话时清空，新会话那一整页
+     * 记录相对上一个会话全是「没见过的新行」，会一次全部淡入——首屏整页闪动。
+     * 这条路径只有换 `sessionId` 才走得到，`poll()` 换不掉身份（它换的是数据）。
+     *
+     * @param nextSessionId - 新会话 id。
+     * @param nextPage - 新会话的 `/session-decisions` 响应。
+     */
+    async switchSession(nextSessionId, nextPage) {
+      pagePayload = nextPage;
+      activeSessionId = nextSessionId;
+      const previousFetch = globalThis.fetch;
+      globalThis.fetch = fetchStub;
+      try {
+        // 换会话只改 props，取数仍由那个依赖 `load`（也就是依赖 `sessionId`）的
+        // effect 触发——所以这里要跑一遍 `renderAndSettle()`，让新 effect 真的
+        // 执行一次。`pollers` 里的定时器回调与身份无关，不必敲。
+        await renderAndSettle();
+        for (let round = 0; round < 3; round += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+        await renderAndSettle();
+      } finally {
+        globalThis.fetch = previousFetch;
+      }
+      return textOf();
     },
     /** 表头文本（按列顺序）。 */
     thTexts() {
@@ -593,7 +757,11 @@ test("列出本会话的决策：时间、决策点、提供方、模型、裁�
   assert.match(text, /2026-11-03 16:30:00/, "应显示时间");
 });
 
-test("多条记录按时间顺序列出", async () => {
+test("多条记录按时间列出：默认降序，最新在上（DEC-044）", async () => {
+  // 这条钉的是「整页的默认口径」，与下面「表头排序」一节互为正反两面：
+  // 数据每 5 秒自己往上长，用户开这一页要看的永远是**刚才**那次裁决。
+  // 升序时最新一条躺在列表最底下，而表格自己滚（maxHeight），首屏停在顶上——
+  // 每次都得滚到底才看得到新记录，等于这个页面默认情况下不好用。
   const { text } = await renderDecisions({
     slots: {
       [SLOTS.page]: {
@@ -606,10 +774,10 @@ test("多条记录按时间顺序列出", async () => {
       [SLOTS.loading]: false,
     },
   });
-  const firstAt = text.indexOf("2026-11-03 16:00:00");
-  const secondAt = text.indexOf("2026-11-03 16:10:00");
-  assert.ok(firstAt >= 0 && secondAt >= 0, "两条时间都要出现");
-  assert.ok(firstAt < secondAt, "应按时间升序");
+  const newestAt = text.indexOf("2026-11-03 16:10:00");
+  const oldestAt = text.indexOf("2026-11-03 16:00:00");
+  assert.ok(newestAt >= 0 && oldestAt >= 0, "两条时间都要出现");
+  assert.ok(newestAt < oldestAt, "默认降序：后发生的那条在上面");
 });
 
 test("展开后能看到决策内容：现场、问题、回答、分数", async () => {
@@ -728,9 +896,13 @@ test("「内容」列显示捕获状态：有内容 / 仅元数据", async () =>
   // 断言这一列的表头与它的语义一致（箭头只画在当前排序列，默认在时间列，
   // 「内容」列因此不带箭头——这正是「箭头只画在当前列」的既有约定）。
   assert.equal(view.thTexts()[COL.capture], "内容", `内容列表头：${view.thTexts()[COL.capture]}`);
-  const cells = view.rowCells();
-  assert.equal(cells[0][COL.capture], "有内容", `第 1 行内容列：${cells[0][COL.capture]}`);
-  assert.equal(cells[1][COL.capture], "仅元数据", `第 2 行内容列：${cells[1][COL.capture]}`);
+  // **按 id 取行**，不按下标：这两条夹具的 ts 相同（都是 entry() 的默认值），
+  // 默认降序下同一毫秒按写入顺序反过来（后写入的在上，DEC-044），行序与夹具
+  // 顺序正好相反。本用例要测的是「这一列写了什么」，与行序无关，所以让行序
+  // 怎么变都不影响它——将来再改排序也不用回来重算下标。
+  assert.equal(view.cellsOf("rec-full")[COL.capture], "有内容", `有内容那条的内容列：${view.cellsOf("rec-full")[COL.capture]}`);
+  assert.equal(view.cellsOf("rec-meta")[COL.capture], "仅元数据", `仅元数据那条的内容列：${view.cellsOf("rec-meta")[COL.capture]}`);
+  assert.deepEqual(view.rowIds(), ["rec-meta", "rec-full"], "同毫秒时后写入的在上");
 });
 
 test("缓存/降级标记只在「标记」列，「内容」列不再兼报它们", async () => {
@@ -750,14 +922,17 @@ test("缓存/降级标记只在「标记」列，「内容」列不再兼报它�
     },
   });
   assert.equal(view.thTexts()[COL.flags], "标记");
-  const cells = view.rowCells();
+  // 三条夹具的 ts 都是默认值（同一毫秒），默认降序把写入顺序整个反过来
+  // （后写入的在上，DEC-044）——所以这里**按 id 取行**而不是按下标：
+  // 本用例断言的是「缓存/降级该出现在哪一列」，行序不是它要管的事。
+  assert.equal(view.rowIds().join("|"), "rec-3|rec-2|rec-1", "同毫秒时后写入的在上");
   assert.deepEqual(
-    cells.map((row) => row[COL.capture]),
+    ["rec-1", "rec-2", "rec-3"].map((id) => view.cellsOf(id)[COL.capture]),
     ["有内容", "有内容", "有内容"],
     "「内容」列只回答捕获状态",
   );
   assert.deepEqual(
-    cells.map((row) => row[COL.flags]),
+    ["rec-1", "rec-2", "rec-3"].map((id) => view.cellsOf(id)[COL.flags]),
     ["缓存命中", "已降级 · http-404", ""],
     "「标记」列回答缓存/降级，并附失败原因",
   );
@@ -1123,8 +1298,11 @@ test("同一行点两次会收起，且不影响别的行", async () => {
 
 // ------------------------------------------------------------------ 表头排序
 //
-// 用户要求（2026-11-03）：表头每一列都可点、按该列升序降序交替，
-// 默认按时间升序。与「展开定位」一节同理：只断言初始画面测不出交互，
+// 用户要求（2026-11-03）：表头每一列都可点、按该列升序降序交替。
+// 默认方向（DEC-044，2026-11-09 改口径）：**默认按时间降序**（最新在上），
+// 且**首次点任何一列都从降序起**——与整页默认同向，用户点一下永远先看到
+// 「这一列最靠后的那个」（时间=最新、耗时=最慢），想反方向再点一次。
+// 与「展开定位」一节同理：只断言初始画面测不出交互，
 // 所以这里真的去点表头，然后看行的先后顺序。
 
 /**
@@ -1143,36 +1321,39 @@ const SORT_FIXTURE = {
 /** 列定义顺序：时间(0) 决策点(1) 提供方(2) 模型(3) 裁决(4) 耗时(5) 内容(6) 标记(7)。 */
 const COL = { ts: 0, point: 1, provider: 2, model: 3, action: 4, latencyMs: 5, capture: 6, flags: 7 };
 
-test("默认按时间升序", async () => {
+test("默认按时间降序（最新在上）", async () => {
+  // DEC-044 改的就是这一条原先的期望（「默认升序」）。留着的理由不是怀旧：
+  // 默认方向是这个页面**唯一不需要用户学习**的行为，它错了就等于每次打开
+  // 都要人自己滚到底去找刚发生的事。
   const view = await renderDecisions({ page: SORT_FIXTURE });
-  assert.deepEqual(
-    view.tbodySequence(),
-    ["row:16:00:00", "row:16:01:00", "row:16:02:00"],
-    `默认应是时间升序，实际：${view.tbodySequence().join(" | ")}`,
-  );
-});
-
-test("点「时间」表头：升序降序交替，箭头只画在当前列", async () => {
-  const view = await renderDecisions({ page: SORT_FIXTURE });
-  const thTexts = () => findNodes(view.tree, "th").map((th) => collectText(th).join(""));
-
-  // 初始：时间列升序，↑ 只画在时间列。
-  assert.match(thTexts()[COL.ts], /↑/, "当前排序列应带 ↑");
-  assert.equal(/↑|↓/.test(thTexts()[COL.latencyMs]), false, "非排序列不该带箭头");
-
-  await view.clickTh(COL.ts); // 已是升序 → 翻成降序
   assert.deepEqual(
     view.tbodySequence(),
     ["row:16:02:00", "row:16:01:00", "row:16:00:00"],
-    `点一次应变降序，实际：${view.tbodySequence().join(" | ")}`,
+    `默认应是时间降序（最新在上），实际：${view.tbodySequence().join(" | ")}`,
   );
-  assert.match(thTexts()[COL.ts], /↓/, "降序应带 ↓");
+});
 
-  await view.clickTh(COL.ts); // 再点 → 回到升序
+test("点「时间」表头：降序升序交替，箭头只画在当前列", async () => {
+  const view = await renderDecisions({ page: SORT_FIXTURE });
+  const thTexts = () => findNodes(view.tree, "th").map((th) => collectText(th).join(""));
+
+  // 初始：时间列降序（默认），↓ 只画在时间列。
+  assert.match(thTexts()[COL.ts], /↓/, "当前排序列应带 ↓");
+  assert.equal(/↑|↓/.test(thTexts()[COL.latencyMs]), false, "非排序列不该带箭头");
+
+  await view.clickTh(COL.ts); // 已是降序 → 翻成升序
   assert.deepEqual(
     view.tbodySequence(),
     ["row:16:00:00", "row:16:01:00", "row:16:02:00"],
-    `再点应变回升序，实际：${view.tbodySequence().join(" | ")}`,
+    `点一次应变升序，实际：${view.tbodySequence().join(" | ")}`,
+  );
+  assert.match(thTexts()[COL.ts], /↑/, "升序应带 ↑");
+
+  await view.clickTh(COL.ts); // 再点 → 回到降序（与整页默认同一个方向）
+  assert.deepEqual(
+    view.tbodySequence(),
+    ["row:16:02:00", "row:16:01:00", "row:16:00:00"],
+    `再点应变回降序，实际：${view.tbodySequence().join(" | ")}`,
   );
 });
 
@@ -1192,7 +1373,10 @@ test("点「耗时」表头：首次降序（最慢在前），再点升序", as
   );
 });
 
-test("排完别的列再点「时间」：从升序起，且箭头跟着切换", async () => {
+test("排完别的列再点「时间」：从降序起，且箭头跟着切换", async () => {
+  // 换列首次点击一律从**降序**起（DEC-044 与整页默认对齐）。这条测的是
+  // 「换列」那条分支（`sort.key` 变了 → 不看旧的 dir）：它必须和默认一致，
+  // 否则用户点回时间列时会先看到最旧的一条在最上，与刚打开页面时相反。
   const view = await renderDecisions({ page: SORT_FIXTURE });
   const thTexts = () => findNodes(view.tree, "th").map((th) => collectText(th).join(""));
 
@@ -1200,13 +1384,13 @@ test("排完别的列再点「时间」：从升序起，且箭头跟着切换",
   assert.match(thTexts()[COL.latencyMs], /↓/);
   assert.equal(/↑|↓/.test(thTexts()[COL.ts]), false, "箭头应从时间列挪走");
 
-  await view.clickTh(COL.ts); // 首次点时间：升序
+  await view.clickTh(COL.ts); // 首次点时间：降序（最新在上）
   assert.deepEqual(
     view.tbodySequence(),
-    ["row:16:00:00", "row:16:01:00", "row:16:02:00"],
-    `换列首次点击应从升序起，实际：${view.tbodySequence().join(" | ")}`,
+    ["row:16:02:00", "row:16:01:00", "row:16:00:00"],
+    `换列首次点击应从降序起，实际：${view.tbodySequence().join(" | ")}`,
   );
-  assert.match(thTexts()[COL.ts], /↑/, "箭头应回到时间列");
+  assert.match(thTexts()[COL.ts], /↓/, "箭头应回到时间列，且是降序箭头");
   assert.equal(/↑|↓/.test(thTexts()[COL.latencyMs]), false, "耗时列不该再有箭头");
 });
 
@@ -1225,10 +1409,12 @@ test("降级「标记」列写出失败原因与状态码", async () => {
       [SLOTS.loading]: false,
     },
   });
-  const cells = view.rowCells();
-  assert.equal(cells[0][COL.flags], "已降级 · http-404", "HTTP 错误直接在标记列带状态码");
-  assert.equal(cells[1][COL.flags], "已降级 · auth-failed (HTTP 401)", "401 也带状态码，且不跟 detail 里的码重复");
-  assert.equal(cells[2][COL.flags], "已降级", "无 detail 时只写已降级");
+  // 三条夹具同 ts（同一毫秒），默认降序下按写入顺序反过来——本用例要断言的是
+  // 「标记列写了什么」，与行序无关，所以**按 id 取行**。
+  assert.deepEqual(view.rowIds(), ["rec-plain", "rec-auth", "rec-http"], "同毫秒时后写入的在上");
+  assert.equal(view.cellsOf("rec-http")[COL.flags], "已降级 · http-404", "HTTP 错误直接在标记列带状态码");
+  assert.equal(view.cellsOf("rec-auth")[COL.flags], "已降级 · auth-failed (HTTP 401)", "401 也带状态码，且不跟 detail 里的码重复");
+  assert.equal(view.cellsOf("rec-plain")[COL.flags], "已降级", "无 detail 时只写已降级");
 });
 
 // ------------------------------------------------------------------ 裁决词的中文显示
@@ -1274,20 +1460,35 @@ const ALL_VERDICTS = {
   total: Object.keys(VERDICT_ZH).length,
 };
 
+/**
+ * 把「裁决」列的显示值**按记录 id 归档**（`{ id → 该格文本 }`）。
+ *
+ * 存在的理由：这一组用例要测的是「哪个词显示成什么」，与行排在第几无关。
+ * 默认降序（DEC-044）之后，夹具的写入顺序与屏幕顺序正好相反，按下标比
+ * 一份顺序数组会把「翻译对不对」和「排序对不对」两件事捆在一起失败——
+ * 按 id 取就只可能因前者变红。
+ */
+function actionById(view) {
+  const ids = view.rowIds();
+  const cells = view.rowCells();
+  const out = {};
+  ids.forEach((id, index) => {
+    out[id] = cells[index][COL.action];
+  });
+  return out;
+}
+
 test("裁决列写中文名：16 个裁决词全覆盖", async () => {
   const view = await renderDecisions({ page: ALL_VERDICTS });
-  const cells = view.rowCells();
-  assert.equal(cells.length, Object.keys(VERDICT_ZH).length, "每个裁决词都该有一行");
-  const shown = cells.map((row) => row[COL.action]);
-  assert.deepEqual(
-    shown,
-    Object.keys(VERDICT_ZH).map((action) => VERDICT_ZH[action]),
-    `裁决列应按词一一对应显示中文名，实际：${shown.join(" | ")}`,
-  );
+  const shown = actionById(view);
+  assert.equal(Object.keys(shown).length, Object.keys(VERDICT_ZH).length, "每个裁决词都该有一行");
+  const wrong = Object.entries(VERDICT_ZH)
+    .filter(([action, label]) => shown[`rec-verdict-${action}`] !== label)
+    .map(([action, label]) => `${action}：期望「${label}」，实际「${shown[`rec-verdict-${action}`]}」`);
+  assert.deepEqual(wrong, [], `裁决列没有按词显示中文名：\n${wrong.join("\n")}`);
   // 机器词不该再出现在中文界面的这一列里。
-  const leaked = Object.keys(VERDICT_ZH).filter((action) =>
-    shown.some((cell) => cell === action),
-  );
+  const values = Object.values(shown);
+  const leaked = Object.keys(VERDICT_ZH).filter((action) => values.includes(action));
   assert.deepEqual(leaked, [], `这些裁决词还是英文：${leaked.join(", ")}`);
 });
 
@@ -1300,12 +1501,13 @@ test("原始机器词留在裁决格的 title 上（对照明细文件与日志�
 
 test("英文界面：裁决列翻回机器词，且不残留中文", async () => {
   const view = await renderDecisions({ page: ALL_VERDICTS, lang: "en" });
-  const shown = view.rowCells().map((row) => row[COL.action]);
-  assert.deepEqual(
-    shown,
-    Object.keys(VERDICT_ZH),
-    `英文界面就该显示机器词本身，实际：${shown.join(" | ")}`,
-  );
+  const shown = actionById(view);
+  // 同样**按 id 比**：这条测的是「英文名 = 机器词本身」（改中文名时不许动到
+  // 英文界面），行序由默认降序决定，与它无关。
+  const wrong = Object.keys(VERDICT_ZH)
+    .filter((action) => shown[`rec-verdict-${action}`] !== action)
+    .map((action) => `${action}：期望「${action}」，实际「${shown[`rec-verdict-${action}`]}」`);
+  assert.deepEqual(wrong, [], `英文界面的裁决列没翻回机器词：\n${wrong.join("\n")}`);
   const leftover = view.text.split("\n").filter((line) => CJK.test(line.trim()));
   assert.deepEqual(leftover, [], `英文界面残留中文：\n${leftover.join("\n")}`);
 });
@@ -1345,6 +1547,255 @@ test("裁决列按中文名排序，不按机器词的字母序", async () => {
     ["保留原模型", "建议分派", "照常放行"],
     `再点应翻回升序，实际：${asc.join(" | ")}`,
   );
+});
+
+// ------------------------------------------------------------------ 新增行的入场动画（DEC-044）
+//
+// 用户要求（2026-11-09）：「决策历史，默认按照时间降序排序，并且新增 rows 需要
+// 用简单动画出现，而不是直接出现。」上面「表头排序」一节管的是前半句，这一节
+// 管后半句——它才是这条需求的正身。
+//
+// 为什么必须单独一组用例：入场动画只体现在**行的内联样式**（`style.animation`）
+// 上，可见文本一个字都不变。也就是说把实现里的 `animation` 整条删掉，本文件
+// 其余 45 条用例**照样全绿**，而真机上用户看到的仍然是「行直接蹦出来」。
+// 这类「测不到的功能」正是靠 `rowAnimations()` / `animatedIds()` 与 `poll()`
+// 三个新读法补上的。
+//
+// 三条契约，各自对应一类真机故障：
+//
+//   1. **首屏那一整批不动画**——几十条一起淡入等于整页闪一下，没人看得出
+//      哪条是新的；动画要说的是「这条刚冒出来」，对首屏不成立。
+//   2. **只有轮询多出来的那一条动**——这页每 5 秒重绘一次，已有行若也挂着
+//      动画，用户看到的是整页周期性闪动（比不动更糟）。动画还必须挂在**对
+//      的那条**上：挂错行等于指着旧记录说「这是新的」。
+//   3. **只播一次**——新增标记若活过这一批，同一条会每 5 秒重播一遍。
+//
+// 另外两条边界：换排序 / 展开这类纯界面动作不该让别的行「获得」动画；
+// 系统开着「减弱动态效果」时一条都不动（但记录照常出现）。
+//
+// 桩的机制说明（决定这些断言为什么这么写）：`window.setInterval` 被桩换成
+// 「把回调记进 `pollers`、不真的等 5 秒」，`poll()` 就是手动敲响它们。新增判定
+// 发生在 `load()` 里（取数那一刻算出 `newIds` 并存进 state），所以 `poll()` 之后
+// 的渲染树就是用户在那 300ms 里看到的那一帧；标记会一直挂到**下一次轮询**
+// 才被覆盖——下面第 4 条按这个口径断言「不扩散、不搬家」，而不是断言「消失」。
+
+/** 上一批已显示的两条记录（动画用例的「旧数据」）。 */
+const ANIM_TWO = {
+  entries: [
+    entry({ seq: 1, ts: "2026-11-03T08:00:00.000Z", action: "allow" }),
+    entry({ seq: 2, ts: "2026-11-03T08:01:00.000Z", action: "keep" }),
+  ],
+  total: 2,
+};
+
+/** 下一轮轮询：同样那两条 + 多出来的一条（时间最新，默认降序下排在最上面）。 */
+function animThree() {
+  return {
+    entries: [
+      ...ANIM_TWO.entries,
+      entry({
+        seq: 3,
+        ts: "2026-11-03T08:02:00.000Z",
+        action: "delegate",
+        latencyMs: 777,
+        content: { state: { args_preview: "NEW_ROW_MARKER" }, questions: {}, answers: {} },
+      }),
+    ],
+    total: 3,
+  };
+}
+
+test("首屏那一整批不带入场动画", async () => {
+  // 防的真机故障：打开页面的瞬间几十条一起淡入——那不是「新增提示」，是整页闪动，
+  // 而且用户完全无法从里面认出「刚发生的那一条」。
+  const view = await renderDecisions({ page: SORT_FIXTURE });
+  assert.equal(view.rowIds().length, 3, "夹具应渲染出三行");
+  assert.deepEqual(
+    view.rowAnimations(),
+    ["", "", ""],
+    `首屏不该有任何行带 animation，实际：${view.rowAnimations().join(" | ")}`,
+  );
+  assert.deepEqual(view.animatedIds(), [], "首屏没有「新增」这回事");
+});
+
+test("轮询多出来的那一条带动画，已有的行一条都不带", async () => {
+  const view = await renderDecisions({ page: ANIM_TWO });
+  assert.deepEqual(view.rowAnimations(), ["", ""], "前提：首屏两行都不动");
+
+  await view.poll(animThree());
+
+  // **按 id 断言**，不按「第一行」：动画属于那条新记录，与它排在哪儿无关。
+  assert.deepEqual(
+    view.animatedIds(),
+    ["rec-3"],
+    `该只有新记录 rec-3 带动画，实际：${view.rowIds().map((id, index) => `${id}=${view.rowAnimations()[index] || "-"}`).join(" | ")}`,
+  );
+  // 带动画的这一行**确实是那条新记录**（不是把样式挂到了同一位置的旧行上）。
+  assert.match(view.cellsOf("rec-3")[COL.ts], /16:02:00/, "带动画的行应是 16:02 那条");
+  assert.equal(view.cellsOf("rec-3")[COL.latencyMs], "777ms", "同上：耗时也是新记录的那一条");
+  assert.match(view.cellsOf("rec-1")[COL.ts], /16:00:00/, "旧记录仍带着它原来的数据");
+
+  const animation = view.rowAnimations()[view.rowIds().indexOf("rec-3")];
+  // keyframes 名必须与注入的那份 `@keyframes` 对得上：名字错了浏览器会**静默**
+  // 不播（样式表里找不到同名 keyframes 时整条 animation 失效），测试不报错。
+  assert.match(animation, /dsh-decision-row-enter/, "animation 要引用注入的 keyframes 名");
+  // 时长也不能省：CSS 默认 duration 是 0s，写了等于没写，用户看到的还是「直接出现」。
+  assert.match(animation, /300ms/, "要有明确时长");
+});
+
+test("动画只播一次：下一轮轮询没多出新记录时谁都不再动", async () => {
+  // 防的真机故障：这页每 5 秒取一次数，如果「新」的判定只看数据里有什么、
+  // 不看相对上一批多出了什么，同一批记录会每 5 秒集体重播一遍淡入。
+  const view = await renderDecisions({ page: ANIM_TWO });
+  await view.poll(animThree());
+  assert.deepEqual(view.animatedIds(), ["rec-3"], "前提：新增那一次确实动了");
+
+  await view.poll(animThree());
+  assert.deepEqual(
+    view.rowAnimations(),
+    ["", "", ""],
+    `同一批再轮询一次不该重播，实际：${view.rowAnimations().join(" | ")}`,
+  );
+  // 行还在：摘掉动画不等于把记录摘掉。
+  assert.deepEqual(view.rowIds(), ["rec-3", "rec-2", "rec-1"], "三行仍按默认降序在页面上");
+});
+
+test("翻排序方向 / 展开行：动画只跟着那一条记录，不扩散也不搬家", async () => {
+  // 防的真机故障：新增判定若跟着「排序后的位置」或「渲染轮次」走，用户点一下
+  // 表头就会看到另一行重新淡入（动画在行间跳来跳去），或者整列都动起来。
+  const view = await renderDecisions({ page: ANIM_TWO });
+  await view.poll(animThree());
+  assert.deepEqual(view.animatedIds(), ["rec-3"], "前提：只有新记录带动画");
+  const before = view.rowIds();
+
+  // 纯界面动作 ①：换排序列。行序整个反过来，动画必须**跟着记录**而不是跟着位置。
+  await view.clickTh(COL.latencyMs);
+  assert.notDeepEqual(view.rowIds(), before, "点了表头，行序确实变了（否则这条等于没测）");
+  assert.deepEqual(
+    view.animatedIds(),
+    ["rec-3"],
+    "换排序列后动画仍只属于 rec-3：既不搬给别的行，也不扩散给已有行",
+  );
+
+  // 纯界面动作 ②：展开一行（会插入一行详情、并让整表重绘）。
+  const clickIndex = view.rowIds().indexOf("rec-2");
+  await view.clickRow(clickIndex);
+  assert.equal(
+    view.tbodySequence().filter((line) => line.startsWith("detail:")).length,
+    1,
+    `应展开出一行详情，实际：${view.tbodySequence().join(" | ")}`,
+  );
+  assert.deepEqual(view.animatedIds(), ["rec-3"], "展开/重绘同样不该让别的行获得动画");
+  assert.equal(
+    view.text.includes("NEW_ROW_MARKER"),
+    false,
+    "展开的是 rec-2 那一行：详情里不该出现新记录的内容（动画行与展开行是两件事）",
+  );
+  // 边界说明：这一帧里 rec-3 仍带着 animation 是**设计如此**——标记挂在取数那
+  // 一刻，活到下一次轮询（300ms 的动画早播完了），这样中途任何重绘都不会把
+  // 动画掐在第几帧上。「下一次轮询时它必须消失」由上面那条用例负责。
+});
+
+test("系统要求减弱动态效果时一律不动画（但新记录照常出现）", async () => {
+  // 防的真机故障：macOS / Windows 的「减弱动态效果」是**可访问性设置**，前庭
+  // 功能敏感的用户靠它关掉这类位移淡入。无视它属于可访问性缺陷。
+  const view = await renderDecisions({ page: ANIM_TWO, reducedMotion: true });
+  await view.poll(animThree());
+  assert.deepEqual(
+    view.rowAnimations(),
+    ["", "", ""],
+    `开着减弱动效就不该有行动画，实际：${view.rowAnimations().join(" | ")}`,
+  );
+  // 关掉动画不等于关掉功能：新记录必须还在，而且位置与顺序都不变。
+  assert.deepEqual(view.rowIds(), ["rec-3", "rec-2", "rec-1"], "新记录仍出现在降序的最上面");
+  assert.match(view.text, /777ms/, "新记录的内容仍要渲染出来");
+});
+
+test("换会话：新会话的第一批只登记、不动画（基线随会话清空）", async () => {
+  // 防的真机故障：宿主**复用同一个视图实例**切到另一个会话时（在会话列表里点
+  // 另一条会话，就是这个路径），若「已经见过哪些记录」的基线不清空，新会话那
+  // 一整页记录相对上一个会话全是「没见过的新行」→ 整页一起淡入。这与首屏那个
+  // 「几十条一起淡等于整页闪」是同一类毛病，只是从「刚打开」挪到了「切会话」。
+  const view = await renderDecisions({ page: ANIM_TWO });
+  // 先在旧会话里制造一次「有动画」的状态，证明基线此刻**确实**立起来了：
+  // 否则「换会话后不动画」也可能只是基线从来没生效过，测了个寂寞。
+  await view.poll(animThree());
+  assert.deepEqual(view.animatedIds(), ["rec-3"], "前提：旧会话里轮询出新记录时是动起来的");
+
+  // 切到另一个会话：记录是**另一批**（id 全不相同），第一屏。期望一条都不动。
+  const other = {
+    entries: [
+      entry({ id: "other-a", seq: 1, ts: "2026-11-03T09:00:00.000Z", action: "allow" }),
+      entry({ id: "other-b", seq: 2, ts: "2026-11-03T09:01:00.000Z", action: "deny" }),
+    ],
+    total: 2,
+  };
+  await view.switchSession("session-ffffffffffffffff", other);
+  assert.deepEqual(view.rowIds(), ["other-b", "other-a"], "新会话的记录应已经渲染出来（不是空白）");
+  assert.deepEqual(
+    view.rowAnimations(),
+    ["", ""],
+    `换会话后的第一批不该有入场动画（基线没清空就会整页淡入），实际：${view.rowAnimations().join(" | ")}`,
+  );
+
+  // 换过去之后再轮询出新记录，动画要照常工作——清空基线不是把功能关掉。
+  const more = { entries: [...other.entries, entry({ id: "other-c", seq: 3, ts: "2026-11-03T09:02:00.000Z" })], total: 3 };
+  await view.poll(more);
+  assert.deepEqual(view.animatedIds(), ["other-c"], "新会话里新冒出来的那条照样要有动画");
+});
+
+test("keyframes 只往文档里注一次；没有 document 也只是不动画、不崩", async () => {
+  // 这一条补的是**有** document 的那一半：样式表必须幂等注入。
+  // （「没有 document 不能抛错」由上面几条天然覆盖——Node 环境里 `document`
+  //  根本不存在，而它们全都跑绿了；实现读不到 document 就返回 false。）
+  //
+  // 防的真机故障：这个标签页会被 DEC-022 的 reconcile **卸载 / 重挂**（用户在
+  // 插件详情页拨一下开关就会发生一次），插件热重载也一样。不幂等的话 `head`
+  // 里会攒下一堆一模一样的 `<style>`——每重挂一次多一份，久了就是几百 KB 的
+  // 重复样式表挂在会话页上。
+  const appended = [];
+  const byId = new Map();
+  globalThis.document = {
+    head: {
+      appendChild(node) {
+        appended.push(node);
+        byId.set(node.id, node);
+        return node;
+      },
+    },
+    createElement: (tag) => ({ tagName: String(tag).toUpperCase(), dataset: {}, id: "", textContent: "" }),
+    getElementById: (id) => byId.get(id) ?? null,
+  };
+  try {
+    const view = await renderDecisions({ page: ANIM_TWO });
+    assert.equal(appended.length, 1, `第一次挂载应注入一次 keyframes，实际 ${appended.length} 次`);
+    const style = appended[0];
+    // id 是幂等判定的唯一依据，名字错了就等于每次都新注一个。
+    assert.equal(style.id, "dsh-decision-row-enter-css", "注入的 <style> 要带固定 id");
+    assert.equal(style.tagName, "STYLE", "注的必须是 <style>");
+    assert.equal(style.dataset.plugin, "dsh-decision-engine", "要能看出这条样式是谁注的");
+    // 关键帧名必须与行上那条 `animation` 引用得上（对不上就是静默不播）。
+    assert.match(String(style.textContent), /@keyframes\s+dsh-decision-row-enter/);
+
+    // 同一个实例里再来一轮轮询 + 一次纯界面动作：都不该再注第二个 <style>。
+    await view.poll(animThree());
+    await view.clickTh(COL.ts);
+    assert.equal(appended.length, 1, `轮询/重绘后仍只该有一个 <style>，实际 ${appended.length} 个`);
+    // 有文档可注时动画才是「有处可播」的：这一轮的新记录确实拿到了 animation。
+    assert.deepEqual(view.animatedIds(), ["rec-3"]);
+
+    // **再挂载一个视图实例**（reconcile 重挂 / 热重载后是全新的一份组件与模块）。
+    // 幂等判定必须跨实例成立——它查的是文档，不是组件里的某个标记。
+    const second = await renderDecisions({ page: ANIM_TWO });
+    assert.equal(appended.length, 1, `第二个实例挂载后仍只该有一个 <style>，实际 ${appended.length} 个`);
+    await second.poll(animThree());
+    assert.equal(appended.length, 1, "复用已注过的样式表，不是复用已断掉的动画");
+    assert.deepEqual(second.animatedIds(), ["rec-3"], "第二个实例的动画照样要能播");
+  } finally {
+    // 必须拆掉：本文件其它用例都靠 `typeof document === "undefined"` 这条
+    // Node 语义跑，留着假文档会让它们走进另一条分支（互相污染）。
+    delete globalThis.document;
+  }
 });
 
 
