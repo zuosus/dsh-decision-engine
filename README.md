@@ -2,7 +2,7 @@
 
 ![dsh-decision-engine — decision engine for DeepSeek Harness](docs/assets/hero.jpeg)
 
-** 提供免费决策模型 / Free decision model usage provided **
+**提供免费决策模型 / Free decision model usage provided**
 
 [website](https://dsh.zuos.us/dsh-decision-engine/) ·
 [config.example.yml](config.example.yml) · [DECISIONS.md](DECISIONS.md)
