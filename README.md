@@ -69,14 +69,24 @@ Windows 上形如 `C:\Users\<name>\.dsh\`）。解析顺序与宿主一致：显
 ## 决策历史 / The Decisions tab
 
 开启后，会话的标签栏会在「对话」「轨迹」之后多出一个 **决策历史** 标签页，
-按时间顺序列出**当前会话**里经本插件做出的每一次决策，共八列：
+按时间倒序列出**当前会话**里经本插件做出的每一次决策，共八列：
 时间 / 决策点 / provider / model / 裁决 / 耗时 / **内容**（有内容 / 仅元数据）/
 **标记**（缓存命中、已降级）。点任意一行展开，能看到这次决策的完整现场——
 发给决策模型的 `state` 与 `questions`，以及它回来的 `answers` 和本地算出的
 `scores`。
 
 **列表滚动时表头（时间 / 决策点 / …）保持冻结**，记录多了也看得到列名。
-**每一列表头都可点排序**（再点切换升降序；默认按时间升序）。
+**每一列表头都可点排序**（首次点某一列一律从降序起，再点切换升降序；默认按时间降序，最新一条在最上面）。
+
+**新出现的记录带一个轻量入场动画**：页面每 5 秒轮询一次，这一轮比上一轮多出来的行会淡入
+（300ms、位移 4px），已有行不动画，打开页面时那一批也不动画（几十条一起淡等于整页闪，反而看不出哪条是新的）。
+翻排序方向、展开某行不会重放动画；系统开了「减弱动态效果」时一律不播。
+
+Every column header is clickable (the first click on any column sorts descending;
+the page itself defaults to time-descending — newest row on top). **Rows that show
+up on a poll fade in** (300ms, 4px): existing rows never animate, neither does the
+batch you get when you open the tab, and flipping the sort or expanding a row never
+replays it. With the system's "reduce motion" setting on, nothing animates at all.
 
 **「裁决」列写中文**：`delegate` 交给主模型 · `ask` 转人工确认 · `deny` 拒绝执行 ·
 `keep` 保留原模型 · `switch` 换模型 · `inline` 自己接着做 · `advise` 建议分派 ·
@@ -93,7 +103,7 @@ the English UI keeps showing the words themselves.
 
 With the feature on, each session gains a **Decisions** tab right after
 Chat and Trajectory. It lists every decision this plugin made in *that* session
-in time order, in eight columns: time / decision point / provider / model /
+newest first, in eight columns: time / decision point / provider / model /
 verdict / latency / **content** (has content, metadata only) / **flags** (cache
 hit, degraded). Expanding a row reveals the full context sent to the decision
 model, the questions, its answers, and the locally computed scores.
