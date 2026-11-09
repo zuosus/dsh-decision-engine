@@ -1,6 +1,51 @@
 # DECISIONS.md — 设计决策日志
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
+
+## DEC-043 ⛔️ 审批卡正文可读化改为默认开启：可读性就是默认体验（2026-11-09）
+
+取代: DEC-042（**只取它「默认 `approvalDetailReadable` 为 `false`」那一条**；DEC-042 的接管机制、
+priority -1、确定性切分、原文保真、已知限制等全部结论保留，条目本身原样不动）。
+
+**背景**：DEC-042 把它定为默认关闭，理由是「接管宿主 UI 就是耦合，默认关 = 与升级前零差异」。
+这个理由算的是**维护方**的耦合风险，对**用户的默认体验**一个字都没说。宿主把 `args.command`
+原样塞进 `.ImxglW_command`（`word-break: break-all`、**没有** `white-space: pre-wrap`），换行
+因此全部被折叠：一条十几行的 `python3 - <<'PY'` heredoc 在卡片上是一整面读不出结构的字墙。
+换句话说，**不打任何补丁时用户看到的就是这个插件存在的理由本身**。把修复默认关掉，等于让
+当初抱怨这块不可读的人升级完还继续看那张坏卡，直到他自己在某处找到一个开关——而配置页上
+它只是十几行里的一行「审批卡正文可读化」，没人会为一件本该正常的事去找开关。用户的决定：
+改为默认开启。
+
+**决定**：`approvalDetailReadable` 默认 `true`；生效值语义从「缺省 = 关」（`=== true`）换成
+「缺省 = 开」（`!== false`）——与 `decisionsTabEnabled` 早就在用的那套约定一致。两半都改：
+服务端的 `/status` 回传 `cfg.approvalDetailReadable !== false`，客户端则涵盖 patch 构造、
+diff 比较、refresh 派生、兜底 status、初始 draft、`applyServerState`、配置页那一行，以及
+挂载判定。偏好宿主观感的用户写 `approvalDetailReadable: false`，得到与 1.5.x**逐字节一致**
+的行为；开关仍在配置页上，也仍在保存白名单里。
+
+顺手记录一个**这次改默认值才暴露出来的真 bug**：`lib/client.js` 里 `applyServerState` 与初始
+draft 派生**都没带这个键**。`applyServerState` 在每次保存成功后都会跑，所以在旧的默认关代码
+下，草稿每保存一次就把这个值弄丢一次——开关当场画成「关」，下一次保存再把 `false` 提交
+上去：**开关自己弹回去**。功能默认关时没人注意到（反正那个值本来就该是 `false`，丢不丢结果
+一样）；改成默认开之后，它会让第一次使用看起来就是坏的。这两处现在都带上了这个键，
+与 DEC-037 记过的「开关自己弹回去」是同一类事故（那里是漏了 `decisionsTabEnabled` 的同类
+缺口）。
+
+**为什么不是「保持默认关」**：代价仍然真实——接管意味着宿主将来对这块的改进（换组件、
+加字段、改交互）不会自动落到我们身上，摘要本身是启发式的，永远不能替代原文。但这两条是
+「保留这个开关」与「原文永远可展开」的理由，不是「把可读卡片默认藏起来」的理由：前者的
+成本是一次性的升级差异，后者的成本是每个用户每天看到一张读不懂的审批卡。默认值应该站在
+用户能读懂的那一侧，开关留给那套宿主呈现更合他意的人。
+
+**验证**：`node --test test/` 582 项全绿（`approval-detail.test.js` 11 项、
+`approval-detail-toggle.test.js` 6 项、`approval-detail-mount.test.js` 5 项），
+`node scripts/verify-wiring.mjs` 全部接线检查通过。
+
+**改动文件**：`lib/index.js`（DEFAULTS / schema 描述 / status 回传语义）、`lib/client.js`
+（八处：patch、diff、refresh、兜底 status、初始 draft、`applyServerState`、配置页行、挂载
+判定）、`test/approval-detail-toggle.test.js`、`test/approval-detail-mount.test.js`、
+`README.md`、`config.example.yml`、`package.json`（1.6.0）。
+
 ## DEC-042 审批卡正文可读化：接管宿主的 detail slot，摘要 + 可展开原文（默认关闭）（2026-11-08）
 
 **背景**：用户看到一张审批卡截图，原话是「**conversation.approval.detail 完全没有可读性**」。
