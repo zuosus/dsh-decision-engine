@@ -209,12 +209,14 @@ unsaved-with-reason.
 保持中文审计原文不动，只进审批审计与遥测。
 
 **审批卡正文**（标题下面那块命令）另有一个开关 **`approvalDetailReadable`**（配置页叫
-「审批卡正文可读化」，**默认关闭**）。打开后插件接管宿主的 `conversation.approval.detail`，
+「审批卡正文可读化」，**默认开启**）。插件接管宿主的 `conversation.approval.detail`，
 把命令改成「摘要 + 可展开的原文」：先给出「几步、其中哪几步是危险动作」（`rm -rf` /
 `curl … | sh` / `sudo` 这类会被标出来），摘要下方列出每个步骤；原文默认收起，点开仍可
 逐字核对——**真正执行的永远是原文**。摘要由确定性规则切分（`&&` / `||` / `;` / `|` /
 换行，heredoc 整段识别成「执行一段脚本（N 行）」），不经过决策模型——端点只有
-`choice` / `score` / `noul` 三种题型、没有自由文本。关闭时完全不接管，与升级前零差异。
+`choice` / `score` / `noul` 三种题型、没有自由文本。可读化就是默认体验；若你更想保留
+宿主自己的样子，把这个开关**关掉**即可：关闭后完全不接管，宿主自己的渲染原样回来，
+与 1.5.x 逐字一致（换行照旧由宿主折叠）。
 
 The config and stats panels use the host language (DSH settings → Language): a Chinese
 host gets Chinese, an English host gets English, and the panel follows a live switch
@@ -230,15 +232,17 @@ telemetry.
 
 The **command block inside an approval card** (below the title) has its own switch,
 **`approvalDetailReadable`** (labelled "Readable approval-card command block" on the config
-page, **off by default**). When on, the plugin takes over the host's
+page, **on by default**). The plugin takes over the host's
 `conversation.approval.detail` and turns the raw command into a summary plus an expandable
 original: how many steps there are and which look risky (`rm -rf`, `curl … | sh`, `sudo`)
 come first, then each step on its own line; the original is collapsed by default and can be
 expanded to compare byte for byte — **the original is always what actually runs**. The
 summary is produced by deterministic rules (`&&`, `||`, `;`, `|`, newlines, with heredocs
 recognised as "runs a script (N lines)"), never by the decision model, whose endpoint only
-answers `choice` / `score` / `noul` and has no free text. When off, nothing is taken over
-and behaviour is identical to before.
+answers `choice` / `score` / `noul` and has no free text. A readable card is the default
+experience; if you would rather keep the host's own rendering, switch it **off** — nothing is
+taken over then, the host renders the block exactly as it did in 1.5.x, and line breaks
+collapse there as before.
 
 ## 人工审核比例：模型无关的打扰频率 / Review tolerance: a model-agnostic interruption rate
 
