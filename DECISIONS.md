@@ -2,6 +2,67 @@
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
 
+## DEC-050 ⛔️ 撤销 DEC-038 / DEC-039：插件页不再隐藏 README（2026-11-09）
+
+取代: DEC-038（全部）、DEC-039（全部）。两条的性质相同：**用插件自己的 locale 去改宿主的
+统一取文档规则**，改的是「DSH 对所有插件的默认行为」，不是本插件要新增的功能。
+
+**背景**：用户的原话——「DEC-038 关于插件配置页不要显示 README 是错误的决定，因为这似乎是
+DSH 对插件整体做出的变更，不是本插件自己增加的功能，需要你 revert 这个显示 README 内容的部分」。
+这是对**判断本身**的否定，不是对实现细节的否定：DEC-038 当年的问题（36 kB 的整份 README 糊进
+设置页）确实存在，但它被归错了类——被当成「这个插件要给自己的长描述定个更短的版本」，于是走了
+`meta.detail` 这条通道；DEC-039 更进一步，把那份 DETAIL 置空，用「声明了一个空文件」去表达
+「我没有文档」。
+
+**这两步为什么是错的，而不是只是「用户口味不同」**：
+
+1. **`meta.detail` 的语义是「我有一份更合适的描述」，不是「我拒绝描述」。** 宿主的取文档顺序
+   （`@deepseek-ai/dsh-plugin-detail` 的 `readPackageDocument`，实测源码）是
+   `locale meta.detail` → 包 README → 仓库 README，其中第一条一旦命中就**不再**往下走。
+   DEC-038 是主动占用第一条去拦第二条；DEC-039 是占着第一条而交出一个空串。前者是「换一份」，
+   后者是「占位但不给」——**后者尤其错误**：它让宿主拿到 `{origin:'locale', markdown:''}`，
+   界面上是一个零高的空区，读者看到的是「这个插件没有介绍」，而不是「这个插件介绍很短」。
+2. **这个开关不属于本插件。** README 显示不显示、在哪显示、显示多长，是 DSH 宿主对所有插件
+   一视同仁的规则。本插件既没有「另一份长描述」要给，也没有权利要求宿主为它破例。用 locale 去
+   撬这条规则，效果是**这一个插件**在设置页看起来和别的插件不一样——而付出的是「读者在这个
+   插件页上看不到任何介绍」，收益却只是「不用看长文档」。
+3. **原本的问题已经被别处解决了。** DEC-047 / DEC-048 把 README 从 609 行压到 47 行（1.8 kB），
+   DEC-038 要挡的那块 36 kB 的字墙**已经不存在了**。所以撤销之后插件页显示的是 47 行清单，
+   正是 DEC-048 描述的那份「只列功能点」的版本——这条回退顺带把「README 太长」这个原始抱怨
+   也一并了结了，不再需要任何挡板。
+
+**决定：回到宿主默认规则，把挡板整套拆掉。**
+
+- `locale/zh.json` / `locale/en.json` 删掉 `meta.detail` 键（**只是删键**，`meta.title` 与
+  `meta.description` 一字不动——撤销的是长描述挡板，不是整个简介）；
+- 删掉 `docs/DETAIL.md`、`docs/DETAIL.zh.md` 两个文件（DEC-038 新增、DEC-039 置空的挡板本身）；
+- `package.json` 的 `files` 去掉这两条声明，`npm pack` 不再把它们随包发出；
+- **为什么不把 `meta.detail` 置成 `""` 或指向别的文件**：实测宿主的 `detailPath` 对空串/纯空白
+  抛 `DetailFailure('invalid', 'must be a non-empty string')`，界面是红字报错而**不**回落 README；
+  指向空文件则是 DEC-039 那个零高空区。**只有整个删掉这个键**，`localeDetail()` 才返回
+  `undefined`，宿主才走到第二步读 README。
+
+**验证**（都用宿主自己那套 `@deepseek-ai/dsh-plugin-detail`，不靠推断）：
+
+- 改动前：`zh-CN` → `origin=locale path=docs/DETAIL.zh.md markdownLen=0`；`en-US` 同理
+  —— 确认 DEC-039 的空区行为；
+- 改动后：`zh-CN` 与 `en-US` 均 → `origin=readme path=README.md markdownLen=1443`
+  （首行 `# dsh-decision-engine`）—— 宿主确实回落到 README；
+- `node --test test/` **634 项全绿**（原 630 + 新增 4）；
+- `node scripts/verify-wiring.mjs` 全部接线检查通过；
+- `npm pack --dry-run`：Tarball Contents 里 `docs/DETAIL.md` / `docs/DETAIL.zh.md` 已消失，
+  `README.md`（1.8kB）与 `docs/assets/*` 在包内，共 38 个文件；
+- 新增 `test/detail-readme.test.js`（4 项）把这三条事实钉成守卫：locale 无 `meta.detail`、
+  包内无 DETAIL 文件、`files` 无 DETAIL 声明——少任何一条，行为都会悄悄退回 DEC-038/039。
+
+**改动文件**：`locale/zh.json`、`locale/en.json`（删 `meta.detail` 键）、
+`docs/DETAIL.md`、`docs/DETAIL.zh.md`（删除）、`package.json`（`files` 去掉两条、
+version 1.6.0 → 1.6.1）、`test/detail-readme.test.js`（新增）、`DECISIONS.md`。
+
+**顺手记下的边界**：这条撤销**不涉及** `lib/client.js` 里那几个同名的 `DETAIL` 标识符
+（`conversation.approval.detail` 的 slot 名）——那是审批卡正文可读化（DEC-041/042/043）的宿主
+slot，与插件页的「详细介绍」文档是两件毫不相干的事，名字撞了而已。
+
 ## DEC-049 两张界面截图进仓库与 npm 包：README 用并列表格展示，文件名去掉空格（2026-11-09）
 
 **背景**：用户把两张截图放进 `docs/assets/`，要求「显示两个截图，并把截图放到本项目中」。
