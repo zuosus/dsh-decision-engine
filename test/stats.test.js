@@ -256,6 +256,20 @@ test("节省量：相对基线算，而不是相对实际值", () => {
   assert.equal(row.savedRatio, 0.8);
 });
 
+test("聚合：totals 里的次数字段叫 requests，不叫 turns（回归 DEC-046 的线上 bug）", () => {
+  // 匿名心跳取「当天决策数」时曾读 `result.totals.turns`——这个字段不存在，
+  // 永远取到 undefined → 0，于是线上 5646 条活跃记录的 decisions 全是 0，
+  // 日报里的「决策」与「人均」两行等于一直没起作用。
+  //
+  // 这条断言把字段名钉死：以后无论改哪一侧（改字段名、或改读取方），
+  // 都必须先撞到这里。
+  const range = resolveRange({ preset: "custom", start: "2026-10-20T00:00", end: "2026-10-20T23:59" });
+  const result = aggregate([rec(), rec(), rec()], range);
+  assert.equal(result.totals.requests, 3, "totals.requests 应等于记录条数");
+  assert.equal(result.totals.turns, undefined, "totals 不应有 turns 字段");
+  assert.equal(Number(result.totals?.requests) || 0, 3, "心跳取值表达式应拿到 3");
+});
+
 test("节省量：没有可归因的优化时是 0，而不是负数或假想值", () => {
   const range = resolveRange({ preset: "custom", start: "2026-10-20T00:00", end: "2026-10-20T23:59" });
   const result = aggregate(

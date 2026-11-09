@@ -191,6 +191,14 @@ async function runDigest(env,opts={}){
   const yday=dayOf(now-86400000);
   const todayStart=dayStart(today);
   const ydayStart=dayStart(yday);
+  // 滚动 24 小时窗口。日报每天固定时刻发一次，所以 now-24h 到 now 正好
+  // 就是「上次推送之后」的那段时间——这才是「新增变化」该有的口径。
+  //
+  // 历史教训：原来同时算「昨天整天」与「今天截至发送时刻」，推出去是
+  // "DAU 10（… 743）" 这种两截数字。两截既不同口径也不同长度（后者只覆盖到
+  // 18:42，不足一天），放在一行里读者只能猜哪个才是 DAU，而正确答案两个都
+  // 不是。现在整条推送只保留一个可比窗口（见 DEC-046）。
+  const winStart=now-86400000;
   const weekStart=dayStart(dayOf(now-6*86400000));
   const monthStart=dayStart(dayOf(now-29*86400000));
 
@@ -200,34 +208,41 @@ async function runDigest(env,opts={}){
   if(!opts.force&&seen&&Number(seen.ok)===1)return { skipped:"already-sent" };
 
   const qs=[
-    env.DB.prepare("SELECT COUNT(*) AS n FROM daily_active WHERE plugin=? AND day=?").bind(plugin,yday),
-    env.DB.prepare("SELECT COUNT(*) AS n FROM daily_active WHERE plugin=? AND day=?").bind(plugin,today),
-    env.DB.prepare("SELECT COUNT(*) AS n FROM installs WHERE plugin=? AND first_seen_ms>=? AND first_seen_ms<?").bind(plugin,ydayStart,todayStart),
-    env.DB.prepare("SELECT COUNT(*) AS n FROM installs WHERE plugin=? AND first_seen_ms>=?").bind(plugin,todayStart),
+    // ---- 推送口径：一律滚动 24 小时 --------------------------------
+    // 用 updated_ms 而不是 day：day 是日历日，切出来的是「昨天整天」或
+    // 「今天到此刻」，两者都不是「距上次推送 24 小时」，且长度随推送时刻变化
+    // （18:42 推送的「今日」只有 18 小时 42 分）。updated_ms 是这一行的最后一次
+    // 心跳时间戳，>= now-24h 就是真正的滚动窗口。
+    env.DB.prepare("SELECT COUNT(DISTINCT install_id) AS n FROM daily_active WHERE plugin=? AND updated_ms>=?").bind(plugin,winStart),
+    env.DB.prepare("SELECT COUNT(*) AS n FROM installs WHERE plugin=? AND first_seen_ms>=?").bind(plugin,winStart),
     env.DB.prepare("SELECT COUNT(*) AS n FROM installs WHERE plugin=?").bind(plugin),
+    env.DB.prepare("SELECT COALESCE(SUM(decisions),0) AS n FROM daily_active WHERE plugin=? AND updated_ms>=?").bind(plugin,winStart),
+    env.DB.prepare("SELECT version, COUNT(*) AS n FROM daily_active WHERE plugin=? AND updated_ms>=? GROUP BY version ORDER BY n DESC LIMIT 3").bind(plugin,winStart),
+    // 新装版本按 first_version 分组——installs 表里只有 first_version /
+    // last_version 两列，没有裸 version（写裸 version 会直接 SQLITE_ERROR，
+    // 整个 cron 静默失败）。
+    env.DB.prepare("SELECT first_version AS version, COUNT(*) AS n FROM installs WHERE plugin=? AND first_seen_ms>=? GROUP BY first_version ORDER BY n DESC LIMIT 3").bind(plugin,winStart),
+    // ---- 周/月活：仍按日历日，这是 WAU/MAU 的通行定义 --------------
     env.DB.prepare("SELECT COUNT(DISTINCT install_id) AS n FROM daily_active WHERE plugin=? AND day>=?").bind(plugin,dayOf(weekStart+TZ)),
     env.DB.prepare("SELECT COUNT(DISTINCT install_id) AS n FROM daily_active WHERE plugin=? AND day>=?").bind(plugin,dayOf(monthStart+TZ)),
-    env.DB.prepare("SELECT COALESCE(SUM(decisions),0) AS n FROM daily_active WHERE plugin=? AND day=?").bind(plugin,yday),
-    env.DB.prepare("SELECT version, COUNT(*) AS n FROM daily_active WHERE plugin=? AND day=? GROUP BY version ORDER BY n DESC LIMIT 3").bind(plugin,yday),
+    // ---- 留档：按日历日写 downloads / version_daily，保持历史可比 ----
     env.DB.prepare("SELECT source, count FROM downloads WHERE plugin=? AND day=?").bind(plugin,yday),
-    // 每个版本的「新装」按 first_version 分组——installs 表里只有
-    // first_version / last_version 两列，没有裸 version（写裸 version 会
-    // 直接 SQLITE_ERROR，整个 cron 静默失败）。
+    env.DB.prepare("SELECT version, COUNT(*) AS n FROM daily_active WHERE plugin=? AND day=? GROUP BY version ORDER BY n DESC LIMIT 3").bind(plugin,yday),
     env.DB.prepare("SELECT first_version AS version, COUNT(*) AS n FROM installs WHERE plugin=? AND first_seen_ms>=? AND first_seen_ms<? GROUP BY first_version ORDER BY n DESC LIMIT 3").bind(plugin,ydayStart,todayStart)
   ];
   const res=await env.DB.batch(qs);
 
-  const dauY=sumRows(res[0]);
-  const dauT=sumRows(res[1]);
-  const newY=sumRows(res[2]);
-  const newT=sumRows(res[3]);
-  const total=sumRows(res[4]);
-  const wau=sumRows(res[5]);
-  const mau=sumRows(res[6]);
-  const decisions=sumRows(res[7]);
-  const verActive=(res[8]&&res[8].results)||[];
-  const dlRows=(res[9]&&res[9].results)||[];
-  const verNew=(res[10]&&res[10].results)||[];
+  const dau24=sumRows(res[0]);
+  const new24=sumRows(res[1]);
+  const total=sumRows(res[2]);
+  const decisions=sumRows(res[3]);
+  const verActive=(res[4]&&res[4].results)||[];
+  const verNew=(res[5]&&res[5].results)||[];
+  const wau=sumRows(res[6]);
+  const mau=sumRows(res[7]);
+  const dlRows=(res[8]&&res[8].results)||[];
+  const verActiveDay=(res[9]&&res[9].results)||[];
+  const verNewDay=(res[10]&&res[10].results)||[];
 
   const npm=(dlRows.find(r=>r.source==="npm")||{}).count;
   const npmNow=await npmDownloads(plugin,yday);
@@ -237,18 +252,18 @@ async function runDigest(env,opts={}){
     env.DB.prepare("INSERT INTO downloads (plugin,day,source,count,updated_ms) VALUES (?,?,?,?,?) ON CONFLICT(plugin,day,source) DO UPDATE SET count=excluded.count,updated_ms=excluded.updated_ms")
       .bind(plugin,yday,"npm",npmNow===null?Number(npm)||0:npmNow,now)
   ];
-  for(const r of verActive){
+  for(const r of verActiveDay){
     writes.push(env.DB.prepare("INSERT INTO version_daily (plugin,day,version,installs,active_users) VALUES (?,?,?,?,?) ON CONFLICT(plugin,day,version) DO UPDATE SET installs=excluded.installs,active_users=excluded.active_users")
       .bind(plugin,yday,String(r.version||"unknown"),0,Number(r.n)||0));
   }
-  for(const r of verNew){
+  for(const r of verNewDay){
     writes.push(env.DB.prepare("INSERT INTO version_daily (plugin,day,version,installs,active_users) VALUES (?,?,?,?,?) ON CONFLICT(plugin,day,version) DO UPDATE SET installs=excluded.installs")
       .bind(plugin,yday,String(r.version||"unknown"),Number(r.n)||0,0));
   }
   await env.DB.batch(writes).catch(e=>console.warn("digest-write-failed "+String(e&&e.message)));
 
   const dlTotal=npmNow===null?(Number(npm)||0):npmNow;
-  const avgUser=dauY>0?Math.round(decisions/dauY*10)/10:0;
+  const avgUser=dau24>0?Math.round(decisions/dau24*10)/10:0;
   const verTop=verActive.length>0
     ?verActive.map(r=>String(r.version||"unknown")+" ×"+Number(r.n||0)).join(" · ")
     :"(无)";
@@ -256,15 +271,17 @@ async function runDigest(env,opts={}){
     ?verNew.map(r=>String(r.version||"unknown")+" +"+Number(r.n||0)).join(" · ")
     :"(无)";
 
-  const title=plugin+" "+yday;
+  const title=plugin+" 近24小时";
   const body=[
-    "DAU "+dauY+"（今日至此刻 "+dauT+"）",
-    "新增安装 "+newY+"（今日 "+newT+"） · 累计 "+total,
-    "WAU "+wau+" · MAU "+mau,
-    "npm 下载 "+dlTotal,
+    // 每条只有一个数：每个指标只有一个窗口（now-24h → now），没有第二个
+    // 数字可以被误读成「同一件事的另一半」。
+    "活跃 "+dau24+" 台（近24h）",
+    "新增安装 "+new24+" 台（近24h） · 累计 "+total,
     "决策 "+(Number(decisions)||0)+" · 人均 "+avgUser,
     "版本 "+verTop,
-    "新装版本 "+verNewTop
+    "新装版本 "+verNewTop,
+    "WAU "+wau+" · MAU "+mau,
+    "npm 下载 "+dlTotal
   ].join("\\n");
 
   const sent=await barkPush(env,title,body);
@@ -272,7 +289,7 @@ async function runDigest(env,opts={}){
     .bind(plugin,today,now,sent.ok?1:0,sent.ok?"":String(sent.err||"").slice(0,200))
     .run().catch(()=>{});
   if(!sent.ok)console.warn("bark-push-failed "+String(sent.err||""));
-  return { ok:sent.ok, err:sent.err||"", day:yday, dau:dauY };
+  return { ok:sent.ok, err:sent.err||"", day:yday, dau24:dau24 };
 }
 
 export default{fetch:async(rq,env,ctx)=>{

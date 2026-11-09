@@ -299,6 +299,33 @@ test("采集端点必须把写入放进 waitUntil（否则响应结束即被取�
   assert.ok(source.includes("ctx.waitUntil(env.DB.batch(stmts)"), "心跳写入必须在 waitUntil 里");
 });
 
+test("推送口径必须是滚动 24 小时，且每个指标只出现一个数字（DEC-046）", async () => {
+  const source = await readFile(BUNDLER, "utf8");
+
+  // 活跃 / 新增 / 决策 / 版本分布都必须按 updated_ms 或 first_seen_ms 的滚动
+  // 窗口切，而不是按 day 切日历日。按 day 切出来的是「昨天整天」或「今天到
+  // 此刻」，后者随推送时刻缩水（18:42 推送只有 18h42m），两者都答不了
+  // 「距上次推送 24 小时」。
+  assert.ok(
+    /COUNT\(DISTINCT install_id\) AS n FROM daily_active WHERE plugin=\? AND updated_ms>=\?/.test(source),
+    "活跃数必须按 updated_ms >= now-24h 统计",
+  );
+  assert.ok(
+    /COUNT\(\*\) AS n FROM installs WHERE plugin=\? AND first_seen_ms>=\?"\)\.bind\(plugin,winStart\)/.test(source),
+    "新增安装必须按 first_seen_ms >= now-24h 统计",
+  );
+  assert.ok(source.includes("const winStart=now-86400000"), "必须存在滚动 24h 窗口变量");
+
+  // 回归：正文里不得再出现「第二个半截数字」。这条曾把
+  // 10 与 743 拼成一行，读者无法判断哪个才是 DAU。
+  assert.ok(!/今日至此刻/.test(source), "正文不得再出现「今日至此刻」的半截口径");
+  assert.ok(!/（今日 \+/.test(source), "正文不得再出现「（今日 N）」的半截口径");
+
+  // 每个指标行只允许有一个数字：检查正文构造里没有成对的 dau/new 变量。
+  assert.ok(!source.includes("dauY") && !source.includes("dauT"), "不得再有 dauY/dauT 两个口径");
+  assert.ok(!source.includes("newY") && !source.includes("newT"), "不得再有 newY/newT 两个口径");
+});
+
 test("Worker 必须导出 scheduled，且 cron 只认 UTC 的 42 10 * * *", async () => {
   const source = await readFile(BUNDLER, "utf8");
   assert.ok(source.includes("scheduled:async("), "bundle 必须导出 scheduled 处理器");
@@ -418,8 +445,10 @@ test("npm 下载与推送标题都按插件区分，不再写死包名", async (
   );
   assert.ok(!source.includes('/dsh-decision-engine"'), "npm 查询不得写死包名");
   // 推送标题同理：应带插件名，而不是固定字符串。
-  assert.ok(source.includes('const title=plugin+" "'), "推送标题应按 plugin 区分");
-  assert.ok(!source.includes('const title="dsh-decision-engine "'), "标题不得写死插件名");
+  // 只断言前缀 `plugin+`，不锁死后缀——标题后缀会随口径变化（DEC-046 把
+  // 「日期」换成了「近24小时」），把整串写死会让一次合理的文案调整假红。
+  assert.ok(source.includes("const title=plugin+"), "推送标题应按 plugin 区分");
+  assert.ok(!source.includes('const title="dsh-decision-engine'), "标题不得写死插件名");
 });
 
 test("插件清单从 D1 读取，新增插件不必改 Worker 代码", async () => {
