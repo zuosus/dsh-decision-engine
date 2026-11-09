@@ -2,6 +2,132 @@
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
 
+## DEC-049 两张界面截图进仓库与 npm 包：README 用并列表格展示，文件名去掉空格（2026-11-09）
+
+**背景**：用户把两张截图放进 `docs/assets/`，要求「显示两个截图，并把截图放到本项目中」。
+两张图分别是**配置页**（Provider / Model / API Key / Effective endpoint 四行，带「Verified
+working」角标）与会话里的**决策历史**标签页（Review tolerance 滑块 + 八列决策明细，
+含一条 `degraded · network-error` 记录）。它们是这个插件唯一「不读代码就知道它长什么样」的
+材料，而 README 在 DEC-048 之后只剩功能点清单，正好缺这一块。
+
+**决定**：
+
+1. **放在 `docs/assets/`**，与 `docs/DETAIL.md`、`docs/lessons/` 同级——仓库已有这个资产目录，
+   不新建顶层 `screenshots/` 或 `images/`。
+2. **改名去掉空格**：`Screenshot 2026-11-09 at 10.35.58.png` → `decisions-tab.png`、
+   `…10.36.40.png` → `config-page.png`。原名是 macOS 截图工具的默认名，含空格与时序号：
+   空格在 Markdown 链接与 `npm pack` 里都要转义（URL 编码后才可用），时序号对读者零信息。
+   按**内容**命名，两个文件一眼能对上它们描述的东西。
+3. **README 里用两列并列表格**（`| 配置页 | 决策历史 |` 下接一行两个 `<img>`），不用上下两张
+   竖排大图：竖排会在 41 行的清单里塞进两屏图片，把「只列功能点」的版式彻底破坏；并排能在一
+   个视口内看到「有这两个界面」，且点击可放大。
+4. **进 npm 包**：`package.json` 的 `files` 加 `docs/assets`。否则 README 里的相对链接在 npm 首页
+   渲染时是坏图（npm 会显示 alt 文本），而 `npm pack` 只打包 `files` 声明的路径 + 强制包含的
+   README/LICENSE。
+
+**为什么不是直接提交二进制就完事**：这两个文件是仓库里**第一批图片资产**（此前没有任何
+png/jpg）。图片不进包、名字带空格、README 竖排三件事，每一件都要单独定一次规矩，否则下一个人
+加截图时会各按各的习惯来。这条就是那三条规矩。
+
+**验证**：`npm pack --dry-run` 确认 `docs/assets/config-page.png`（329.0kB）与
+`docs/assets/decisions-tab.png`（282.5kB）都在 Tarball Contents 里；README 的五个相对链接
+（`config.example.yml`、`DECISIONS.md`、两个 png）逐一 `os.path.exists` 通过；
+`node --test test/` 630 项全绿；`node scripts/verify-wiring.mjs` 全部接线检查通过。
+（`npm pack` 首次因 `~/.npm/_cacache` 的 root-owned 权限报 EPERM，改用 `--cache /tmp/…`
+完成验证——这是本机 npm 缓存的历史问题，与本仓库无关。）
+
+**改动文件**：`docs/assets/config-page.png`、`docs/assets/decisions-tab.png`（新增）、
+`README.md`、`package.json`、`DECISIONS.md`。
+
+
+## DEC-048 ⛔️ README 再压到 41 行：只列功能点，不解释、不装、不描述设计（2026-11-09）
+
+取代: DEC-047（**只取它「细节归还各自的权威出处」这一条结论**；DEC-047 删掉哪些段落的清单、
+把 609 行压到 185 行的篇幅目标，以及「结构固定为安装 / 数据文件 / … 十二节」这个形态，全部
+作废）。DEC-047 记录的那次核对（`timeoutMs` 三处不一致）与验证结论仍然有效。
+
+**背景**：用户看过 185 行版本后的原话——「还是太多内容了，继续大量减少。去掉安装，数据文件等
+非必要内容，只留下给新用户看的核心功能内容。不要解释功能点，只列举功能点。不要描述设计思路等，
+只列举功能点。」
+
+**为什么这个方向是对的，而不只是「再删点」**：DEC-047 的形态仍然是**手册**——安装步骤、
+五个数据文件、八个决策点的挂载点与触发闸、tolerance 四档的实测询问率、隐私与开关清单。
+手册对「已经装好的维护者」有用，但 README 的头号读者是**还不知道这个插件有哪几样东西的新人**，
+他此刻要回答的只有一个问题：**这个插件能干什么，我要不要装**。安装命令、数据落在哪、每个点
+为什么带闸，都属于「装完再看」的第二层，`config.example.yml` 与 `docs/` 已经在管。
+
+**决定**：185 行 → 41 行。形态从「手册」换成「清单」：
+
+- **只留功能点，每条一行**：八个决策点、三态、七家 provider、tolerance 四档、四个界面、
+  三条省 token 手段、四条可靠性约束。
+- **不解释、不举例、不给数字**：删掉挂载点（`tools/pre-execute` / `agent/request` …）、
+  触发闸理由、「每次约 1.9k token」、「实测询问率 1.1% / 22.5% / 41%」、阈值名、
+  「为什么不是每次都问」。清单只回答「有这个东西」，不回答「它怎么工作」。
+- **不描述设计思路**：`autonomous` 仍会拦下、软缓存对授权永久禁用、越界写入交给宿主——
+  这些取舍各自在 DECISIONS.md 里有完整论证，README 复述只会写成没有证据的断言。
+- **删掉安装与数据文件两节**（用户点名）：`dsh plugin add` 由插件页与站点承担，
+  数据目录与五个文件由 `config.example.yml` 的注释承担。
+- **保留双语**：仍然是一条中文 + 一条英文的并列写法，因为仓库惯例如此，而且每条已经短到
+  双语不比单语长多少。
+- **保留三处外链**：站点、`config.example.yml`、`DECISIONS.md`——这是「想往下读」的唯一入口，
+  没有它们，删掉的内容就没有落点。
+
+**这次的边界**：README 现在是**索引**，不是文档。任何「某功能怎么用 / 参数是多少 / 为什么这样
+设计」的问题，答案一律在 `config.example.yml`（键与默认值）、`DECISIONS.md`（理由）、
+`docs/`（专题），README 不再承担。将来加功能时，README 只加一行清单条目——若发现需要写第二行
+解释，那说明该写进 `config.example.yml` 的注释或一条 DEC。
+
+**验证**：`wc -l` 41 行；全部相对链接（`config.example.yml` / `DECISIONS.md`）确认存在。
+本次只动 `README.md` 与 `DECISIONS.md`，无代码改动，测试无需重跑（DEC-047 那次 630 项全绿
+与接线检查对它仍然成立）。
+
+**改动文件**：`README.md`、`DECISIONS.md`。
+
+
+## DEC-047 README 精简为要点版：一份「导航 + 一张表」，细节归还各自的权威出处（2026-11-09）
+
+**背景**：用户要求「simplify README.md to make it much shorter, only list key points」。
+README 已长到 609 行 / 36 kB，中英各写一遍；其中大量篇幅讲的是**某一处界面细节**（决策历史
+的入场动画、审批卡的渲染接管、配置页四组排列、密钥优先级、服务端下发的 wrangler secret）。
+
+**为什么该精简**：这些细节各自都有更合适的落点，而 README 本来不该是它们的容器：
+
+- **界面行为**已经在 `lib/client.js` 里实现、在 `test/` 里被断言，重复描述只是在制造第二个
+  会漂移的真相源（DEC-038 之后，插件页也不再读 README 了）；
+- **配置键与阈值**的权威清单是 `config.example.yml`，README 抄一遍必然过期；
+- **取舍理由**归 `DECISIONS.md`，README 里复述只能写成没有证据的断言。
+
+README 剩下的职责是**导航**：这是什么、怎么装、数据落在哪、八个决策点是什么、怎么接
+provider、隐私边界。读完该知道「要不要装」和「下一步去哪个文件」就够了。
+
+**决定**：609 行 → 185 行（-552 / +128）。结构固定为：「定位 + 链接三处权威出处」→ 安装 →
+数据文件 → 八个决策点（一张表）+ 三态 → provider 表 → 人工审核比例 → 隐私与开关 →
+省 token → fail-open → 作用域边界 → 开发 → License。
+
+- **保留双语**（用户确认的取向）：仓库惯例是中英双写，删掉英文版等于对 npm 读者失礼。
+  但每节只留要点：中文讲事、英文一句话收口，不再逐段翻译。
+- **删掉的部分**（各自的落点）：决策历史页的八列与排序/动画细节、审批卡摘要的确定性切分
+  规则、配置页四组分隔线与「无保存按钮」的交互细节、`keyStorage` 的两格对照与优先级链、
+  服务端下发的 TTL 与「这不是鉴权」警告、统计页的时间范围与基线口径、token 估算公式、
+  阈值逐项说明、`docs/lessons/` 清单。**这些行为一个都没变**，变的只是文档不再复述它们。
+- **保留的硬事实**：默认 `shadow` / fail-open、数据目录与五个文件、八个决策点的挂载与触发
+  闸、三态语义、七家 provider 的地址与 key 变量名、四档 tolerance 与实测询问率、
+  隐私边界（「关掉开关就一个字节都不写」「`off` 一个请求都不发」）、
+  `verify:endpoint` 不能省的理由。
+
+**验证**：`node --test test/` 630 项全绿；`node scripts/verify-wiring.mjs` 全部接线检查通过；
+README 的全部相对链接（`config.example.yml` / `DECISIONS.md` / `docs/local-dev-link.md`）
+逐一确认存在。
+
+**顺带核对到的不一致**（README 原文写「默认 `timeoutMs: 8000`」，而 `lib/index.js` 的
+`DEFAULT_TIMEOUT_MS = 20000`，`config.example.yml` 写 `timeoutMs: 8000`——三处说法对不上，
+且 `DEFAULT_TIMEOUT_MS` 的注释「默认给足 20s / 旧插件默认 1500ms 必然超时」正是 20s 的来源）。
+本条**不裁决**这个数字：精简版只写「`timeoutMs`（最小 1000ms）」这个与取值无关的界实，
+把「到底该是 8s 还是 20s」留给单独一条决策，避免在文档改写里顺手改行为。
+
+**改动文件**：`README.md`、`DECISIONS.md`。
+
+
 ## DEC-046 日报只推一个滚动 24 小时窗口；修掉决策数恒为 0（2026-11-09）
 
 **背景**：日报正文里的两行都在同一行给了两个数字：

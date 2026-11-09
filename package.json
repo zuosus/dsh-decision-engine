@@ -24,6 +24,7 @@
     "locale",
     "docs/DETAIL.md",
     "docs/DETAIL.zh.md",
+    "docs/assets",
     "scripts/migrate-profile.mjs"
   ],
   "keywords": [
