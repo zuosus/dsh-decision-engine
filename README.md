@@ -31,12 +31,15 @@ Perplexity · OpenRouter · custom base URL
 **人工审核比例 / Review tolerance**：自治 autonomous · 轻松 relaxed · 默认 default ·
 谨慎 cautious
 
-**界面 / UI**：决策历史标签页 / Decisions tab · 配置页 / config page · 统计与对比 / stats ·
-审批卡正文可读化 / readable approval card
+**界面 / UI**：配置页（四个可折叠分组）/ config page with collapsible sections ·
+决策历史标签页 / Decisions tab · 统计与对比 / stats · 审批卡正文可读化 / readable approval card
 
 | 配置页 / Config page | 决策历史 / Decisions tab |
 |---|---|
 | ![config page](docs/assets/config-page.png) | ![decisions tab](docs/assets/decisions-tab.png) |
+
+> 截图拍于分组折叠（DEC-051）之前的版式，当前界面为四个可折叠分组。 /
+> Screenshots predate the collapsible-section layout (DEC-051).
 
 **省 token / Token saving**：精确缓存 / exact cache · 只读工具放行 / read-only tools bypass ·
 state 截断 / state trimming

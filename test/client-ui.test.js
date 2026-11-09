@@ -140,6 +140,7 @@ async function render(status, options = {}) {
   };
 
   let component;
+  let i18n;
   globalThis.window = {
     __ModuleLoader__: {
       load({ factory }) {
@@ -180,6 +181,7 @@ async function render(status, options = {}) {
         };
         bundle.apply(ctx);
         component = registered[0];
+        i18n = bundle.i18n;
       },
     },
   };
@@ -188,7 +190,7 @@ async function render(status, options = {}) {
   assert.ok(typeof component === "function", "client bundle 未注册配置组件");
 
   const tree = component({ view: "config" });
-  return { tree, text: collectText(tree).join("\n"), controls: collectControls(tree) };
+  return { tree, text: collectText(tree).join("\n"), controls: collectControls(tree), i18n };
 }
 
 /** 递归收集渲染树里的文本（含 value / placeholder 属性）。 */
@@ -1468,89 +1470,330 @@ function blockAt(at, label) {
   return at.has(label) ? at.get(label) : at.get(`#${label}`);
 }
 
-test("配置页四组顺序 + 三条分隔线都在正确的位置（DEC-037）", async () => {
-  const { tree } = await render(stateWith({}), { slots: { [SLOTS.decisions]: decisionsFixture } });
-  const at = configBlocks(tree);
+// ===========================================================================
+// 配置页的分组折叠（DEC-051）
+// ===========================================================================
+//
+// DEC-037 的「一条长表单 + 三条分隔线」被换成**四个可展开的分组**（样式参考
+// `@xbzbing/dsh-git-panel` 的插件配置页）。这一组用例钉的是**结构契约**：
+//
+//   - 四个分组按固定顺序出现，标题分别是 连接方式 / 守卫行为 / 记录与展示 /
+//     模型与统计；每个标题都是**按钮**，且带 `aria-expanded` / `aria-controls`；
+//   - 每个分组的正文装在自己的 `section-body` 里，**折叠时仍在树里**（只是
+//     `hidden`）——卸载会让控件草稿值丢失，那是另一个事故；
+//   - 每一项都归属正确的那一组：断言「这一项在哪个 body 下」，而不是
+//     「页面上有这个字」；
+//   - 旧的 `divider-N` 节点必须**全部消失**：分组标题就是新的分隔。
 
-  // 期望的**完整**顺序。数组顺序即页面顺序；`divider-N` 是分隔线节点。
-  // 分组：
-  //   ① 使用免费模型
-  //   ② 服务提供方 / 模型 / API Key / 生效端点
-  //   ③ 启用守卫 / 真正拦截 / 决策历史 / 人工审核比例
-  //   ④ 思考模式 / 匿名统计 / 密钥保存位置 / custom / 诊断 / 状态
-  const EXPECTED = [
-    "使用免费模型",
-    "divider-1",
-    "服务提供方",
-    "模型",
-    "API Key",
-    "生效端点",
-    "divider-2",
-    "启用守卫",
-    "真正拦截",
-    "决策历史",
-    "人工审核比例",
-    "divider-3",
-    "思考模式",
-    "匿名统计",
-    "密钥保存位置",
-  ];
-
-  for (const label of EXPECTED) {
-    assert.ok(blockAt(at, label) !== undefined, `配置页缺少「${label}」这一块；实际顺序：${JSON.stringify([...at.keys()])}`);
+/** 递归收集某个节点的全部后代文本。 */
+function textsOf(node, out = []) {
+  if (node === null || node === undefined || node === false) return out;
+  if (typeof node === "string" || typeof node === "number") {
+    out.push(String(node));
+    return out;
   }
+  if (Array.isArray(node)) {
+    for (const child of node) textsOf(child, out);
+    return out;
+  }
+  if (typeof node === "object") textsOf(node.children, out);
+  return out;
+}
 
-  // 逐对断言相对顺序：用 Map 下标，不用文本位置。
-  for (let i = 1; i < EXPECTED.length; i += 1) {
-    const prev = EXPECTED[i - 1];
-    const curr = EXPECTED[i];
+/** 找出配置页里所有分组 `<section>`（按出现顺序）。 */
+function sectionsOf(tree) {
+  const found = [];
+  (function walk(node) {
+    if (node === null || node === undefined || typeof node !== "object") return;
+    if (Array.isArray(node)) {
+      for (const child of node) walk(child);
+      return;
+    }
+    if (node.type === "section" && typeof node.props?.["data-section"] === "string") {
+      found.push(node);
+    }
+    for (const child of node.children ?? []) walk(child);
+  })(tree);
+  return found;
+}
+
+/** 取一个分组里的标题按钮（`aria-controls` 指向它自己的 body）。 */
+function headerOf(section) {
+  return (section.children ?? []).find(
+    (child) => child?.type === "button" && typeof child.props?.["aria-controls"] === "string",
+  );
+}
+
+/** 取一个分组的正文容器。 */
+function bodyOf(section) {
+  const header = headerOf(section);
+  const id = header?.props?.["aria-controls"];
+  return (section.children ?? []).find(
+    (child) => child?.type === "div" && child.props?.id === id,
+  );
+}
+
+test("配置页分成四个可折叠分组，顺序与标题固定（DEC-051）", async () => {
+  const { tree } = await render(stateWith({}), { slots: { [SLOTS.decisions]: decisionsFixture } });
+  const sections = sectionsOf(tree);
+  assert.equal(sections.length, 4, `应有 4 个分组，实际 ${sections.length}`);
+
+  const EXPECTED = [
+    ["connection", "连接方式", "business"],
+    ["guard", "守卫行为", "warn"],
+    ["record", "记录与展示", "success"],
+    ["model", "模型与统计", "neutral"],
+  ];
+  sections.forEach((section, index) => {
+    const [id, title, tone] = EXPECTED[index];
+    assert.equal(section.props?.["data-section"], id, `第 ${index + 1} 个分组的 id 应为 ${id}`);
+    const header = headerOf(section);
+    assert.ok(header !== undefined, `分组 ${id} 缺少标题按钮`);
     assert.ok(
-      blockAt(at, prev) < blockAt(at, curr),
-      `「${prev}」应在「${curr}」之前（实际下标 ${blockAt(at, prev)} vs ${blockAt(at, curr)}）`,
+      textsOf(header).join("").includes(title),
+      `分组 ${id} 的标题应含「${title}」，实际：${textsOf(header).join("")}`,
+    );
+    assert.ok(
+      header.props.className.includes(`de-cfg__section--${tone}`) === false,
+      // 语义色挂在 section 上（正文竖线要继承它），标题只带自己的图标色。
+      `分组 ${id} 的 section 应带 ${tone} 色调`,
+    );
+    assert.ok(
+      String(section.props.className).includes(`de-cfg__section--${tone}`),
+      `分组 ${id} 的 section 应带 --${tone}`,
+    );
+  });
+});
+
+test("每个分组标题是带 aria-expanded / aria-controls 的按钮（可点可折叠）", async () => {
+  const { tree } = await render(stateWith({}), { slots: { [SLOTS.decisions]: decisionsFixture } });
+  const sections = sectionsOf(tree);
+  for (const section of sections) {
+    const id = section.props["data-section"];
+    const header = headerOf(section);
+    assert.equal(header.type, "button", `分组 ${id} 的标题应是 <button>`);
+    assert.ok(
+      ["true", "false"].includes(header.props["aria-expanded"]),
+      `分组 ${id} 的标题应带 aria-expanded`,
+    );
+    const body = bodyOf(section);
+    assert.ok(body !== undefined, `分组 ${id} 缺少与 aria-controls 对应的正文容器`);
+    assert.equal(body.props.id, header.props["aria-controls"], `分组 ${id} 的 aria-controls 应指向自己的正文`);
+    // 折叠是 `hidden`，不是卸载：卸载会丢控件草稿（例如填了一半的 base URL）。
+    assert.equal(
+      body.props.hidden === true,
+      header.props["aria-expanded"] === "false",
+      `分组 ${id} 的 hidden 状态应与 aria-expanded 一致`,
     );
   }
+});
 
-  // 第 ④ 组的收尾项也要在分隔线 3 之后（它们不进 EXPECTED 是因为
-  // custom / points 的出现依赖数据，状态行是固定块）。
-  for (const label of ["自定义 provider", "决策模型参与点", "改动即保存"]) {
-    const index = blockAt(at, label);
-    if (index !== undefined) {
-      assert.ok(index > blockAt(at, "divider-3"), `「${label}」应落在分隔线 3 之后`);
+test("默认只展开第一组（连接方式），其余收起（DEC-051）", async () => {
+  const { tree } = await render(stateWith({}), { slots: { [SLOTS.decisions]: decisionsFixture } });
+  const sections = sectionsOf(tree);
+  const states = sections.map((section) => [
+    section.props["data-section"],
+    headerOf(section).props["aria-expanded"],
+  ]);
+  assert.deepEqual(
+    states,
+    [["connection", "true"], ["guard", "false"], ["record", "false"], ["model", "false"]],
+    "首次访问应只展开「连接方式」——它是唯一回答「连到哪」的一组；其余设一次就忘",
+  );
+});
+
+test("每一项都归属正确的那一组（断言父子关系，不是「页面上有这个字」）", async () => {
+  const { tree } = await render(stateWith({}), { slots: { [SLOTS.decisions]: decisionsFixture } });
+  const sections = sectionsOf(tree);
+  const byId = new Map(sections.map((section) => [section.props["data-section"], section]));
+
+  // 每一组**至少**要有这些项出现在它的正文里。用文本判断归属，
+  // 因为 row() 的标题藏在 `rowText > rowTitle` 两层里。
+  const EXPECTED = {
+    connection: ["使用免费模型", "服务提供方", "模型", "API Key", "生效端点", "密钥保存位置"],
+    guard: ["启用守卫", "真正拦截", "人工审核比例", "决策模型参与点"],
+    record: ["决策历史", "审批卡正文可读化"],
+    model: ["思考模式", "匿名统计"],
+  };
+
+  for (const [id, labels] of Object.entries(EXPECTED)) {
+    const section = byId.get(id);
+    assert.ok(section !== undefined, `缺少分组 ${id}`);
+    const bodyText = textsOf(bodyOf(section)).join("\n");
+    for (const label of labels) {
+      assert.ok(bodyText.includes(label), `分组「${id}」的正文应含「${label}」`);
+    }
+  }
+
+  // 反向：某项**不该**出现在别的组里（防止「两项都写上、反正都在页面上」）。
+  const CROSS = [
+    ["启用守卫", "connection"],
+    ["思考模式", "connection"],
+    ["使用免费模型", "guard"],
+    ["决策历史", "model"],
+  ];
+  for (const [label, wrongId] of CROSS) {
+    const bodyText = textsOf(bodyOf(byId.get(wrongId))).join("\n");
+    assert.equal(
+      bodyText.includes(label),
+      false,
+      `「${label}」不该出现在分组「${wrongId}」里`,
+    );
+  }
+});
+
+test("页脚（保存状态 / 测试端点 / 状态信息）在所有分组之下，不属于任何一组（DEC-051）", async () => {
+  const { tree } = await render(stateWith({}), { slots: { [SLOTS.decisions]: decisionsFixture } });
+  const sections = sectionsOf(tree);
+  const bodyText = sections.map((section) => textsOf(bodyOf(section)).join("\n"));
+  // 页脚回答的是「刚才存没存、端点通不通」，是四组的共同结论。
+  for (const label of ["改动即保存", "测试端点"]) {
+    assert.equal(
+      bodyText.some((text) => text.includes(label)),
+      false,
+      `「${label}」是页脚，应留在分组之外`,
+    );
+    assert.ok(textsOf(tree).join("\n").includes(label), `页面上应有「${label}」`);
+  }
+  // 页脚排在四个分组之后：它是 `.de-cfg` 里的最后一个子节点，自己包在
+  // `.de-cfg__footer` 里（不该被套上分组的竖线与顶边线）。
+  const container = findNode(tree, (node) => node.type === "div" && node.props?.className === "de-cfg");
+  assert.ok(container !== null, "没找到 .de-cfg 容器");
+  const kids = (container.children ?? []).filter((child) => child !== null && child !== undefined);
+  const lastSectionAt = kids.findLastIndex((child) => child?.type === "section");
+  const footerAt = kids.findIndex(
+    (child) => child?.type === "div" && child.props?.className === "de-cfg__footer",
+  );
+  assert.ok(lastSectionAt >= 0, "没找到分组");
+  assert.ok(footerAt >= 0, "没找到页脚容器");
+  assert.ok(footerAt > lastSectionAt, "页脚应排在所有分组之后");
+  // 页脚容器里必须装得下那两项。
+  const footerText = textsOf(kids[footerAt]).join("\n");
+  assert.ok(footerText.includes("改动即保存"), "页脚应有保存状态");
+  assert.ok(footerText.includes("测试端点"), "页脚应有测试端点按钮");
+});
+
+test("分组展开状态记在 localStorage，刷新后不弹回（DEC-051）", async () => {
+  // 用户把「守卫行为」展开、把「连接方式」收起，下次打开面板应当保持那次选择。
+  // 这条防的是「状态只活在内存里」：刷新一次全部复位，等于每次都要重新折叠。
+  //
+  // 做法：起一个带 localStorage 的最小环境，把 bundle 的纯函数从 `i18n`
+  // 探针上取出来直接调——不必真的跑一次浏览器重渲染。
+  const { i18n } = await render(stateWith({}), { slots: { [SLOTS.decisions]: decisionsFixture } });
+  assert.equal(typeof i18n.readSectionOpen, "function", "readSectionOpen 应挂在 i18n 探针上");
+  assert.equal(typeof i18n.writeSectionOpen, "function", "writeSectionOpen 应挂在 i18n 探针上");
+
+  // 没有 localStorage 时回落到默认值：只展开「连接方式」。
+  assert.deepEqual(i18n.readSectionOpen(), {
+    connection: true,
+    guard: false,
+    record: false,
+    model: false,
+  });
+
+  // 有 localStorage 时按存下来的值还原。
+  const store = {};
+  globalThis.localStorage = {
+    getItem: (key) => (key in store ? store[key] : null),
+    setItem: (key, value) => { store[key] = String(value); },
+  };
+  try {
+    i18n.writeSectionOpen({ connection: false, guard: true, record: false, model: true });
+    assert.deepEqual(i18n.readSectionOpen(), {
+      connection: false,
+      guard: true,
+      record: false,
+      model: true,
+    });
+    // 坏数据（手工改坏 / 别的版本写的）不能让页面崩：退回默认值。
+    store[i18n.SECTION_OPEN_KEY] = "{not json";
+    assert.deepEqual(i18n.readSectionOpen(), {
+      connection: true,
+      guard: false,
+      record: false,
+      model: false,
+    });
+  } finally {
+    delete globalThis.localStorage;
+  }
+});
+
+test("折叠是 hidden 而不是卸载：控件草稿不会因为收起分组而丢（DEC-051）", async () => {
+  const { tree } = await render(stateWith({}), { slots: { [SLOTS.decisions]: decisionsFixture } });
+  const sections = sectionsOf(tree);
+  // 收起的组里，正文必须仍是一个**有内容的**节点，只是 props.hidden = true。
+  // 卸载会让 base URL 填到一半时一切归零（真实事故：切 tab 后草稿消失）。
+  const collapsed = sections.filter((section) => headerOf(section).props["aria-expanded"] === "false");
+  assert.ok(collapsed.length > 0, "默认应有收起的组");
+  for (const section of collapsed) {
+    const body = bodyOf(section);
+    assert.ok(body !== undefined, `${section.props["data-section"]} 的正文容器应仍在树里`);
+    assert.equal(body.props.hidden, true, "收起时应 hidden");
+    assert.ok((body.children ?? []).length > 0, "正文内容应保留（不是空壳）");
+  }
+  // 展开的组不能 hidden。
+  for (const section of sections) {
+    if (headerOf(section).props["aria-expanded"] === "true") {
+      assert.notEqual(bodyOf(section).props.hidden, true, "展开的组不该 hidden");
     }
   }
 });
 
-test("分隔线是独立的一根细线，不是 rowLine 那种两列布局（DEC-037）", async () => {
+const EXPECTED_TONE = {
+  connection: "business",
+  guard: "warn",
+  record: "success",
+  model: "neutral",
+};
+
+test("每个分组标题带语义色图标与 chevron，且图标与色块同色（DEC-051）", async () => {
+  const { tree } = await render(stateWith({}), { slots: { [SLOTS.decisions]: decisionsFixture } });
+  for (const section of sectionsOf(tree)) {
+    const id = section.props["data-section"];
+    const header = headerOf(section);
+    // 图标是 `<SectionIcon>` 组件元素：桩不会执行子组件，所以这里比对
+    // 「元素类型是函数」+ 它的入参，再把该组件**直接调一次**验证形状。
+    const iconEl = findNode(header, (node) => typeof node.type === "function");
+    assert.ok(iconEl !== null, `分组 ${id} 缺少图标组件`);
+    assert.equal(iconEl.props.tone, EXPECTED_TONE[id], `分组 ${id} 的图标色调应与其分组一致`);
+    const svg = iconEl.type(iconEl.props);
+    assert.equal(svg.type, "svg", `分组 ${id} 的图标应渲染成 svg`);
+    assert.equal(svg.props["aria-hidden"], "true", `分组 ${id} 的图标是纯装饰，应 aria-hidden`);
+    // 图标是内联 path 画的（不依赖宿主的图标库）。
+    assert.ok((svg.children ?? []).length > 0, `分组 ${id} 的图标应有图形`);
+    const chevron = findNode(header, (node) => typeof node.props?.className === "string" && node.props.className.includes("de-cfg__chevron"));
+    assert.ok(chevron !== null, `分组 ${id} 缺少 chevron`);
+    // 两态的指示必须**可分辨**：展开加 --open 类，闭合不加。若两态都带同一个
+    // 内联 transform，chevron 就永远指同一个方向，指示等于没有。
+    const isOpen = header.props["aria-expanded"] === "true";
+    assert.equal(
+      String(chevron.props.className).includes("de-cfg__chevron--open"),
+      isOpen,
+      `分组 ${id} 的 chevron 开合态与 aria-expanded 不一致`,
+    );
+    assert.equal(
+      typeof chevron.props.style?.transform,
+      "undefined",
+      `分组 ${id} 的 chevron 不该用内联 transform——旋转由 CSS 类控制`,
+    );
+  }
+});
+
+test("旧的分隔线节点已全部移除（分组标题就是新的分隔，DEC-051）", async () => {
   const { tree } = await render(stateWith({}), { slots: { [SLOTS.decisions]: decisionsFixture } });
   const dividers = [];
   (function walk(node) {
     if (node === null || node === undefined || typeof node !== "object") return;
+    if (Array.isArray(node)) {
+      for (const child of node) walk(child);
+      return;
+    }
     if (typeof node.props?.key === "string" && node.props.key.startsWith("divider-")) {
       dividers.push(node);
     }
     for (const child of node.children ?? []) walk(child);
   })(tree);
-
-  assert.deepEqual(
-    dividers.map((node) => node.props.key),
-    ["divider-1", "divider-2", "divider-3"],
-    "三条分隔线都要在，顺序必须是 1 / 2 / 3",
-  );
-
-  for (const node of dividers) {
-    const style = node.props.style ?? {};
-    // 事故形状：rowLine = display:flex + justifyContent:space-between。
-    // 分隔线不许借用它——它不是一行控件，也不该被那条滑块用例当成
-    // 「两列布局容器」收集走。
-    assert.equal(
-      style.display === "flex" && style.justifyContent === "space-between",
-      false,
-      `${node.props.key} 用了 rowLine 的两列布局形状`,
-    );
-    assert.equal(style.borderTop, "1px solid rgba(128,128,128,.32)", `${node.props.key} 应画一条顶边细线`);
-    // 没有子节点：它只是一根线，不承载任何文案。
-    assert.deepEqual(node.children, [], `${node.props.key} 不该有子节点`);
-  }
+  assert.deepEqual(dividers, [], "分隔线应由分组标题取代，不该再留");
 });
 
 test("配置页与统计页的容器不限制最大宽度（DEC-040）", async () => {

@@ -2,6 +2,87 @@
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
 
+## DEC-051 配置页改学分组的可折叠 section：向 @xbzbing/dsh-git-panel 的设置风格靠拢（2026-11-09）
+
+取代: DEC-037 的**版面形态**（「一条长表单 + 三条分隔线」）。DEC-037 的分组**依据**（按用途
+分组、组内顺序由「先定连到哪 → 再定怎么干预我 → 再定记不记 → 剩下调优」这条阅读线决定）
+仍然有效，而且被本文强化：分组从「画一条线」升级成「一个个能收起来的东西」。
+
+**背景**：用户的原话——「配置页面需要学习 @xbzbing/dsh-git-panel@1.13.0 插件的设置风格：
+将设置分为几个大类，放在可展开可关闭的 section 里」。
+
+**参考实现实测**（读 `~/.dsh/profiles/desktop/node_modules/@xbzbing/dsh-git-panel/lib/client.js`
+的 `.gp-cfg*` 一段，不是凭印象）：
+
+- 结构：`<section class="gp-cfg__section gp-cfg__section--{tone}">`，里面一个
+  `<button class="gp-cfg__section-hd" aria-expanded aria-controls>`
+  → `<div class="gp-cfg__section-body" hidden={!open}>`；
+- 标题左边一个 24px 的**色块图标**，色块底色 = 这一组的语义色（business / success / warn /
+  neutral 四选一）；正文左侧一条 2px 的竖线，用**同一个色**——「下面这些行属于这一组」是画
+  出来的，不靠留白暗示；
+- 折叠用 `hidden` 属性（**不是卸载**），所以 `aria-controls` 始终可解析；
+- 只有第一组默认展开，其余收起；
+- chevron 的朝向由**类名**决定（`.de-cfg__chevron--open{transform:rotate(90deg)}`），
+  不写内联 transform——两态若都带同一个内联旋转，指示就永远指一个方向，等于没有；
+- 样式在**样式表**里，不在内联对象里——`.gp-cfg__section--business{--gp-cfg-tone:…}`
+  定义变量，`.gp-cfg__section-body{border-left:2px solid var(--gp-cfg-tone)}` 消费它。
+  这条**必须**是样式表：内联样式给不了「祖先把变量递给后代」这层关系。
+
+**决定：四组，全部照搬形状；内容按本插件自己的语义重新归类。**
+
+| 分组 | 色调 | 装什么 | 为什么在这一组 |
+|---|---|---|---|
+| 连接方式 connection | business | 使用免费模型、服务提供方、模型、API Key、生效端点、密钥保存位置、自定义 provider、provider 校验错误 | 它们共同回答「连到哪、用谁的 key、key 存哪」。这一组是全页的前提：下面的开关都作用在这条连接上 |
+| 守卫行为 guard | warn | 启用守卫、真正拦截、人工审核比例、决策模型参与点 | 都直接改变**干预强度**（判不判 / 拦不拦 / 问多频繁 / 哪些环节问），所以用警示色 |
+| 记录与展示 record | success | 决策历史、审批卡正文可读化 | 与「判不判」是**两件事**：这两个开关决定「记不记、长什么样」。观察模式下往往才是用户真正想要的 |
+| 模型与统计 model | neutral | 思考模式、匿名统计 | 设一次就忘的调优项。neutral 是刻意的：前三组已经用掉「强调 / 警示 / 正向」三档语义色，再加一档等于把颜色当装饰 |
+
+**页脚（保存状态 / 测试端点 / 状态信息 / 诊断结果）不进任何分组**：它回答的是「刚才那一下
+存没存、端点通不通」，是四组的**共同结论**。收进某一组会被读成「那一组的附带设置」。
+
+**四条约束（缺一条这次改动就是错的）**：
+
+1. **折叠是 `hidden`，不是卸载。** 卸载会让正在填的控件草稿消失——真实事故是「base URL 填
+   到一半、切去看一眼统计、回来全空」。所以正文容器始终在树里，只是 `hidden`；配套要重述
+   `.de-cfg__section-body[hidden]{display:none}`，因为作者写的 `display:flex` 会压过 UA 的
+   `[hidden]` 规则（参考实现也踩过这条，注释里写了「An author display rule beats the UA's
+   `[hidden]{display:none}` — restate it」）。
+2. **分组折叠状态记在 localStorage，不进 `config.yml`。** 那份文件是给别的进程读的运行配置，
+   往里塞「用户上次折叠了哪一组」只会多一条与运行无关的键。读不到（隐私模式 / 首次访问 /
+   解析失败）时回落到「只展开连接方式」。
+3. **样式表注不上也不能影响功能。** `ensureCfgSectionCss()` 全程 try/catch 并返回布尔：没有
+   `document`（Node 渲染测试）、CSP 挡了 `<style>`、head 还没挂上——任何一种都只是少了竖线与
+   hover 底色，分组照样渲染、照样能展开收起。失败方向选「少装饰」，不选「少功能」。
+4. **图标自己画。** 本插件的 `client.js` 不注入 `@deepseek-ai/dsh-client-ui-primitives`，多引
+   一个包就多一份宿主版本耦合；四个图形是纯装饰（`aria-hidden`），几行 path 就够。形状按语义
+   选：插头（连接）/ 盾牌（守卫）/ 书页（记录）/ 滑块（调优）。
+
+**配色用宿主的设计令牌**（`--dsw-alias-*`，实测宿主 bundle 里确有这些变量），不写死颜色：
+`label-primary` / `label-secondary` / `label-tertiary` / `border-l2` / `state-{business,support,warn}-primary`
+/ `interactive-bg-hover-solid`。每个 `var()` 都带 fallback（`var(--x, #hex)`）：宿主换主题或
+将来改令牌名时，最坏情况是退回这组中性色，不是变成不可读的白底白字。
+
+**顺带删掉的死代码**：`divider()` 辅助函数与 `S.divider` 样式（DEC-037 的「三条分隔线」）
+在分组标题取代分隔线之后**没有任何调用方了**。留着它只会让下一个人以为页面上还有分隔线，
+或者顺手把它加回来。
+
+**验证**：
+- `node --test test/` **641 项全绿**（本次新增 10 项、改写 2 项、删除 0 项）；
+- `node scripts/verify-wiring.mjs` 全部接线检查通过；
+- `test/client-ui.test.js` 新增的分组用例钉的是**结构契约**，不是「页面上有这个字」：
+  四个 section 的顺序与 id、标题按钮的 `aria-expanded` / `aria-controls`、正文 `hidden` 与
+  `aria-expanded` 一致、默认只展开第一组、**每一项归属正确的那一组**（含四条反向断言：
+  「启用守卫」不该出现在连接组里这类）、页脚在四组之外且排在最后、旧 `divider-N` 节点已清零；
+- `test/client-ui.test.js` 的 localStorage 用例把 `readSectionOpen` / `writeSectionOpen` 挂到
+  模块导出的 `i18n` 探针上直接调——坏 JSON 必须退回默认值，不能让页面崩；
+- 真实渲染树 dump 确认形状：`div.de-cfg > section×4（第一个 aria-expanded=true，
+  后三个 body [hidden]）+ div.de-cfg__footer`；
+- 英文词表补齐四个组名（`Connection` / `Guard behavior` / `Records & display` /
+  `Model & telemetry`），`test/client-i18n.test.js` 14 项全绿。
+
+**改动文件**：`lib/client.js`、`test/client-ui.test.js`、`DECISIONS.md`。
+
+
 ## DEC-050 ⛔️ 撤销 DEC-038 / DEC-039：插件页不再隐藏 README（2026-11-09）
 
 取代: DEC-038（全部）、DEC-039（全部）。两条的性质相同：**用插件自己的 locale 去改宿主的
