@@ -147,8 +147,11 @@ const themeOverride = `
  * 主题覆盖：把 microcharts 的 token 接到 DSH 的语义变量上
  * ============================================================ */
 :where(.mc-theme) {
-  --mc-stroke: var(--dsw-alias-label-primary, #1a1917);
-  --mc-neutral: var(--dsw-alias-label-tertiary, #8a8986);
+  /* 兜底用 currentColor 而不是一个固定的深色：固定深色在深色宿主里
+     是不可见的黑，而 currentColor 永远等于它身边的文字色——宿主改了
+     变量名时图表只是「跟正文同色」，不是「消失」。 */
+  --mc-stroke: var(--dsw-alias-label-primary, currentColor);
+  --mc-neutral: var(--dsw-alias-label-tertiary, color-mix(in srgb, currentColor 55%, transparent));
   --mc-accent: var(--dsw-alias-state-business-primary, #1f6091);
   --mc-positive: var(--dsw-alias-state-success-primary, #0e7a5f);
   --mc-negative: #e8797f;
