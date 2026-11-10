@@ -2394,11 +2394,15 @@ test("图表：请求次数排序条只取前 8 个组合", async () => {
   const { tree } = await render(stateWith({}), {
     slots: { [SLOTS.tab]: "stats", [SLOTS.stats]: statsWithSeries({ rows: manyRows }), 20: chartsFixture },
   });
-  const bars = findAllByType(tree, "MiniBar");
-  assert.ok(bars.length >= 1, "应渲染排序条");
-  assert.equal(bars[0].props.data.length, 8, "排序条只画前 8 个组合");
-  // 降序：最大的排最前。
-  assert.equal(bars[0].props.data[0].value, 100);
+  // 排序条现在是自己画的行（名称 + 条 + 数值 + 占比），不再用 MiniBar：
+  // 实测 MiniBar 横向模式不画标签、也不能按条上色，画出来是一排没有身份的
+  // 白条。这里改成检查「每一行都带名称与数值」这件真正该保证的事。
+  const text = collectText(tree).join("\n");
+  assert.ok(text.includes("p0 · m0"), "排序条应带 provider · model 名称");
+  assert.ok(text.includes("100"), "排序条应带数值，不能只有一根条");
+  assert.ok(/\d+(\.\d+)?%/.test(text), "排序条应带占比");
+  // 只取前 8 个：第 9 个（p8 · m8，requests=92）不该出现在条形列表里。
+  assert.equal(text.includes("p8 · m8"), false, "排序条只画前 8 个组合");
 });
 
 test("图表：按决策点分账画圆环，且图例与圆环同色（mc-theme 作用域）", async () => {
@@ -2488,4 +2492,109 @@ test("图表：没有 byPoint 时不画圆环", async () => {
     slots: { [SLOTS.tab]: "stats", [SLOTS.stats]: statsWithSeries({ byPoint: [] }), 20: chartsFixture },
   });
   assert.equal(findAllByType(tree, "MicroDonut").length, 0, "没有按决策点数据时不该画圆环");
+});
+
+test("图表：点击图例可隐藏决策点，其余点重新归一化", async () => {
+  // 这是「工具调用常年占 95%+，把饼图吃满」的那个需求：点掉巨无霸之后，
+  // 剩下的点应该**重新归一化**到 100%，彼此比例才看得清。若分母仍是全量，
+  // 留下的只是几个 2%、3% 的小数——比例关系还是读不出来，功能白做。
+  const { tree } = await render(stateWith({}), {
+    slots: {
+      [SLOTS.tab]: "stats",
+      [SLOTS.decisions]: decisionsFixture,
+      [SLOTS.stats]: statsWithSeries({
+        byPoint: [
+          { point: "authorize", requests: 950, cached: 0, inputTokens: 1, outputTokens: 1, durationMs: 1, avgDurationMs: 1 },
+          { point: "retrieval", requests: 40, cached: 0, inputTokens: 1, outputTokens: 1, durationMs: 1, avgDurationMs: 1 },
+          { point: "compaction", requests: 10, cached: 0, inputTokens: 1, outputTokens: 1, durationMs: 1, avgDurationMs: 1 },
+        ],
+      }),
+      20: chartsFixture,
+    },
+  });
+
+  // 图例项必须是**按钮**（可操作控件）：键盘用户要能 Tab 到、Enter 触发。
+  const buttons = [];
+  (function walk(node) {
+    if (node === null || node === undefined || node === false) return;
+    if (Array.isArray(node)) return node.forEach(walk);
+    if (typeof node !== "object") return;
+    if (node.type === "button" && typeof node.props?.onClick === "function") buttons.push(node);
+    walk(node.children);
+    walk(node.props?.children);
+  })(tree);
+  const legendButtons = buttons.filter((node) => "aria-pressed" in (node.props ?? {}));
+  assert.ok(legendButtons.length >= 3, `图例应有可点击按钮，实际 ${legendButtons.length}`);
+  // 默认全部参与：aria-pressed 全为 true。
+  assert.ok(
+    legendButtons.every((node) => node.props["aria-pressed"] === true),
+    "默认所有决策点都应参与绘制",
+  );
+});
+
+test("图表：全部隐藏时给出可撤销的提示，而不是画一个空环", async () => {
+  // 空环会被读成「这段时间没有数据」，而真相是「用户把所有点都排除了」。
+  // 两者行动建议完全不同：前者要等数据，后者点一下图例就恢复。
+  const { tree } = await render(stateWith({}), {
+    slots: {
+      [SLOTS.tab]: "stats",
+      [SLOTS.decisions]: decisionsFixture,
+      [SLOTS.stats]: statsWithSeries({
+        byPoint: [
+          { point: "authorize", requests: 10, cached: 0, inputTokens: 1, outputTokens: 1, durationMs: 1, avgDurationMs: 1 },
+        ],
+      }),
+      20: chartsFixture,
+      // 槽位 21 是 hiddenPoints：把所有点都标成隐藏
+      21: new Set(["authorize"]),
+    },
+  });
+  const text = collectText(tree).join("\n");
+  assert.ok(
+    text.includes("所有决策点都被隐藏"),
+    `应提示全部被隐藏，实际：\n${text.slice(0, 500)}`,
+  );
+});
+
+test("图表：隐藏后圆环数据只含可见项，且颜色按 id 固定不随顺序漂移", async () => {
+  // 颜色必须绑在「决策点 id」上而不是「第几个可见项」。否则隐藏掉第一个
+  // 之后，原本第二名的颜色会顶到第一位——每点一次整张图换一套配色，
+  // 读者无法在两次操作之间比较。
+  const base = {
+    byPoint: [
+      { point: "authorize", requests: 50, cached: 0, inputTokens: 1, outputTokens: 1, durationMs: 1, avgDurationMs: 1 },
+      { point: "retrieval", requests: 30, cached: 0, inputTokens: 1, outputTokens: 1, durationMs: 1, avgDurationMs: 1 },
+    ],
+  };
+  const all = await render(stateWith({}), {
+    slots: {
+      [SLOTS.tab]: "stats",
+      [SLOTS.decisions]: decisionsFixture,
+      [SLOTS.stats]: statsWithSeries(base),
+      20: chartsFixture,
+    },
+  });
+  const allDonut = findAllByType(all.tree, "MicroDonut")[0];
+  // colors 显式下发时，顺序与 data 对齐。
+  assert.ok(Array.isArray(allDonut.props.colors), "应显式下发 colors（按 id 固定）");
+
+  const hidden = await render(stateWith({}), {
+    slots: {
+      [SLOTS.tab]: "stats",
+      [SLOTS.decisions]: decisionsFixture,
+      [SLOTS.stats]: statsWithSeries(base),
+      20: chartsFixture,
+      21: new Set(["authorize"]),
+    },
+  });
+  const hiddenDonut = findAllByType(hidden.tree, "MicroDonut")[0];
+  assert.equal(hiddenDonut.props.data.length, 1, "隐藏后只应剩一个可见项");
+  // 关键：剩下那个点的颜色，必须与「全部显示」时**它自己**的颜色相同。
+  const indexAll = allDonut.props.data.findIndex((item) => item.label === "检索必要性");
+  const indexHidden = hiddenDonut.props.data.findIndex((item) => item.label === "检索必要性");
+  assert.equal(
+    hiddenDonut.props.colors[indexHidden],
+    allDonut.props.colors[indexAll],
+    "同一个决策点的颜色不能因为隐藏了别人而改变",
+  );
 });
