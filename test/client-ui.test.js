@@ -2246,6 +2246,7 @@ const chartsFixture = {
   SegmentedBar: chartStub("SegmentedBar"),
   Bullet: chartStub("Bullet"),
   Delta: chartStub("Delta"),
+  MicroDonut: chartStub("MicroDonut"),
 };
 
 /** 在渲染树里按 type 找节点（替身组件的 type 是字符串，便于断言）。 */
@@ -2398,4 +2399,93 @@ test("图表：请求次数排序条只取前 8 个组合", async () => {
   assert.equal(bars[0].props.data.length, 8, "排序条只画前 8 个组合");
   // 降序：最大的排最前。
   assert.equal(bars[0].props.data[0].value, 100);
+});
+
+test("图表：按决策点分账画圆环，且图例与圆环同色（mc-theme 作用域）", async () => {
+  // microcharts 故意不提供饼图，圆环（MicroDonut）是它的折中。但圆环
+  // **不画分块标签、也没有图例**——没有文字图例的圆环只有「形」没有「义」，
+  // 所以图例是本表格不可分割的一半。这条同时盯住那个静默错位：
+  // 图例若跑到 mc-theme 外面，会按库的默认调色板取色，与圆环显示成两种颜色。
+  const { tree } = await render(stateWith({}), {
+    slots: {
+      [SLOTS.tab]: "stats",
+      [SLOTS.decisions]: decisionsFixture,
+      [SLOTS.stats]: statsWithSeries({
+        byPoint: [
+          { point: "authorize", requests: 120, cached: 2, inputTokens: 500, outputTokens: 50, durationMs: 1000, avgDurationMs: 8 },
+          { point: "retrieval", requests: 40, cached: 0, inputTokens: 200, outputTokens: 20, durationMs: 400, avgDurationMs: 13 },
+        ],
+      }),
+      20: chartsFixture,
+    },
+  });
+
+  const donuts = findAllByType(tree, "MicroDonut");
+  assert.equal(donuts.length, 1, "按决策点分账应渲染一个圆环");
+  // 顺序按请求次数降序：图例与图型共用同一个已排序数组，颜色才不会错位。
+  assert.deepEqual(
+    donuts[0].props.data.map((item) => item.value),
+    [120, 40],
+    "圆环数据应按请求次数降序",
+  );
+
+  // 图例必须存在，且逐项列出决策点中文名与占比。
+  const text = collectText(tree).join("\n");
+  assert.ok(text.includes("工具授权"), "图例应显示决策点中文名");
+  assert.ok(text.includes("检索必要性"), "图例应显示第二个决策点");
+  // 占比：120/160 = 75%
+  assert.ok(text.includes("75.0%") || text.includes("75%"), `图例应显示占比，实际：\n${text.slice(0, 600)}`);
+});
+
+test("图表：圆环容器带 mc-theme，图例颜色才不会与圆环错位", async () => {
+  // 这条是上面那个 bug 的形状守卫：`--mc-cat-N` 在 .mc-theme 里被重新
+  // 定义（接的是 DSH 语义色）。图例色块在 chartBox 外面，只有容器的
+  // className 里带 mc-theme，两者才取到同一套颜色。
+  const { tree } = await render(stateWith({}), {
+    slots: {
+      [SLOTS.tab]: "stats",
+      [SLOTS.stats]: statsWithSeries({
+        byPoint: [
+          { point: "authorize", requests: 10, cached: 0, inputTokens: 1, outputTokens: 1, durationMs: 1, avgDurationMs: 1 },
+          { point: "retrieval", requests: 5, cached: 0, inputTokens: 1, outputTokens: 1, durationMs: 1, avgDurationMs: 1 },
+        ],
+      }),
+      20: chartsFixture,
+    },
+  });
+  // 找到图例色块，向上确认它所在的容器链上出现过 mc-theme。
+  const swatches = [];
+  (function walk(node) {
+    if (node === null || node === undefined || node === false) return;
+    if (Array.isArray(node)) return node.forEach(walk);
+    if (typeof node !== "object") return;
+    const cls = node.props?.className ?? "";
+    if (typeof cls === "string" && cls.includes("background:") === false && node.props?.style?.background !== undefined) {
+      swatches.push(node);
+    }
+    walk(node.children);
+    walk(node.props?.children);
+  })(tree);
+  // 更直接的守卫：圆环外层容器的 className 必须含 mc-theme。
+  const holders = [];
+  (function find(node) {
+    if (node === null || node === undefined || node === false) return;
+    if (Array.isArray(node)) return node.forEach(find);
+    if (typeof node !== "object") return;
+    if (typeof node.props?.className === "string" && node.props.className.includes("mc-theme")) holders.push(node);
+    find(node.children);
+    find(node.props?.children);
+  })(tree);
+  assert.ok(holders.length > 0, "必须有带 mc-theme 的容器承载图例");
+  assert.ok(
+    holders.some((node) => node.props?.style?.display === "flex" && node.props?.style?.gap === "18px"),
+    "圆环与图例共用的外层容器应带 mc-theme（否则图例与圆环取色不一致）",
+  );
+});
+
+test("图表：没有 byPoint 时不画圆环", async () => {
+  const { tree } = await render(stateWith({}), {
+    slots: { [SLOTS.tab]: "stats", [SLOTS.stats]: statsWithSeries({ byPoint: [] }), 20: chartsFixture },
+  });
+  assert.equal(findAllByType(tree, "MicroDonut").length, 0, "没有按决策点数据时不该画圆环");
 });

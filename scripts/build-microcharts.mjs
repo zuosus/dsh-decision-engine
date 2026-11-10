@@ -64,8 +64,19 @@ mkdirSync(join(scratch, "src"), { recursive: true });
  *   SegmentedBar  占比构成（allow/ask/reject 三格）
  *   Bullet        目标达成（节省量的实际 vs 基线）
  *   Delta         有符号变化（节省比例这样一个 +/- 数字）
+ *   MicroDonut    圆环占比（按决策点分账的构成）
  *
  * 少导出一种就少一份要审的第三方代码；加图型请同时补测试与 DEC 条目。
+ *
+ * 为什么是 MicroDonut 而不是 PieChart：**microcharts 故意不提供饼图**。
+ * 官方文档把饼图、仪表盘、华夫图列为「词级尺寸下不可读」的一类，并给了
+ * 各自的替代品——SegmentedBar 替代饼图、Bullet 替代仪表盘。圆环
+ * （micro-donut）是库给出的折中：保住了「一个整体被切成几份」的直觉，
+ * 但它是**带洞的环**，洞用来放总数，而且默认会合并长尾。
+ *
+ * 用它的代价必须自己补上：圆环本身**不画分块标签、也没有图例**，只看
+ * 颜色分不出哪块是哪个决策点。所以 client.js 里必须配一份文字图例
+ * （见 renderPointDonut 的调用处），否则这张图只有「形」没有「义」。
  */
 writeFileSync(
   join(scratch, "src", "entry.js"),
@@ -76,6 +87,7 @@ writeFileSync(
     'export { SegmentedBar } from "@microcharts/react/segmented-bar";',
     'export { Delta } from "@microcharts/react/delta";',
     'export { MiniBar } from "@microcharts/react/mini-bar";',
+    'export { MicroDonut } from "@microcharts/react/micro-donut";',
     "",
   ].join("\n"),
 );
