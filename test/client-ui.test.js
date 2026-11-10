@@ -2214,3 +2214,188 @@ test("滑块独占一整行，没被塞进 rowLine 的右半边（真机竖排�
     );
   }
 });
+
+// ---------------------------------------------------------------- 统计页图表
+
+/**
+ * 一份最小的图表模块替身。
+ *
+ * 用它而不是真的 microcharts：渲染测试要验证的是「统计页有没有把数据
+ * 交给图型、失败时会不会降级」，不是第三方库画得对不对（那由库自己的
+ * 测试与我们的 chunk 自检负责）。替身让这些断言不依赖一个 24 KB 的产物，
+ * 也不会因为库升级改了几何就让整个 UI 套件变红。
+ *
+ * 每个组件都把自己的入参摊成一个可断言的节点，于是测试能直接问
+ * 「Sparkline 拿到的 data 是不是服务端那条序列」。
+ */
+function chartStub(name) {
+  const Stub = function Stub() {
+    return null;
+  };
+  // 标记在函数对象上：渲染树里的节点 type 就是这个函数本身
+  // （createElement 不把函数换成字符串），所以靠标记识别图型，
+  // 而不是靠 type 的形状。
+  Stub.__chart = name;
+  return Stub;
+}
+
+const chartsFixture = {
+  Sparkline: chartStub("Sparkline"),
+  SparkBar: chartStub("SparkBar"),
+  MiniBar: chartStub("MiniBar"),
+  SegmentedBar: chartStub("SegmentedBar"),
+  Bullet: chartStub("Bullet"),
+  Delta: chartStub("Delta"),
+};
+
+/** 在渲染树里按 type 找节点（替身组件的 type 是字符串，便于断言）。 */
+function findAllByType(node, chartName, out = []) {
+  if (node === null || node === undefined || node === false) return out;
+  if (Array.isArray(node)) {
+    for (const child of node) findAllByType(child, chartName, out);
+    return out;
+  }
+  if (typeof node !== "object") return out;
+  if (typeof node.type === "function" && node.type.__chart === chartName) out.push(node);
+  findAllByType(node.children, chartName, out);
+  findAllByType(node.props?.children, chartName, out);
+  return out;
+}
+
+/** 带时间序列的统计结果（走势图需要它）。 */
+function statsWithSeries(over) {
+  return statsWith({
+    series: {
+      bucket: "hour",
+      buckets: ["2026-11-10T09", "2026-11-10T10", "2026-11-10T11"],
+      series: {
+        requests: [3, 0, 4],
+        inputTokens: [600, 0, 900],
+        outputTokens: [90, 0, 120],
+        durationMs: [3000, 0, 4000],
+        allow: [2, 0, 1],
+        ask: [1, 0, 1],
+        reject: [0, 0, 2],
+        none: [0, 0, 0],
+      },
+      total: 3,
+    },
+    ...over,
+  });
+}
+
+test("图表：有图表模块时，走势图拿到服务端那条序列", async () => {
+  // 关键断言是「图里画的就是表里那个数」：走势图的 data 必须与服务端
+  // 下发的序列**逐点相同**，不能在渲染层再算一遍（那会出现图与表对不上）。
+  const { tree } = await render(stateWith({}), {
+    slots: {
+      [SLOTS.tab]: "stats",
+      [SLOTS.stats]: statsWithSeries({}),
+      20: chartsFixture,
+    },
+  });
+  const sparklines = findAllByType(tree, "Sparkline");
+  assert.ok(sparklines.length >= 1, "统计页应渲染走势图");
+  const requests = sparklines.find((node) => node.props.data?.join(",") === "3,0,4");
+  assert.ok(requests !== undefined, "请求次数走势应原样使用服务端序列（含空桶 0）");
+});
+
+test("图表：没有图表模块时统计页照常显示数字表格（降级）", async () => {
+  // 分块可能因为宿主版本、缓存、网络任何一环加载失败。那时统计页**必须**
+  // 还能用：表格是主体，图表只是让数字更好读的增强。这条防的是
+  // 「图表没加载出来 → 整页空白 / 报错」。
+  const { text, tree } = await render(stateWith({}), {
+    slots: {
+      [SLOTS.tab]: "stats",
+      [SLOTS.stats]: statsWithSeries({}),
+      20: null,
+    },
+  });
+  assert.equal(findAllByType(tree, "Sparkline").length, 0, "没模块时不该渲染图表");
+  // 数字与表格仍在：合计、对比表、节省量都能看到。
+  assert.ok(text.includes("用量统计与对比"), "统计页标题应在");
+  assert.ok(text.includes("横向对比"), "对比表应在");
+  assert.ok(text.includes("节省量对比"), "节省量表应在");
+  assert.ok(text.includes("48000") || text.includes("24,000") || text.includes("24000"), "合计数字应在");
+});
+
+test("图表：裁决构成条只在有裁决时出现，且不含「未裁决」", async () => {
+  // 「未裁决」不是第四种裁决结果，而是「这次根本没产生裁决」。把它拼进
+  // 100% 的构成条，会让「降级很多」看起来像「模型总在拦/放」。
+  const withDecided = statsWithSeries({
+    outcomes: { allow: 10, ask: 3, reject: 2, none: 5, decided: 15, byPoint: [], otherVerdicts: [], otherVerdictCount: 0 },
+  });
+  const { tree } = await render(stateWith({}), {
+    slots: { [SLOTS.tab]: "stats", [SLOTS.stats]: withDecided, 20: chartsFixture },
+  });
+  const bars = findAllByType(tree, "SegmentedBar");
+  assert.equal(bars.length, 1, "有裁决时应渲染一条构成条");
+  const labels = bars[0].props.data.map((item) => item.label);
+  assert.deepEqual(labels, ["放行", "询问", "拦截"], "构成条只含三种裁决，顺序固定");
+  assert.equal(
+    bars[0].props.order,
+    "data",
+    "顺序固定成 allow→ask→reject，不能按大小重排（否则跨区间颜色会换）",
+  );
+
+  // 全零裁决：不画空条（空条会被读成「裁决了但全是别的」）。
+  const noneDecided = statsWithSeries({
+    outcomes: { allow: 0, ask: 0, reject: 0, none: 7, decided: 0, byPoint: [], otherVerdicts: [], otherVerdictCount: 0 },
+  });
+  const { tree: bare } = await render(stateWith({}), {
+    slots: { [SLOTS.tab]: "stats", [SLOTS.stats]: noneDecided, 20: chartsFixture },
+  });
+  assert.equal(findAllByType(bare, "SegmentedBar").length, 0, "没有裁决时不该画构成条");
+});
+
+test("图表：节省量对比只在「观察模式有数据」时画，且带基线", async () => {
+  // 节省量是反事实数字，最容易误读。没有观察模式记录时画一条「实际=基线」
+  // 的满格条，会被读成「一点没省」——所以要整块不画。
+  const { tree } = await render(stateWith({}), {
+    slots: { [SLOTS.tab]: "stats", [SLOTS.stats]: statsWithSeries({}), 20: chartsFixture },
+  });
+  const bullets = findAllByType(tree, "Bullet");
+  assert.ok(bullets.length >= 1, "有观察模式数据时应渲染节省量对比");
+  const inputBullet = bullets.find((node) => node.props.target === 40000);
+  assert.ok(inputBullet !== undefined, "子弹图应把基线作为 target");
+  assert.equal(inputBullet.props.value, 16000, "条长应是实际消耗");
+
+  const unavailable = statsWithSeries({
+    savings: { observeRequests: 0, totalRequests: 12, byMode: { observe: 0, enforce: 12, off: 0, unknown: 0 }, unavailable: true },
+  });
+  const { tree: bare } = await render(stateWith({}), {
+    slots: { [SLOTS.tab]: "stats", [SLOTS.stats]: unavailable, 20: chartsFixture },
+  });
+  assert.equal(findAllByType(bare, "Bullet").length, 0, "没有观察模式数据时不该画节省量对比");
+});
+
+test("图表：请求次数排序条只取前 8 个组合", async () => {
+  // 行数一多，横向条的标签会挤在一起。图表负责「看出头部」，表格
+  // 负责「查具体值」——所以排序条截断，表格不截断。
+  const manyRows = Array.from({ length: 12 }, (_, index) => ({
+    provider: `p${index}`,
+    model: `m${index}`,
+    requests: 100 - index,
+    cached: 0,
+    inputTokens: 1000,
+    outputTokens: 100,
+    durationMs: 100,
+    avgDurationMs: 100,
+    observeRequests: 0,
+    observeInputTokens: 0,
+    observeOutputTokens: 0,
+    observeDurationMs: 0,
+    savedInputTokens: 0,
+    savedOutputTokens: 0,
+    savedDurationMs: 0,
+    savedRatio: 0,
+  }));
+  const { tree } = await render(stateWith({}), {
+    slots: { [SLOTS.tab]: "stats", [SLOTS.stats]: statsWithSeries({ rows: manyRows }), 20: chartsFixture },
+  });
+  const bars = findAllByType(tree, "MiniBar");
+  assert.ok(bars.length >= 1, "应渲染排序条");
+  assert.equal(bars[0].props.data.length, 8, "排序条只画前 8 个组合");
+  // 降序：最大的排最前。
+  assert.equal(bars[0].props.data[0].value, 100);
+});
