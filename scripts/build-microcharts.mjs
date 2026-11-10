@@ -68,6 +68,25 @@ mkdirSync(join(scratch, "src"), { recursive: true });
  *
  * 少导出一种就少一份要审的第三方代码；加图型请同时补测试与 DEC 条目。
  *
+ * **一律用 `/interactive` 入口，不用静态入口。**
+ *
+ * microcharts 的每个图型都有两个入口：
+ *   `@microcharts/react/sparkline`             静态（hook-free，零客户端 JS）
+ *   `@microcharts/react/sparkline/interactive` 交互（hover / 键盘 / 点选）
+ *
+ * 静态入口渲染出来的是「一张不会动的图」：没有 hover 读数、没有十字线、
+ * 不能点选、不能键盘漫游。用户看到的是一坨没有反馈的图形——趋势图尤其
+ * 致命，它有几十个点却不能指着某一个点问「这是多少」。
+ *
+ * 交互入口多依赖几个 hook（`useSyncExternalStore` / `useLayoutEffect` /
+ * `useMemo`），但**仍然只依赖 react**（实测全部 106 个交互入口的产物里
+ * 只有 `require("react")`），因此不破坏「宿主只保证 react」这条硬约束。
+ * 宿主是 React 18.3.1，`useSyncExternalStore` 自 React 18 起就提供
+ * （宿主 bundle 里还带 shim 回退），所以这条路走得通。
+ *
+ * 代价：产物从 24.8 KB 涨到 45.0 KB（gzip 11.2 → 17.1 KB）。它仍是按需
+ * 下载的分块，不进首屏。
+ *
  * 为什么是 MicroDonut 而不是 PieChart：**microcharts 故意不提供饼图**。
  * 官方文档把饼图、仪表盘、华夫图列为「词级尺寸下不可读」的一类，并给了
  * 各自的替代品——SegmentedBar 替代饼图、Bullet 替代仪表盘。圆环
@@ -81,13 +100,13 @@ mkdirSync(join(scratch, "src"), { recursive: true });
 writeFileSync(
   join(scratch, "src", "entry.js"),
   [
-    'export { Sparkline } from "@microcharts/react/sparkline";',
-    'export { SparkBar } from "@microcharts/react/sparkbar";',
-    'export { Bullet } from "@microcharts/react/bullet";',
-    'export { SegmentedBar } from "@microcharts/react/segmented-bar";',
-    'export { Delta } from "@microcharts/react/delta";',
-    'export { MiniBar } from "@microcharts/react/mini-bar";',
-    'export { MicroDonut } from "@microcharts/react/micro-donut";',
+    'export { Sparkline } from "@microcharts/react/sparkline/interactive";',
+    'export { SparkBar } from "@microcharts/react/sparkbar/interactive";',
+    'export { Bullet } from "@microcharts/react/bullet/interactive";',
+    'export { SegmentedBar } from "@microcharts/react/segmented-bar/interactive";',
+    'export { Delta } from "@microcharts/react/delta/interactive";',
+    'export { MiniBar } from "@microcharts/react/mini-bar/interactive";',
+    'export { MicroDonut } from "@microcharts/react/micro-donut/interactive";',
     "",
   ].join("\n"),
 );
@@ -232,7 +251,7 @@ ${bundle}
     return module.exports;
   },
 });
-`,
+\`,
 );
 
 /*

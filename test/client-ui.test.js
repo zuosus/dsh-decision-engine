@@ -137,6 +137,28 @@ async function render(status, options = {}) {
     useEffect() {
       // SSR 语义：effect 不执行，正好避免真实网络请求。
     },
+    /**
+     * 交互版图表用到的 hook。
+     *
+     * 为什么必须补齐：microcharts 的交互入口（`/interactive`）用
+     * `useLayoutEffect` 画十字线、`useMemo` 缓存几何、`useSyncExternalStore`
+     * 订阅选中态。桩里缺任何一个，交互版图表就会在渲染时抛
+     * ReferenceError——而桩只提供 `useState` 时，静态版一切正常，
+     * 于是「交互坏了」这件事在测试里根本不会暴露。
+     *
+     * `useSyncExternalStore` 的语义是「订阅外部 store 并返回快照」；
+     * 这里没有外部 store，返回第三参数（getServerSnapshot）即可——
+     * 它正是 SSR/无订阅场景下的正确答案。
+     */
+    useLayoutEffect() {
+      // 同 useEffect：SSR 语义，不执行。
+    },
+    useMemo(fn) {
+      return fn();
+    },
+    useSyncExternalStore(_subscribe, _getSnapshot, getServerSnapshot) {
+      return typeof getServerSnapshot === "function" ? getServerSnapshot() : null;
+    },
   };
 
   let component;

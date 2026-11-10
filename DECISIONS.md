@@ -2,6 +2,73 @@
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
 
+## DEC-055 图表改用 microcharts 的交互入口（/interactive），并接入 hover 读数（2026-11-10）
+
+**背景**：用户指出一件事——「这些图表都不能交互，但是 microcharts 是允许交互的，
+请你查看问题」。
+
+**根因**：microcharts 的每个图型都有**两个入口**，我之前一直只用静态的那个：
+
+| 入口 | 例子 | 能力 |
+|---|---|---|
+| 静态 | `@microcharts/react/sparkline` | hook-free、零客户端 JS、**完全不可交互** |
+| 交互 | `@microcharts/react/sparkline/interactive` | hover 读数 / 十字线 / 点选钉住 / 键盘漫游 |
+
+也就是说，**不是「交互坏了」，而是「用的是没有交互的那个版本」**。106 个图型
+全部有交互入口（`exports` 里每个图型都成对出现），只有静态版是「一张不会动的图」。
+
+**为什么这个差别很要紧**：趋势图有几十个点，静态版既不能指着某个点问「这是多少」，
+也不能键盘访问——那基本是一张装饰画。裁决构成条静态版也无法指出「哪一段是 ask」。
+
+**决定与验证**：
+
+1. **全部改用 `/interactive` 入口**（构建脚本 `scripts/build-microcharts.mjs`）。
+2. **交互版仍只依赖 react**：实测全部 106 个交互入口的产物里只有
+   `require("react")`（多几个同目录的相对引用，不是外部依赖），所以
+   「宿主只保证 react」这条硬约束没有被破坏。交互版多用的 hook 是
+   `useSyncExternalStore` / `useLayoutEffect` / `useMemo`。
+3. **宿主满足这些 hook**：宿主是 React 18.3.1（从 app.asar 的 renderer bundle 里
+   读到的版本号），`useSyncExternalStore` 自 React 18 起就提供，宿主 bundle 里
+   还带 shim 回退。
+4. **接入 hover 读数**：`onActive`（移过）/ `onSelect`（点选钉住）把当前点回传，
+   界面在图下方显示「时间 · 数值」。没有它，交互就只剩一根会动的线——读者看到
+   高亮圆点，却不知道那个点是多少。
+5. **给走势图喂时间标签**（`labels` 数组）：交互版默认念「第 7 个点」，
+   喂了桶标签之后念「13时」。桶键 `2026-11-10T14` 在 260px 的 viewBox 里放不下，
+   因此按粒度缩成「14时」「10日」「11月」（见 `shortBucketLabel`）。
+6. **圆环与构成条同样接入**：hover/点选某段时那一段会高亮，并报出它的占比与数值。
+
+**代价**：产物从 24.8 KB / gzip 11.2 KB 涨到 68.0 KB / gzip 23.5 KB。仍是按需下载的
+分块，不进首屏。
+
+**过程中修掉的三个真实问题**：
+
+1. **块注释里的 `*/` 提前闭合了注释**：注释里写 `**/interactive**` 时，`*/`
+   正好闭合了 JSDoc 块，后面所有内容变成代码——chunk 直接语法错误、加载失败。
+   改成不带 `*/` 的写法。
+2. **CSS 里的反引号破坏了外层模板字符串**：产物用模板字面量拼接时，
+   `JSON.stringify` 出来的 CSS 里含反引号（CSS 注释里有 `[data-mc-ink]`）会提前
+   闭合模板。改为**用数组 join 拼装**（头 + 产物 + 尾），不再把第三方内容
+   嵌进模板字面量。
+3. **交互读数状态又踩了跨作用域的坑**：`trendReadout` 定义在组件里，却被
+   组件**外部**的 `renderStatsTab` 直接引用 → `ReferenceError` → 整页崩掉。
+   这与上一轮 `hiddenPoints` 是同一类错误，这次一次把两张图的读数都改走 props。
+
+**验证**：
+- 新增 `test/client-charts-chunk.test.js`（5 项）专门盯**构建产物**：语法正确、
+  只依赖 react、注册协议正确、导出全部图型 + 样式、**交互层真的挂上了**
+  （`data-mc-host` / `tabindex="0"` / `aria-live`）、CSS 具备图形可见性所需规则。
+  这条测试能挡住「悄悄退回静态入口」——实测把产物里的 `data-mc-host` 改掉，
+  该用例立刻变红。
+- 测试桩补上 `useLayoutEffect` / `useMemo` / `useSyncExternalStore`：原来的桩
+  只有 `useState`，静态版一切正常，**交互坏了这件事在测试里根本不会暴露**。
+- 真实浏览器端到端：在 Chrome 里用 `PointerEvent` 扫过走势图，`onActive` 触发
+  **6 次**，最后一次回报 `{index:5, value:7}`，与最后一个数据点一致；截图可见
+  十字线、高亮端点与读数气泡（「12」）以及图下方的「13时 → 12」。
+- 全套 666 项通过，`verify-wiring` 通过。
+
+
+
 ## DEC-054 圆环图例可点击隐藏；横向对比改为自绘排序条（2026-11-10）
 
 用户报的两个问题，都是「图看起来没问题，但其实没传达信息」那一类。
