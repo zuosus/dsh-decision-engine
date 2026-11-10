@@ -2,6 +2,75 @@
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
 
+## DEC-056 修「点统计页整页白屏」：读数元素被当成样式对象展开（2026-11-10）
+
+**背景**：用户报告——「你肯定改错东西了，设置里点击 `统计与对比` 后，整个配置部分
+（包括配置 tab）都消失了」。
+
+**根因（真机事故，已复现并证实）**：
+
+上一轮给走势图加 hover 读数的写法是：
+
+```js
+return chartBox(
+  `trend/${options.label}`,
+  h(charts.Sparkline, { ... }),
+  typeof options.readout === "function" ? options.readout() : null,  // ← 第三个参数
+);
+```
+
+而 `chartBox(key, children, extra)` 的第三个参数是**样式对象**：
+
+```js
+style: { ...S.chartBox, ...(extra ?? {}) }
+```
+
+于是那个 React 元素被**展开进了 `style`**，产生 `{ display:'inline-flex',
+type:'div', props:{}, children:[...] }` 这样的畸形样式。React 设置样式时遇到
+对象值直接抛 `TypeError`：
+
+```
+The style prop expects a mapping from style properties to values,
+got an object for key "props"
+```
+
+React 在渲染期抛异常就会**卸载整棵组件树**——所以用户看到的不是「统计页坏了」，
+而是「连配置 tab 一起消失」。这个现象正是根因的直接证据：**异常发生在统计页
+渲染内部，但 React 的崩溃范围是整棵树**。
+
+**为什么测试没抓到**：测试用的是图表替身（`chartsFixture`），且 `readout` 只在
+真实数据 + charts 非 null 时才被调用；更关键的是，测试桩的 `h()` 不做任何样式
+校验，展开出来的畸形对象被原样存进 `props.style`，没有任何断言去看它。
+
+**修法（三层）**：
+
+1. **改正写法**：读数作为图表的**兄弟节点**，放进一个外层 `div`，不再走
+   `chartBox` 的第三个参数。
+2. **`chartBox` 加防御**：第三个参数若带 `type` / `props` / `$$typeof`（即它是
+   React 元素而不是样式对象），打一条英文警告并**忽略**它。实测：传元素进去后
+   `style` 保持 `{display:'inline-flex'}` 干净、不再污染页面。这条防的是「同一类
+   错误再次发生」——任何把非样式对象塞进第三个参数的调用都不会再拖垮整页。
+3. **统计页加保护壳** `safeRenderStatsTab`：用 try/catch 包住整页渲染，异常时
+   **把错误消息与完整堆栈显示在页面上**，而不是白屏。理由：统计页数据全部来自
+   服务端（`/stats` 形状随版本变），一条缺字段的记录就可能让某张图崩掉——这种
+   情况会一直存在，必须让它降级而不是炸掉整棵树；而白屏对用户毫无信息、对我们
+   更是零线索（Console 里往往只有一句 `The above error occurred in…`）。
+
+**验证**：
+- 用真实数据 + 真实 charts 分块渲染统计页，四个区块（走势 / 横向对比 /
+  按决策点分账 / 裁决构成）全部出现，未触发错误保护。
+- `chartBox` 防御单测：传 React 元素 → 打警告、style 干净；传普通样式 → 正常合并。
+- 新增回归守卫测试：遍历统计页渲染树，断言任何节点的 `style` 里都**不能**出现
+  `type` / `props` / `children` / `$$typeof` 这些来自 React 元素的键。
+- 全套 **667 项通过**，`verify-wiring` 通过。
+
+**教训（已写进 DECISIONS 以便下次避免）**：给渲染辅助函数加「可选参数」时，
+必须确认那个参数位的**语义**（是样式？是子节点？是回调？）。`chartBox` 的第三个
+参数叫 `extra`，名字中性而实际是样式对象——这种命名本身就是坑。以后这类辅助函数
+的参数名要写清类型（`styleExtra`），或者干脆只接受一个 options 对象。
+
+
+
 ## DEC-055 图表改用 microcharts 的交互入口（/interactive），并接入 hover 读数（2026-11-10）
 
 **背景**：用户指出一件事——「这些图表都不能交互，但是 microcharts 是允许交互的，

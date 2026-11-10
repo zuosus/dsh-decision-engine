@@ -2620,3 +2620,48 @@ test("图表：隐藏后圆环数据只含可见项，且颜色按 id 固定不�
     "同一个决策点的颜色不能因为隐藏了别人而改变",
   );
 });
+
+test("图表：读数元素不能塞进 chartBox 的样式参数（真机白屏事故的回归守卫）", async () => {
+  // 事故经过：renderTrend 把 `options.readout()` 的 React 元素当成 chartBox 的
+  // 第三个参数传了进去，而那个参数是**样式对象**。元素被展开进 style，
+  // style 里出现 type/props/children 这些非法键 → React 设置样式时抛
+  // TypeError → 整棵组件树被卸载 → 用户看到「点统计页，连配置 tab 一起消失」。
+  //
+  // 这条断言比「渲染不报错」更严格：它在任何环境（包括测试桩）里都能抓到
+  // 「把元素当样式用」这个错误形态，不依赖 React 的样式校验是否会抛错。
+  const { tree } = await render(stateWith({}), {
+    slots: {
+      [SLOTS.tab]: "stats",
+      [SLOTS.decisions]: decisionsFixture,
+      [SLOTS.stats]: statsWithSeries({
+        byPoint: [
+          { point: "authorize", requests: 8, cached: 0, inputTokens: 1, outputTokens: 1, durationMs: 1, avgDurationMs: 1 },
+        ],
+        outcomes: { allow: 5, ask: 2, reject: 3, none: 0, decided: 10, byPoint: [], otherVerdicts: [], otherVerdictCount: 0 },
+      }),
+      20: chartsFixture,
+    },
+  });
+
+  const badKeys = ["type", "props", "children", "$$typeof"];
+  const offenders = [];
+  (function walk(node) {
+    if (node === null || node === undefined || node === false) return;
+    if (Array.isArray(node)) return node.forEach(walk);
+    if (typeof node !== "object") return;
+    const style = node.props?.style;
+    if (style !== null && typeof style === "object" && !Array.isArray(style)) {
+      for (const key of badKeys) {
+        if (Object.hasOwn(style, key)) offenders.push({ element: String(node.type), key });
+      }
+    }
+    walk(node.children);
+    walk(node.props?.children);
+  })(tree);
+
+  assert.deepEqual(
+    offenders,
+    [],
+    `样式对象里出现了 React 元素的键，说明有元素被当成样式展开：${JSON.stringify(offenders.slice(0, 2))}`,
+  );
+});
