@@ -2435,6 +2435,49 @@ test("图表：区间尾部有未来段时，未来点在 data 里置 null、虚
   );
 });
 
+test("图表：区间全零（没有任何数据）时不该出现「虚线段…」那句说明", async () => {
+  // 真机场景：本月一条记录都没有，但区间上界是月末，服务端照样给出
+  // nowIndex=11（第一个还没开始的桶）。此时 `renderTrend` 会在 hasData
+  // 为 false 时**直接返回「本区间没有数据」占位**——图上没有线，自然也没有
+  // 虚线。而说明行的判据只看「区间里有没有未来桶」，于是会渲染出一句
+  // 「虚线段是区间内还没到的时间」——**描述一个不存在的东西**。
+  //
+  // 口径：「有没有虚线」是**渲染出来的图**的事实，不是区间的事实。
+  // 说明行必须跟着图走，否则它就是在讲屏幕上并不存在的东西。
+  const allZero = statsWith({
+    series: {
+      bucket: "hour",
+      buckets: ["2026-11-10T09", "2026-11-10T10", "2026-11-10T11"],
+      series: {
+        requests: [0, 0, 0],
+        inputTokens: [0, 0, 0],
+        outputTokens: [0, 0, 0],
+        durationMs: [0, 0, 0],
+        allow: [0, 0, 0],
+        ask: [0, 0, 0],
+        reject: [0, 0, 0],
+        none: [0, 0, 0],
+      },
+      total: 3,
+      nowIndex: 2,
+    },
+  });
+  const { tree, text } = await render(stateWith({}), {
+    slots: { [SLOTS.tab]: "stats", [SLOTS.stats]: allZero, 20: chartsFixture },
+  });
+  // 图确实没画出来（走的是占位那句），所以虚线说明也不该出现。
+  assert.equal(
+    findAllByType(tree, "Sparkline").length,
+    0,
+    "全零区间不该画折线图（贴底的直线会被误读成一直很平稳）",
+  );
+  assert.ok(text.includes("本区间没有数据"), "应显示「没有数据」占位");
+  assert.ok(
+    !text.includes("虚线段是区间内还没到的时间"),
+    "图上没有虚线，就不该有一句解释虚线的说明",
+  );
+});
+
 test("图表：没有未来段时（字段缺失 / 越界 / 非数字 / 整段未来）行为与旧版逐点相同", async () => {
   // 向后兼容是硬要求：老服务端响应里没有 nowIndex，非法值一律当作「没有未来段」。
   // 做错的表现都不是「报错」而是「画了不该画的线」——比如把整段历史画成虚线，
