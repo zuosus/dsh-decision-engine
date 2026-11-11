@@ -2613,6 +2613,89 @@ test("图表：按决策点分账画圆环，且图例与圆环同色（mc-theme
   assert.ok(text.includes("75.0%") || text.includes("75%"), `图例应显示占比，实际：\n${text.slice(0, 600)}`);
 });
 
+test("图表：圆环下方不再加自己的一行读数（图自己会报数）", async () => {
+  // 这条锁住一次「删繁」的改动：以前界面把圆环 hover 的楔形数据抄进 React
+  // state，再在**图下面**自己画一行读数（「工具授权 120 次请求」）。但交互版
+  // 圆环自带读数气泡（`.mc-spark-readout`，在图上方），同一件事被说两遍：
+  // 多占一行版面，还会让读者以为两处的数字是两回事。
+  //
+  // 守卫盯住两件事：
+  //   1. 圆环**不接** onActive / onSelect（接了就说明又要自己抄一份读数）；
+  //   2. 界面上不出现那一行读数的痕迹（它的样式是 chartReadout + flexBasis
+  //      100%，且它带一个「次请求」单位标签）。
+  const { tree } = await render(stateWith({}), {
+    slots: {
+      [SLOTS.tab]: "stats",
+      [SLOTS.decisions]: decisionsFixture,
+      [SLOTS.stats]: statsWithSeries({
+        byPoint: [
+          { point: "authorize", requests: 120, cached: 0, inputTokens: 500, outputTokens: 50, durationMs: 1000, avgDurationMs: 8 },
+          { point: "retrieval", requests: 40, cached: 0, inputTokens: 200, outputTokens: 20, durationMs: 400, avgDurationMs: 13 },
+        ],
+      }),
+      20: chartsFixture,
+    },
+  });
+
+  const donuts = findAllByType(tree, "MicroDonut");
+  assert.equal(donuts.length, 1, "按决策点分账应渲染一个圆环");
+  assert.equal(donuts[0].props.onActive, undefined, "圆环不该再往外抛 onActive");
+  assert.equal(donuts[0].props.onSelect, undefined, "圆环不该再往外抛 onSelect");
+  assert.equal(donuts[0].props.readout, undefined, "圆环不该再带自绘读数");
+
+  // 那一行读数的样式指纹：chartReadout 的 flexBasis:100% 整行。
+  // 走势图的读数行没有 flexBasis，所以两者能区分开。
+  const readoutRows = [];
+  (function walk(node) {
+    if (node === null || node === undefined || node === false) return;
+    if (Array.isArray(node)) return node.forEach(walk);
+    if (typeof node !== "object") return;
+    const style = node.props?.style;
+    if (style !== null && typeof style === "object" && style.flexBasis === "100%") readoutRows.push(node);
+    walk(node.children);
+    walk(node.props?.children);
+  })(tree);
+  assert.deepEqual(
+    readoutRows,
+    [],
+    `圆环下方不应再有自己的读数行，实际找到 ${readoutRows.length} 个`,
+  );
+
+  // 旧读数行的单位标签「次请求」也不该再出现在页面上。
+  const text = collectText(tree).join("\n");
+  assert.equal(text.includes("次请求"), false, "旧读数行的「次请求」标签应已移除");
+});
+
+test("图表：走势图下方的读数行仍然保留（只有圆环去掉了）", async () => {
+  // 与上一条互为对照：这次删的只是**圆环**那一行，走势图自己的读数行
+  // 还在（它读的是「第几个桶、那个桶多少」，没有别的图形能替它说）。
+  const { tree } = await render(stateWith({}), {
+    slots: {
+      [SLOTS.tab]: "stats",
+      [SLOTS.stats]: statsWithSeries({}),
+      20: chartsFixture,
+    },
+  });
+
+  const readoutRows = [];
+  (function walk(node) {
+    if (node === null || node === undefined || node === false) return;
+    if (Array.isArray(node)) return node.forEach(walk);
+    if (typeof node !== "object") return;
+    const style = node.props?.style;
+    if (style !== null && typeof style === "object" && style.minHeight === "16px") readoutRows.push(node);
+    walk(node.children);
+    walk(node.props?.children);
+  })(tree);
+  assert.ok(readoutRows.length > 0, "走势图下方的读数行应仍然存在");
+
+  const text = collectText(tree).join("\n");
+  assert.ok(
+    text.includes("把鼠标移到图上看某一格的具体值"),
+    `走势图的读数提示应仍然存在，实际：\n${text.slice(0, 600)}`,
+  );
+});
+
 test("图表：圆环容器带 mc-theme，图例颜色才不会与圆环错位", async () => {
   // 这条是上面那个 bug 的形状守卫：`--mc-cat-N` 在 .mc-theme 里被重新
   // 定义（接的是 DSH 语义色）。图例色块在 chartBox 外面，只有容器的
