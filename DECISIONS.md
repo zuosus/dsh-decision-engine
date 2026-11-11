@@ -2,6 +2,119 @@
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
 
+## DEC-058 走势图把「还没到的时间」画成淡色虚线（2026-11-11）
+
+**背景**：用户原话「走势的折线图显示的统计周期包含了未来。未来部分的颜色粗细风格
+和过去的完全一致，是否可以采用淡一些的颜色，以及使用虚线而不是实线，以便用户更
+清晰地了解时间分布？」
+
+**根因（口径问题，不是画法问题）**：`resolveRange` 给的区间上界常常落在未来——
+`today` → 次日 0 点、`week` → 本周末、`month` → 月末、`year` → 年末。`bucketKeys`
+又刻意生成**连续**的桶（见 DEC-052 那条「空桶补 0」），于是序列尾部有一批值恒为 0
+的桶。**同样画成实线的 0，此时有两种互相矛盾的含义**：「这段时间真的没有请求」
+与「这段时间还没到」。图上无法区分，读者会把后者的平线读成前者——这是本插件在
+统计口径上反复强调的那条原则（0 与「无数据」不是一回事）在时间维度上的同一个坑。
+
+**决定**：
+
+1. **未来段由服务端算好一个下标下发**，前端不做任何时间运算：
+   `series.nowIndex` = 第一个「还没开始」的桶的下标。判定看**桶起点**：
+   `bucketStartMs(key) > now` 才算未来（严格大于）。**正在进行的那个桶算过去**
+   ——它已经有真实数据了，按桶终点判定会把它划进未来段，图上最后一段真实折线被
+   画成虚线，读者以为「还没发生」，其实那就是刚刚发生的事。
+   全过去 → `buckets.length`；全未来 → `0`；空序列 / 任一非法键 → `buckets.length`
+   （非法键时**整段放弃**而非停在出错位置：返回出错位置等于把「说不清」画成
+   「还没发生」，会凭空造出一段假虚线。宁可没有虚线，不可造假）。
+2. **过去段照旧交给库，未来段自己画**：交给 `Sparkline` 的 `data` 在未来索引处置
+   `null`——库把非有限值当断点，实线自然停在边界；同时 hover 与键盘漫游的候选点
+   集合只剩过去的桶，**自动跳过未来的桶**（没发生的时间不该给出「0 次」的读数，
+   这正是本次要修的那个误读）。虚线段由我们在 `children` 里塞一条
+   `<path data-mc-ink="muted">`。
+3. **线型复用库已有的 token，不硬编码颜色**：vendored 样式里
+   `:where(.mc-root [data-mc-ink=muted]){fill:none;stroke:var(--mc-neutral)}` 且
+   `:where(.mc-spark-interactive [data-mc-ink=muted]){stroke-dasharray:1.5 2}`；
+   本插件的主题覆盖把 `--mc-neutral` 接到 `--dsw-alias-label-tertiary`（淡色），
+   muted 又**没有**设 `stroke-width`（库只给 `[data-mc-ink=data]` 设 `--mc-sw`），
+   线宽因此从 1.5 降到默认 1。**淡色 + 虚线 + 略细**一次满足，深色 / 浅色主题与
+   forced-colors（muted → GrayText）都自动成立。硬编码颜色会在深色主题或高对比
+   模式下变成看不见的线。
+4. **`domain` 与 `maxPoints` 必须由我们显式传**：值域按**原始序列**算（未来那个 0
+   照样参与缩放），否则库拿 null 化之后的序列自己算，过去段的坡度会随「后面挂了
+   几格未来」被偷偷改掉——那比虚线缺席严重得多。`maxPoints` 只有存在未来段时
+   才钉成桶数：库默认 200 会做 min/max 抽稀，长区间（year + 日桶 = 365 格）上
+   虚线与实线的顶点就不再逐桶对应，会错开好几天。没有未来段时不传，保持旧行为。
+5. **坐标系必须逐位复刻库的内部布局**：pad=2、按**全长**排 x、按值域排 y、坐标
+   保留 2 位小数、null 处切子路径且每段各起一个 `M`（分隔符是 `" L"`）。复刻错了
+   不会报错，只会错位。所以 `lib/client.js` 为此导出 `sparkTrendGeometry` /
+   `sparkTrendPath` / `sparkDomain` / `sparkFutureIndex`，由
+   `test/client-charts-chunk.test.js` 拿**同一份 vendored 产物**渲染 Sparkline，
+   把库自己算出的 `d` 与我们算的**逐字符**比对。将来重跑
+   `scripts/build-microcharts.mjs` 升级 microcharts、库改了 pad 或抽稀规则，
+   这条立刻红，而不是让用户先看到错位的线。
+6. **旧响应完全不受影响**：`nowIndex` 缺失 / 非整数 / 越界 / 为 0 一律当作「没有
+   未来段」，`data`、`domain`、`maxPoints` 全部原样——这是向后兼容的底线。
+
+**文案**：走势区块在有未来段时才多一行「虚线段是区间内还没到的时间，不计入读数。」；
+无障碍摘要补「（虚线为未来 N 个桶，尚未发生）」——读屏用户看不见线型，虚线的含义
+只能写进摘要里。两处都登记进了词表（`test/i18n-coverage.test.js` 盯着）。
+
+**测试**：
+- `test/stats-series.test.js` 新增 11 项：`bucketStartMs` 与 `bucketKey` 互逆
+  （含 23 点 / 月末 / 跨年）、严格大于的边界两侧（13:59:59.999 → 14、
+  14:00:00.000 → 15）、全过去 / 全未来、天与月粒度、空数组 / 乱码键 / 坏 now
+  不抛异常、`aggregate` 下发形状。
+- `test/client-ui.test.js` 新增 2 项：有未来段时 `data` 置 null 且虚线首尾顶点
+  精确落在 `{x:130,y:32}` → `{x:258,y:2}`；以及 9 种退化输入（缺失 / 越界 /
+  负数 / 0 / NaN / Infinity / 小数 / 字符串 / null）全部退回旧行为且摘要不提虚线。
+- `test/client-charts-chunk.test.js` 新增几何锁定：我们算的 `d` 与真实 vendored
+  库算出的 `d` 逐字符相同（含 NaN / Infinity / undefined 断成四段那条）。
+
+**验证**：`node --test "test/*.test.js"` → 678 项全过；另用独立脚本让真库与我们
+的几何函数在小时桶 / 日桶 / 负值 / 无未来段 / 全未来五种输入上比对，实线顶点
+逐位一致、虚线起笔点与实线末点重合、虚线确实渲染进 SVG。
+
+## DEC-057 DEC-044 入场动画：时长翻倍 + 新增行背景色淡出（2026-11-11）
+
+取代：DEC-044 第 4 条里 `S.decisionsRowEnter` 的 `300ms` 与
+`from{opacity:0;transform:translateY(-4px)} to{opacity:1;transform:translateY(0)}`
+这两处口径。keyframes 名、`both` 填充、只给新增行、首屏不动画、减弱动效不播、
+幂等注入、新增判定放取数、换会话清基线等**其余约定一字未动**；DEC-044 条目按
+append-only 规则原样保留（它正文里那几处 `300ms` 是当时的历史值），失效由本条声明。
+
+**背景**：用户原话「DEC-044 的动画太快了……1. 动画效果 duration 延长一倍；
+2. 增加 row background color 动画：新增 row 自带不同的 background color，在整个
+动画过程中逐渐改变为默认 color」。
+
+**决定**：
+
+1. **时长 300ms → 600ms**（翻倍）。`S.decisionsRowEnter` 仍是一条
+   `animation: dsh-decision-row-enter 600ms ease-out both`，不拆两段、不加延时、
+   不加配置键、不升版本（沿用 DEC-044「不新增配置键、不升版本」）。
+2. **在 `@keyframes` 里加 `background-color`**：`from` 帧给新增行一层靛蓝高亮
+   `rgba(99,102,241,.28)`（与配置页 active 的 `rgba(99,102,241,.28)` 同一个语义
+   色），`to` 帧褪到同色相 `rgba(99,102,241,0)`——即行默认的「无背景色」。颜色
+   与 opacity / 位移走同一条 `from→to`、同一段 600ms，于是「逐渐改变为默认 color」
+   正好铺满整个动画过程。
+
+**为什么高亮只写在 keyframes、不写成行内联 `background`**：`DECISION_ROW_ENTER_CSS`
+注不上（无 `document` / CSP 拦 `<style>`）时，浏览器找不到同名 keyframes，整条
+`animation` 失效；此时若高亮是内联样式，行会**永久卡在一层底色**（要到下一次轮询
+才被覆盖）。放进 keyframes 则随动画一起失效，行照常按默认背景出现。这与 DEC-044
+「注不上就是不动画、行照常出现」是同一个失败方向，不能破。
+
+**为什么 `to` 用 `rgba(99,102,241,0)` 而不是 `transparent` 关键字**：部分引擎把
+`transparent` 当 `rgba(0,0,0,0)` 做非预乘插值，靛蓝 → 黑透明中途会透出灰调；
+同色相 alpha=0 是纯 alpha 淡出，浅色/深色主题、各浏览器都不偏色，且 alpha=0 与
+「无背景色」视觉等价——正是用户说的「默认 color」。
+
+**只碰展示层**：背景色不牵动盒尺寸，不碰 `decisionsScroll` 的重排（沿用 DEC-044
+「简单动画、不碰盒尺寸」）；5 秒轮询、新增判定、`newIds` / `seenIdsRef` 链路不动。
+
+**验证**：`test/client-decisions-view.test.js` 仍 52 项。复用 DEC-044 那 7 项入场
+动画用例：「要有明确时长」断言 `300ms` → `600ms`；在 keyframes 注入用例补三条——
+`from` / `to` 两帧都带 `background-color`、起始色 ≠ 默认色、`to` 帧收敛到 alpha=0
+（透明）。注释里残留的 `300ms` 同步改为 `600ms`。
+
 ## DEC-056 修「点统计页整页白屏」：读数元素被当成样式对象展开（2026-11-10）
 
 **背景**：用户报告——「你肯定改错东西了，设置里点击 `统计与对比` 后，整个配置部分

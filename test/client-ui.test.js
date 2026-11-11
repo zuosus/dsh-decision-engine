@@ -2307,6 +2307,62 @@ function statsWithSeries(over) {
   });
 }
 
+/**
+ * 同一份序列，再补上服务端的 `series.nowIndex`（「第一个还没开始的桶」的下标）。
+ *
+ * `undefined` 走「字段根本不存在」那条路——那是老服务端的样子，必须和现在
+ * 一模一样，所以这里不是「传个 null 占位」，而是整个键都不写。
+ */
+function statsWithSeriesFuture(nowIndex) {
+  const base = statsWithSeries({});
+  const series = { ...base.series };
+  if (nowIndex !== undefined) series.nowIndex = nowIndex;
+  return { ...base, series };
+}
+
+/**
+ * 取走势图里我们自己画的那条虚线（`data-mc-ink="muted"` 的 path 子节点）。
+ *
+ * 子节点在 `props.children` 上：`renderTrend` 是把 path 放进 Sparkline 的
+ * props 对象的，替身组件不展开子树，所以只能顺着 props 取。
+ */
+function dashedChildOf(sparklineNode) {
+  const kids = [sparklineNode?.children ?? [], sparklineNode?.props?.children ?? []].flat(Infinity);
+  return kids.find(
+    (child) =>
+      child !== null &&
+      typeof child === "object" &&
+      child.type === "path" &&
+      child.props?.["data-mc-ink"] === "muted",
+  );
+}
+
+/**
+ * 把路径 `d` 解析回顶点数组。
+ *
+ * 分隔规则照 microcharts 自己那一套：每段各起一个 `M`，段内用 `" L"` 连接，
+ * 段与段之间用一个空格。写错分隔符的话浏览器整条路径解析失败，
+ * 表现是「虚线根本不出现且不报错」，所以这里也按同一规则解析。
+ */
+function parsePathVertices(d) {
+  return String(d)
+    .split("M")
+    .filter((segment) => segment !== "")
+    .flatMap((segment) =>
+      segment.split(" L").map((pair) => {
+        const [x, y] = pair.trim().split(" ").map(Number);
+        return { x, y };
+      }),
+    );
+}
+
+/** 走势图里「请求次数」那一张（三条序列里 data[0] === 3 的那条）。 */
+function requestsTrend(tree) {
+  return findAllByType(tree, "Sparkline").find(
+    (node) => node.props.data?.length === 3 && node.props.data?.[0] === 3,
+  );
+}
+
 test("图表：有图表模块时，走势图拿到服务端那条序列", async () => {
   // 关键断言是「图里画的就是表里那个数」：走势图的 data 必须与服务端
   // 下发的序列**逐点相同**，不能在渲染层再算一遍（那会出现图与表对不上）。
@@ -2321,6 +2377,100 @@ test("图表：有图表模块时，走势图拿到服务端那条序列", async
   assert.ok(sparklines.length >= 1, "统计页应渲染走势图");
   const requests = sparklines.find((node) => node.props.data?.join(",") === "3,0,4");
   assert.ok(requests !== undefined, "请求次数走势应原样使用服务端序列（含空桶 0）");
+});
+
+test("图表：区间尾部有未来段时，未来点在 data 里置 null、虚线段自己画", async () => {
+  // 区间上界常常延伸到未来（today → 次日 0 点、year → 年末），尾部那些桶恒为 0。
+  // 现在要求：过去段维持原样，未来段用淡色虚线。做法是把交给库的 data 在未来
+  // 索引处置 null（库把非有限值当断点，线停在边界，hover/键盘也跳过未来的桶），
+  // 虚线段由我们塞进 Sparkline 的 children。
+  const { tree, text } = await render(stateWith({}), {
+    slots: {
+      [SLOTS.tab]: "stats",
+      [SLOTS.stats]: statsWithSeriesFuture(2),
+      20: chartsFixture,
+    },
+  });
+  const requests = requestsTrend(tree);
+  assert.ok(requests !== undefined, "请求次数走势图应在");
+
+  // ① 交给库的序列：下标 2（还没开始的桶）必须是 null，前两点原样不动。
+  //    null 而不是 0：0 会被库当成真实读数画出来、也会被 hover 念出来。
+  assert.deepEqual(requests.props.data, [3, 0, null], "未来索引处置 null，实线停在边界");
+
+  // ② 值域必须由我们显式传，而且**按原始序列**算：库拿 null 化之后的
+  //    [3, 0, null] 自己算会得到 [0, 3]，过去段的坡度就因「后面挂了几格未来」
+  //    被偷偷改掉，实线与虚线也不是同一套缩放。这里必须仍是 [0, 4]。
+  assert.deepEqual(requests.props.domain, [0, 4], "值域含未来段的值，形状不因 null 化而变");
+
+  // ③ 顶点数 = 桶数：库默认 maxPoints 200，超过就 min/max 抽稀，
+  //    长区间（year + 日桶）上虚线会和实线错开好几个桶。
+  assert.equal(requests.props.maxPoints, 3, "关抽稀：虚线与实线逐桶对应");
+
+  // ④ 虚线段本体。
+  const dashed = dashedChildOf(requests);
+  assert.ok(dashed !== undefined, '应有一个 data-mc-ink="muted" 的 path 子节点');
+  assert.equal(dashed.props["data-mc-ink"], "muted", "淡色/虚线/略细全靠这条 ink 规则");
+  const vertices = parsePathVertices(dashed.props.d);
+  // 覆盖 [futureFrom - 1, length - 1]：**从最后一个已发生的点起笔**，
+  // 否则虚线与实线之间会留一段肉眼可见的缺口。
+  // 数字来自这套布局：pad 2、x = 2 + i*(258-2)/(3-1) → 2 / 130 / 258；
+  // y = 32 + (v - 0)*(2 - 32)/(4 - 0)。与库自己算的顶点是否逐位相同，
+  // 由 test/client-charts-chunk.test.js 拿真实产物锁定（这里只断言接线位置）。
+  assert.equal(vertices.length, 2, `虚线应有两个顶点，实际 d=${dashed.props.d}`);
+  assert.deepEqual(vertices[0], { x: 130, y: 32 }, "起笔 = 最后一个已发生的桶（下标 1，值 0）");
+  // 下标 2 在这份夹具里故意给了 4（真实数据里未来桶恒为 0）。这一条顺带锁住
+  // 一个性质：虚线画的是**序列里的真实值**，不是把未来段一律拉平到 0——
+  // 所以它必须落在 y=2（4 的顶点），而不是贴底的 32。
+  assert.deepEqual(vertices[1], { x: 258, y: 2 }, "延伸到最后一个桶（下标 2，值 4 → y=2）");
+
+  // ⑤ 文案：读者必须知道虚线是什么，读屏用户也一样。
+  assert.ok(
+    text.includes("虚线段是区间内还没到的时间，不计入读数。"),
+    "说明行应在有未来段时出现",
+  );
+  assert.ok(
+    String(requests.props.summary).includes("虚线为未来 1 个桶"),
+    `无障碍摘要应说明虚线含义，实际：${requests.props.summary}`,
+  );
+});
+
+test("图表：没有未来段时（字段缺失 / 越界 / 非数字 / 整段未来）行为与旧版逐点相同", async () => {
+  // 向后兼容是硬要求：老服务端响应里没有 nowIndex，非法值一律当作「没有未来段」。
+  // 做错的表现都不是「报错」而是「画了不该画的线」——比如把整段历史画成虚线，
+  // 读者会以为这段时间根本没有请求。
+  const cases = [
+    ["字段缺失（老服务端）", undefined],
+    ["nowIndex === buckets.length（没有未来段）", 3],
+    ["nowIndex === 0（整段都在未来，没有已发生的点可以起笔）", 0],
+    ["字符串数字", "2"],
+    ["NaN", Number.NaN],
+    ["Infinity", Number.POSITIVE_INFINITY],
+    ["小数", 1.5],
+    ["负数（越界）", -1],
+    ["大于长度（越界）", 99],
+    ["null", null],
+  ];
+  for (const [name, nowIndex] of cases) {
+    const { tree, text } = await render(stateWith({}), {
+      slots: {
+        [SLOTS.tab]: "stats",
+        [SLOTS.stats]: statsWithSeriesFuture(nowIndex),
+        20: chartsFixture,
+      },
+    });
+    const requests = requestsTrend(tree);
+    assert.ok(requests !== undefined, `${name}：走势图应在`);
+    assert.deepEqual(requests.props.data, [3, 0, 4], `${name}：data 必须原样交给库`);
+    assert.equal(requests.props.domain, undefined, `${name}：不该由我们指定值域`);
+    assert.equal(requests.props.maxPoints, undefined, `${name}：不该改库的抽稀默认值`);
+    assert.equal(dashedChildOf(requests), undefined, `${name}：不该出现虚线段`);
+    assert.ok(!text.includes("虚线段是区间内还没到的时间"), `${name}：不该出现虚线说明`);
+    assert.ok(
+      !String(requests.props.summary).includes("虚线"),
+      `${name}：摘要不该提虚线，实际：${requests.props.summary}`,
+    );
+  }
 });
 
 test("图表：没有图表模块时统计页照常显示数字表格（降级）", async () => {

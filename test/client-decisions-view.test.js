@@ -1576,7 +1576,7 @@ test("裁决列按中文名排序，不按机器词的字母序", async () => {
 // 桩的机制说明（决定这些断言为什么这么写）：`window.setInterval` 被桩换成
 // 「把回调记进 `pollers`、不真的等 5 秒」，`poll()` 就是手动敲响它们。新增判定
 // 发生在 `load()` 里（取数那一刻算出 `newIds` 并存进 state），所以 `poll()` 之后
-// 的渲染树就是用户在那 300ms 里看到的那一帧；标记会一直挂到**下一次轮询**
+// 的渲染树就是用户在那 600ms 里看到的那一帧；标记会一直挂到**下一次轮询**
 // 才被覆盖——下面第 4 条按这个口径断言「不扩散、不搬家」，而不是断言「消失」。
 
 /** 上一批已显示的两条记录（动画用例的「旧数据」）。 */
@@ -1640,7 +1640,8 @@ test("轮询多出来的那一条带动画，已有的行一条都不带", async
   // 不播（样式表里找不到同名 keyframes 时整条 animation 失效），测试不报错。
   assert.match(animation, /dsh-decision-row-enter/, "animation 要引用注入的 keyframes 名");
   // 时长也不能省：CSS 默认 duration 是 0s，写了等于没写，用户看到的还是「直接出现」。
-  assert.match(animation, /300ms/, "要有明确时长");
+  // DEC-057 把 DEC-044 的 300ms 翻倍成 600ms：这里断言翻倍后的新时长。
+  assert.match(animation, /600ms/, "要有明确时长（DEC-057：300ms 翻倍到 600ms）");
 });
 
 test("动画只播一次：下一轮轮询没多出新记录时谁都不再动", async () => {
@@ -1692,7 +1693,7 @@ test("翻排序方向 / 展开行：动画只跟着那一条记录，不扩散�
     "展开的是 rec-2 那一行：详情里不该出现新记录的内容（动画行与展开行是两件事）",
   );
   // 边界说明：这一帧里 rec-3 仍带着 animation 是**设计如此**——标记挂在取数那
-  // 一刻，活到下一次轮询（300ms 的动画早播完了），这样中途任何重绘都不会把
+  // 一刻，活到下一次轮询（600ms 的动画早播完了），这样中途任何重绘都不会把
   // 动画掐在第几帧上。「下一次轮询时它必须消失」由上面那条用例负责。
 });
 
@@ -1775,7 +1776,21 @@ test("keyframes 只往文档里注一次；没有 document 也只是不动画、
     assert.equal(style.tagName, "STYLE", "注的必须是 <style>");
     assert.equal(style.dataset.plugin, "dsh-decision-engine", "要能看出这条样式是谁注的");
     // 关键帧名必须与行上那条 `animation` 引用得上（对不上就是静默不播）。
-    assert.match(String(style.textContent), /@keyframes\s+dsh-decision-row-enter/);
+    const css = String(style.textContent);
+    assert.match(css, /@keyframes\s+dsh-decision-row-enter/);
+
+    // DEC-057：新增行自带一层不同的背景色，整段动画里逐渐褪到默认（透明）。
+    // 背景色写在 keyframes 而非行内联样式上——样式表注不上时它随整条 animation
+    // 一起失效，行不会卡在高亮底色上（与 DEC-044 第 2 条同一个失败方向）。
+    const fromFrame = css.match(/from\{([^}]*)\}/);
+    const toFrame = css.match(/to\{([^}]*)\}/);
+    assert.ok(fromFrame && toFrame, "入场关键帧要有 from / to 两帧");
+    assert.match(fromFrame[1], /background-color\s*:/, "from 帧要给新增行一层背景色");
+    assert.match(toFrame[1], /background-color\s*:/, "to 帧要把背景色收敛到默认值");
+    const fromBg = fromFrame[1].match(/background-color\s*:\s*([^;}]+)/)[1];
+    const toBg = toFrame[1].match(/background-color\s*:\s*([^;}]+)/)[1];
+    assert.notEqual(fromBg, toBg, "起始背景色与默认色必须不同（否则等于没动画）");
+    assert.match(toBg, /,\s*0\s*\)|transparent/, `to 帧应褪到透明/默认色，实际：${toBg}`);
 
     // 同一个实例里再来一轮轮询 + 一次纯界面动作：都不该再注第二个 <style>。
     await view.poll(animThree());
