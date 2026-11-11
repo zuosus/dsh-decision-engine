@@ -40,6 +40,79 @@ function loadChunk() {
 }
 
 /**
+ * 取 `lib/client.js` 的导出（只要它的模块出口，不渲染界面）。
+ *
+ * 为什么要在这里加载 client.js：几何锁定测试必须把「我们自己复刻的坐标公式」
+ * 和「库在这同一份产物上算出的顶点」放在一起比。client.js 是浏览器 bundle，
+ * 加载协议和分块一样（`window.__ModuleLoader__.load({ factory })`），所以一个
+ * react 桩就够了——不调用 `apply()`，也就不会碰宿主的注入点。
+ */
+async function loadClientExports(seq) {
+  const source = readFileSync(new URL("../lib/client.js", import.meta.url), "utf8");
+  let bundle = null;
+  const previous = globalThis.window;
+  globalThis.window = {
+    __ModuleLoader__: {
+      load({ factory }) {
+        bundle = factory((name) => {
+          if (name === "react") return reactStub;
+          throw new Error(`unexpected require: ${name}`);
+        });
+      },
+    },
+  };
+  try {
+    // 加一段唯一注释再转 data URL：内容变了 → 模块标识不同 → factory 重新执行。
+    const unique = `\n// chunk-test-instance-${seq}\n`;
+    await import(`data:text/javascript;base64,${Buffer.from(source + unique, "utf8").toString("base64")}`);
+  } finally {
+    globalThis.window = previous;
+  }
+  assert.ok(bundle !== null, "client bundle 未注册 factory");
+  return bundle;
+}
+
+/**
+ * 在渲染树里找带某个 `data-mc-ink` 的元素。
+ *
+ * 替身 `createElement` 不会展开函数组件，所以遇到 `type` 是函数时要把它调一次
+ * （交互版 Sparkline 把真正的 svg 交给内部组件渲染）。深度上限只是防自相似递归。
+ */
+function findByInk(node, ink, out = [], depth = 0) {
+  if (node === null || node === undefined || depth > 20) return out;
+  if (Array.isArray(node)) {
+    for (const child of node) findByInk(child, ink, out, depth);
+    return out;
+  }
+  if (typeof node !== "object") return out;
+  if (node.props?.["data-mc-ink"] === ink) out.push(node);
+  findByInk(node.children, ink, out, depth + 1);
+  findByInk(node.props?.children, ink, out, depth + 1);
+  if (typeof node.type === "function") {
+    findByInk(node.type(node.props), ink, out, depth + 1);
+  }
+  return out;
+}
+
+/**
+ * 解析路径 `d` 成顶点数组。
+ *
+ * 分隔规则与 microcharts 一致：每段各起一个 `M`，段内以 `" L"` 连接，
+ * 段与段之间是一个空格（null 断点就切在这里）。
+ */
+function parseVertices(d) {
+  return String(d)
+    .split("M")
+    .filter((segment) => segment !== "")
+    .flatMap((segment) =>
+      segment.split(" L").map((pair) => {
+        const [x, y] = pair.trim().split(" ").map(Number);
+        return { x, y };
+      }),
+    );
+}
+
+/**
  * 一个够用的 react 桩。
  *
  * 只实现交互入口真正用到的那几个 hook。`useSyncExternalStore` 返回
@@ -109,6 +182,131 @@ test("图表分块：用的是交互入口，交互层真的挂上了", () => {
   const markup = JSON.stringify(el);
   assert.ok(markup.includes("data-mc-host"), "缺少交互宿主标记");
   assert.ok(markup.includes("mc-spark-interactive"), "不是交互版图型（应为 /interactive 入口）");
+});
+
+/** 几何锁定的用例：全部走统计页那一条配置（label "none"、dots "auto"、260×34）。 */
+const GEOMETRY_CASES = [
+  { name: "尾部两格未来（null 断在末尾，显式传值域）", data: [3, 0, 4, null, null], domain: [0, 4] },
+  { name: "满上限 400 个桶（stat 页最长区间）", data: Array.from({ length: 400 }, (unused, index) => (index % 7) - 3), domain: undefined },
+  { name: "不传值域（退给库自己算，锁 sparkDomain）", data: [1, 4, 2, 8, 5], domain: undefined },
+  { name: "中段断点（虚线要切成子路径）", data: [2, null, 6, 1, null, 3], domain: undefined },
+  { name: "面积模式（zero 会把值域压到含 0）", data: [7, 9, 6, 8], domain: undefined, fill: true },
+  { name: "水平序列（值域退化，斜率非有限）", data: [5, 5, 5, null, 5], domain: undefined },
+  { name: "全 0 + 面积", data: [0, 0, null, 0], domain: undefined, fill: true },
+  { name: "负数与跨度不对称", data: [-4, 0, 3, null, -1], domain: undefined },
+  { name: "两个点", data: [1, 9], domain: undefined },
+  { name: "一个点（x 取中线）", data: [4], domain: undefined },
+  { name: "宽高非法（走 fallback 80×20）", data: [1, 2, null, 4], width: 0, height: -5, domain: undefined },
+];
+
+test("走势图几何：我们复刻的坐标公式与 vendored 库自己算出的顶点逐位相同", async () => {
+  /**
+   * 这条测试是本方案唯一的真风险点。
+   *
+   * 统计页把走势的未来段（区间上界之后那批恒为 0 的桶）画成淡色虚线：过去段
+   * 交给 microcharts，虚线段由 `lib/client.js` 的 `sparkTrendGeometry` /
+   * `sparkTrendPath` 自己算坐标、自己拼 `d`。也就是说我们在**复刻一个第三方
+   * 库的内部布局**（pad=2、按全长排 x、按值域排 y、坐标保留 2 位小数、null 处
+   * 切子路径、每段各起一个 `M`）。
+   *
+   * 复刻错了不会报错，只会**错位**：虚线与实线断开、整体偏移一段、或者在长区间
+   * 上偏好几个桶——用户看到的是「图坏了但还能看」，最难被发现。所以这里不做
+   * 「形状差不多」的近似断言，而是拿**同一份 vendored 产物**渲染 Sparkline，
+   * 把它画出的实线路径与我们算的路径逐字符比对。
+   *
+   * 将来重跑 `scripts/build-microcharts.mjs` 升级 microcharts、库改了 pad 或
+   * 抽稀规则，这条立刻红，而不是让用户先看到错位的线。
+   */
+  const { registration } = loadChunk();
+  const charts = registration.factory((name) => {
+    if (name === "react") return reactStub;
+    throw new Error(`unexpected require: ${name}`);
+  });
+  const client = await loadClientExports(1);
+
+  for (const [seq, testCase] of GEOMETRY_CASES.entries()) {
+    const width = testCase.width ?? 260;
+    const height = testCase.height ?? 34;
+    const fill = testCase.fill === true;
+    const label = `${testCase.name} #${seq}`;
+
+    const props = {
+      data: testCase.data,
+      width,
+      height,
+      label: "none",
+      dots: "auto",
+      fill,
+      // 顶点数 = 桶数：库默认 maxPoints 200 会做 min/max 抽稀，那样
+      // linePoints 的顶点数不等于桶数，两边根本对不上（也是我们传它的值）。
+      maxPoints: testCase.data.length,
+    };
+    if (testCase.domain !== undefined) props.domain = testCase.domain;
+    // children 必须保持 undefined：reactStub 没有 Children.forEach，
+    // 传子节点会在库的注释层里炸掉（那条路径由 client-ui.test.js 覆盖）。
+
+    const element = charts.Sparkline(props);
+    const dataPaths = findByInk(element, "data");
+    assert.equal(dataPaths.length, 1, `${label}：应恰好有一条实线路径`);
+    const vertices = parseVertices(dataPaths[0].props.d);
+
+    // 我们那一套：点数组逐位等于库的顶点，拼出来的 d 逐字符等于库的 d。
+    const ours = client.sparkTrendGeometry(testCase.data, {
+      width,
+      height,
+      domain: testCase.domain,
+      zero: fill,
+    });
+    assert.equal(
+      ours.points.filter((point) => point !== null).length,
+      vertices.length,
+      `${label}：顶点数应一致（库在 null 处断线，我们也是）`,
+    );
+    for (let index = 0; index < vertices.length; index++) {
+      const mine = ours.points.filter((point) => point !== null)[index];
+      assert.equal(mine.x, vertices[index].x, `${label}：第 ${index} 个顶点 x`);
+      assert.equal(mine.y, vertices[index].y, `${label}：第 ${index} 个顶点 y`);
+    }
+    assert.equal(
+      client.sparkTrendPath(ours.points),
+      dataPaths[0].props.d,
+      `${label}：d 字符串必须逐字符相同（分段与分隔符规则也一样）`,
+    );
+
+    // 值域也必须一致：库内部 `domain ?? Nt(data, zero)`，我们显式传同一个值。
+    // 未来段被 null 化时值域仍按原始序列算，所以这里比的是**同一条**序列上的值域。
+    if (testCase.domain !== undefined) {
+      assert.deepEqual(ours.domain, testCase.domain, `${label}：显式值域应原样采用`);
+    } else {
+      assert.deepEqual(ours.domain, client.sparkDomain(testCase.data, fill), `${label}：自动值域`);
+      const library = client.sparkTrendGeometry(testCase.data, { width, height, zero: fill });
+      assert.deepEqual(library.domain, ours.domain, `${label}：值域与库的来源同一`);
+    }
+  }
+
+  // 锁定「非有限值 = 断点」这条：库的 L() 只认有限数字，我们也必须一样，
+  // 否则 NaN 会被画成一个点、把虚线连穿。
+  const withOdd = charts.Sparkline({
+    data: [1, Number.NaN, 3, Number.POSITIVE_INFINITY, 5, undefined, 7],
+    width: 260,
+    height: 34,
+    label: "none",
+    dots: "auto",
+    maxPoints: 7,
+  });
+  const oddPath = findByInk(withOdd, "data")[0];
+  const client2 = await loadClientExports(2);
+  assert.equal(
+    client2.sparkTrendPath(
+      client2.sparkTrendGeometry([1, Number.NaN, 3, Number.POSITIVE_INFINITY, 5, undefined, 7], {
+        width: 260,
+        height: 34,
+      }).points,
+    ),
+    oddPath.props.d,
+    "NaN / Infinity / undefined 都要断成子路径",
+  );
+  assert.equal(parseVertices(oddPath.props.d).length, 4, "四段：1 | 3 | 5 | 7");
 });
 
 test("图表分块：CSS 具备图形可见性所需的规则", () => {
