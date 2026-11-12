@@ -1473,3 +1473,32 @@ test("韧性：降级遥测的 detail 取值集合没变，只是最终失败多
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("韧性：冷却期内缓存命中不受影响（冷却只拦要出网的请求）", async (t) => {
+  const mod = await loadIndexModule(t);
+  if (mod === undefined) return;
+  const dir = await mkdtemp(join(tmpdir(), "de-cooldown-cache-"));
+  try {
+    const { client, calls } = makeResilientClient(mod.StartluxClient, {
+      dir,
+      // cacheSize 必须显式打开：resilienceCfg 默认 0 = 禁用缓存，
+      // 那样这条测试测的就不是「冷却与缓存的先后关系」了。
+      cfg: { failureThreshold: 1, cooldownMs: 60000, cooldownProbeMs: 10000, cacheSize: 8 },
+      fetchFn: async () => okResponse(),
+    });
+    // 先成功一次把结果写进缓存，再人为进入冷却。
+    const warm = await client.classify(resilienceCall());
+    assert.equal(warm?.degraded, undefined, "预热请求应成功");
+    assert.equal(calls.length, 1);
+    client.noteFailure();
+    assert.ok(client.cooldownUntil > Date.now(), "应已进入冷却");
+
+    // 同一个 state 再问一次：冷却期里也必须由缓存作答，而不是降级。
+    const cached = await client.classify(resilienceCall());
+    assert.equal(cached?.degraded, undefined, "冷却期内的缓存命中不该被降级");
+    assert.equal(cached?.cached, true, "这次应当明确是缓存命中");
+    assert.equal(calls.length, 1, "缓存命中不该再发请求");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
