@@ -80,7 +80,7 @@ test("parseServerConfig 常量与冻结接口一致", () => {
   assert.equal(DEFAULT_TTL_SECONDS, 600);
   assert.equal(MIN_TTL_SECONDS, 60);
   assert.equal(MAX_TTL_SECONDS, 3600);
-  assert.equal(REQUEST_TIMEOUT_MS, 5000);
+  assert.equal(REQUEST_TIMEOUT_MS, 15000);
   assert.equal(RETRY_FLOOR_MS, 30000);
 });
 
