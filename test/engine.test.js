@@ -22,6 +22,11 @@ import { mountRoutePoint } from "../lib/adapters/route.js";
 import { mountToolPoints, isRetrievalTool, retrievalQuery, DEFAULT_RETRIEVAL_TOOLS } from "../lib/adapters/tools.js";
 import { mountAgentPoints } from "../lib/adapters/agent.js";
 import { mountCotTranslatePoint } from "../lib/adapters/translate.js";
+import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 
 /** 配置基线。 */
 const baseCfg = (over = {}) => ({
@@ -904,4 +909,567 @@ test("翻译：卸载时恢复原方法", async () => {
   assert.equal(typeof disposer, "function");
   disposer();
   assert.equal(translator.translate, original, "卸载后必须恢复原方法");
+});
+
+// ============================================================================
+// 以下为韧性改造（重试 / 半开冷却 / 测试按钮）新增的用例，只追加，未改动上面任何用例。
+//
+// 这些用例走**真实的 StartluxClient**（而不是本文件上面的假 client）：要验证的
+// 正是「失败之后客户端怎么处理」——那是它内部的时序逻辑，用假 client 替换掉
+// 就等于把被测对象换掉了。全部注入假 fetchFn，不打网络；遥测目录指向临时目录，
+// 不污染 ~/.dsh。
+// ============================================================================
+
+/**
+ * 取真实模块。
+ *
+ * lib/index.js 依赖宿主的 peer 依赖 `@deepseek-ai/schemastery`（仓库里刻意
+ * 不装 node_modules）。裸仓库里这一层解析不到，此时**跳过而不是失败**：
+ * 本文件上半部分（引擎与适配器接线）本来就不需要那个依赖，不该被这几项拖红。
+ */
+async function loadIndexModule(t) {
+  try {
+    return await import("../lib/index.js");
+  } catch (error) {
+    if (error?.code === "ERR_MODULE_NOT_FOUND") {
+      t.skip("缺少宿主 peer 依赖 @deepseek-ai/schemastery，跳过客户端集成用例");
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+/** 韧性用例的配置基线：缓存关掉，避免第二次调用直接命中缓存而绕过网络。 */
+function resilienceCfg(over = {}) {
+  return {
+    provider: "bamboonode",
+    bamboonodeApiKey: "test-key",
+    cacheSize: 0,
+    cacheTtlMs: 0,
+    timeoutMs: 5000,
+    thinkMode: "never",
+    mode: "shadow",
+    cooldownMs: 60000,
+    cooldownProbeMs: 10000,
+    failureThreshold: 3,
+    retryAttempts: 1,
+    ...over,
+  };
+}
+
+/** 造一个真的 StartluxClient；`fetchFn` 收到的每次调用都记进 calls。 */
+function makeResilientClient(StartluxClient, { cfg: cfgOver = {}, fetchFn, dir }) {
+  const cfg = resilienceCfg(cfgOver);
+  const calls = [];
+  const client = new StartluxClient({
+    getConfig: () => cfg,
+    logger: { warn() {}, info() {} },
+    telemetryDir: dir,
+    fetchFn: async (url, init) => {
+      calls.push({ url, init });
+      return fetchFn(url, init, calls.length);
+    },
+  });
+  return { client, calls, cfg };
+}
+
+/** 一次与 guardListener 同构的授权调用。 */
+const resilienceCall = () => ({
+  point: "authorize",
+  tag: "guard",
+  mode: "shadow",
+  tool: "bash",
+  state: { tool: "bash", args_preview: "{}" },
+  questions: { alive: { type: "noul", instructions: "?" } },
+});
+
+/** 一个成功的决策响应（只实现 classify 用到的字段）。 */
+const okResponse = (answers = { alive: { type: "noul", noul: 0.9 } }) => ({
+  ok: true,
+  status: 200,
+  headers: { get: () => undefined },
+  async json() {
+    return { answers, model: "test-model" };
+  },
+  async text() {
+    return "{}";
+  },
+});
+
+/** 模拟 AbortSignal.timeout 掐断时 fetch 抛出的错误。 */
+const abortError = () => Object.assign(new Error("The operation was aborted"), { name: "AbortError" });
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+test("韧性：超时重试一次并成功（冷启动首发被掐断后第二发必中）", async (t) => {
+  const mod = await loadIndexModule(t);
+  if (mod === undefined) return;
+  const dir = await mkdtemp(join(tmpdir(), "de-retry-timeout-"));
+  try {
+    let count = 0;
+    const { client, calls } = makeResilientClient(mod.StartluxClient, {
+      dir,
+      fetchFn: async () => {
+        count += 1;
+        if (count === 1) throw abortError();
+        return okResponse();
+      },
+    });
+    const result = await client.classify(resilienceCall());
+    assert.equal(calls.length, 2, "超时后应重试一次（首发被掐断已把服务端焐热）");
+    assert.equal(result?.degraded, undefined, `重试成功后不该降级：${JSON.stringify(result)}`);
+    assert.equal(typeof result?.answers, "object", "应拿到裁决答案");
+    // 每次尝试各自一份 timer：若复用已 abort 的 signal，第二发会立刻超时，
+    // 于是这里会看到两次都是 timeout。断言拿到答案即证明 timer 是新的。
+    assert.equal(client.failures, 0, "成功后失败计数应归零");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("韧性：网络错误也重试（连接层抖动重发一次常常就通）", async (t) => {
+  const mod = await loadIndexModule(t);
+  if (mod === undefined) return;
+  const dir = await mkdtemp(join(tmpdir(), "de-retry-network-"));
+  try {
+    let count = 0;
+    const { client, calls } = makeResilientClient(mod.StartluxClient, {
+      dir,
+      fetchFn: async () => {
+        count += 1;
+        if (count === 1) throw new TypeError("fetch failed");
+        return okResponse();
+      },
+    });
+    const result = await client.classify(resilienceCall());
+    assert.equal(calls.length, 2, "network-error 也应重试一次");
+    assert.equal(result?.degraded, undefined, `重试成功后不该降级：${JSON.stringify(result)}`);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("韧性：HTTP 500 不重试（服务端故障，重发只多烧一次额度）", async (t) => {
+  const mod = await loadIndexModule(t);
+  if (mod === undefined) return;
+  const dir = await mkdtemp(join(tmpdir(), "de-no-retry-500-"));
+  try {
+    const { client, calls } = makeResilientClient(mod.StartluxClient, {
+      dir,
+      fetchFn: async () => ({ ok: false, status: 500, headers: { get: () => undefined }, async text() { return "boom"; }, async json() { return {}; } }),
+    });
+    const result = await client.classify(resilienceCall());
+    assert.equal(calls.length, 1, "5xx 绝不能重试：断言 fetchFn 只被调用一次");
+    assert.equal(result?.degraded, "http-500", "detail 取值不变（遥测与统计里都有既有断言）");
+    assert.equal(client.failures, 1, "5xx 计入失败阈值，且只记一次");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("韧性：重试总预算封顶——已耗时超过预算就不再发第二发", async (t) => {
+  const mod = await loadIndexModule(t);
+  if (mod === undefined) return;
+  const dir = await mkdtemp(join(tmpdir(), "de-retry-budget-"));
+  try {
+    // timeoutMs=1000 → 总预算 min(2×1000, 30000) = 2000ms。
+    // 首发耗时 2050ms 才失败：预算已用满，重试只会更慢地失败。
+    const { client, calls } = makeResilientClient(mod.StartluxClient, {
+      dir,
+      cfg: { timeoutMs: 1000, retryAttempts: 3 },
+      fetchFn: async () => {
+        await sleep(2050);
+        throw abortError();
+      },
+    });
+    const result = await client.classify(resilienceCall());
+    assert.equal(calls.length, 1, "预算耗尽后不得再发第二发（即便 retryAttempts=3）");
+    assert.equal(result?.degraded, "timeout");
+    // 只有**最终**失败才记一次失败：重试的中间那次不该累计，
+    // 否则失败阈值会提前触发，冷却反而更容易被点着。
+    assert.equal(client.failures, 1, "重试失败只能累加一次失败计数");
+    const telemetry = await readFile(join(dir, "telemetry.jsonl"), "utf8");
+    const entry = JSON.parse(telemetry.split("\n").find((line) => line.trim().length > 0));
+    assert.equal(entry.detail, "timeout", "detail 仍是既有取值");
+    assert.equal(entry.extra?.attempts, 1, "最终失败的 extra 要能看出试了几次");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("韧性：冷却期内请求被拦（0 毫秒快速降级），试探窗口到点后放行一次", async (t) => {
+  const mod = await loadIndexModule(t);
+  if (mod === undefined) return;
+  const dir = await mkdtemp(join(tmpdir(), "de-half-open-"));
+  try {
+    const { client, calls } = makeResilientClient(mod.StartluxClient, {
+      dir,
+      cfg: { failureThreshold: 1, cooldownMs: 60000, cooldownProbeMs: 10000 },
+      fetchFn: async () => okResponse(),
+    });
+    client.noteFailure();
+    assert.ok(client.cooldownUntil > Date.now(), "达到阈值后应进入冷却");
+    const first = await client.classify(resilienceCall());
+    const second = await client.classify(resilienceCall());
+    assert.equal(first?.degraded, "cooldown", "冷却期内的请求应被拦下");
+    assert.equal(second?.degraded, "cooldown", "第二次也必须被拦下（还没到试探窗口）");
+    assert.equal(calls.length, 0, "被拦下的请求一个字节都不该发出去");
+
+    // 模拟「试探窗口到点」：把下一个允许试探的时刻拨到现在。
+    client.cooldownNextProbe = 0;
+    const probeResult = await client.classify(resilienceCall());
+    assert.equal(calls.length, 1, "试探窗口到点后应放行一次");
+    assert.equal(probeResult?.degraded, undefined, "这次试探真的发出去了，而不是又一次快速降级");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("韧性：试探成功彻底解除冷却（cooldownUntil 与 streak 一起归零）", async (t) => {
+  const mod = await loadIndexModule(t);
+  if (mod === undefined) return;
+  const dir = await mkdtemp(join(tmpdir(), "de-half-open-ok-"));
+  try {
+    const { client } = makeResilientClient(mod.StartluxClient, {
+      dir,
+      cfg: { failureThreshold: 1, cooldownMs: 60000, cooldownProbeMs: 10000 },
+      fetchFn: async () => okResponse(),
+    });
+    client.noteFailure();
+    assert.equal(client.cooldownStreak, 1, "首轮冷却 streak 从 1 起");
+    client.cooldownNextProbe = 0;
+    const result = await client.classify(resilienceCall());
+    assert.equal(result?.degraded, undefined);
+    assert.equal(client.cooldownUntil, 0, "试探成功必须彻底清空冷却，而不是等它自然过期");
+    assert.equal(client.cooldownStreak, 0, "streak 也要归零，否则下一轮会接着翻倍");
+    assert.equal(client.failures, 0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("韧性：试探失败按指数退避延长冷却，并重新封锁试探窗口", async (t) => {
+  const mod = await loadIndexModule(t);
+  if (mod === undefined) return;
+  const dir = await mkdtemp(join(tmpdir(), "de-half-open-fail-"));
+  try {
+    const { client, calls } = makeResilientClient(mod.StartluxClient, {
+      dir,
+      cfg: { failureThreshold: 1, cooldownMs: 60000, cooldownProbeMs: 10000, retryAttempts: 0 },
+      fetchFn: async () => {
+        throw new TypeError("fetch failed");
+      },
+    });
+    client.noteFailure();
+    const firstUntil = client.cooldownUntil;
+    assert.equal(client.cooldownStreak, 1);
+    client.cooldownNextProbe = 0;
+    const result = await client.classify(resilienceCall());
+    assert.equal(result?.degraded, "network-error");
+    assert.equal(client.cooldownStreak, 2, "连续进入冷却的轮次要递增");
+    assert.ok(
+      client.cooldownUntil > firstUntil,
+      `第二轮冷却应更长（指数退避）：first=${firstUntil} now=${client.cooldownUntil}`,
+    );
+    // 试探失败后窗口被推后：紧接着的请求必须又被拦下。
+    const before = calls.length;
+    const blocked = await client.classify(resilienceCall());
+    assert.equal(blocked?.degraded, "cooldown");
+    assert.equal(calls.length, before, "试探失败后应立刻重新封锁");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("测试按钮：走注入的 fetchFn、网络错误重试一次，并给出「失败原因 / 建议」", async (t) => {
+  const mod = await loadIndexModule(t);
+  if (mod === undefined) return;
+  const home = mkdtempSync(join(tmpdir(), "de-probe-"));
+  const originalHome = process.env.DSH_HOME;
+  const originalKey = process.env.BAMBOO_API_KEY;
+  const originalFetch = globalThis.fetch;
+  process.env.DSH_HOME = home;
+  process.env.BAMBOO_API_KEY = "probe-test-key";
+  let pinned = 0;
+  let bare = 0;
+  // 决策端点的桩：一律抛网络错误（模拟本机链路不通）。
+  globalThis.fetch = async (url) => {
+    const target = String(url);
+    if (target.includes("/decisions") || target.includes("/systemone")) {
+      pinned += 1;
+      throw new TypeError("fetch failed");
+    }
+    return { ok: true, status: 200, async json() { return {}; }, async text() { return ""; } };
+  };
+  try {
+    const routes = {};
+    const connection = { fetch: { register(entry) { routes[entry.path] = entry; } } };
+    const ctx = {
+      logger: { info() {}, warn() {}, debug() {} },
+      on() {},
+      get(name) {
+        return name === "connection" ? connection : undefined;
+      },
+      inject(_names, fn) { fn(); },
+      plugin() {},
+      effect() {},
+    };
+    mod.apply(ctx, {});
+    // 关键：apply 之后再换掉 globalThis.fetch。客户端在构造时就固化了
+    // fetchFn（this.fetchFn = options.fetchFn ?? globalThis.fetch），
+    // 若 probe 用裸 fetch，它会落到这个桩上被计数——这正是
+    // 「测试通过但实跑不同」的假象来源。
+    globalThis.fetch = async () => {
+      bare += 1;
+      return { ok: true, status: 200, async json() { return {}; }, async text() { return ""; } };
+    };
+    const res = await routes["/api/decision-engine/test"].fetch({
+      method: "POST",
+      url: "http://localhost/api/decision-engine/test",
+    });
+    const data = await res.json();
+    assert.equal(bare, 0, "probe 不得绕过 client.fetchFn 去用裸 fetch");
+    assert.equal(pinned, 2, "probe 应对网络错误重试一次（共两发）");
+    assert.match(data.text, /失败原因: 网络连接失败/, `应给出可读的失败原因，实际：${data.text}`);
+    assert.match(data.text, /建议: /, "应给出一句可执行的下一步");
+    assert.match(data.text, /provider: /, "既有输出结构要保留");
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalHome === undefined) delete process.env.DSH_HOME;
+    else process.env.DSH_HOME = originalHome;
+    if (originalKey === undefined) delete process.env.BAMBOO_API_KEY;
+    else process.env.BAMBOO_API_KEY = originalKey;
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+/**
+ * 造一套隔离环境并走真实 `apply()`，用来验证「测试」按钮（probe）。
+ *
+ * @param options.decisionFetch - 决策端点用的桩；收不到响应就抛错即为失败。
+ * @param options.before - apply 之后、点测试之前要做的准备（如制造冷却）。
+ */
+async function probeSetup(mod, { decisionFetch, before } = {}) {
+  const home = mkdtempSync(join(tmpdir(), "de-probe-"));
+  const originalHome = process.env.DSH_HOME;
+  const originalKey = process.env.BAMBOO_API_KEY;
+  const originalFetch = globalThis.fetch;
+  process.env.DSH_HOME = home;
+  process.env.BAMBOO_API_KEY = "probe-test-key";
+  const calls = [];
+  // 桩必须在 apply 之前装好：客户端在构造时就固化了 fetchFn。
+  globalThis.fetch = async (url, init) => {
+    const target = String(url);
+    if (target.includes("/decisions") || target.includes("/systemone")) {
+      calls.push({ url: target, init });
+      return decisionFetch(target, init, calls.length);
+    }
+    return { ok: true, status: 200, async json() { return {}; }, async text() { return ""; } };
+  };
+  const routes = {};
+  const hooks = new Map();
+  const connection = { fetch: { register(entry) { routes[entry.path] = entry; } } };
+  const ctx = {
+    logger: { info() {}, warn() {}, debug() {} },
+    on(name, listener) {
+      const list = hooks.get(name) ?? [];
+      list.push(listener);
+      hooks.set(name, list);
+      return () => {};
+    },
+    get(name) { return name === "connection" ? connection : undefined; },
+    inject(_names, fn) { fn(); },
+    plugin() {},
+    effect() {},
+  };
+  mod.apply(ctx, {});
+  // before 拿到已注册的守卫监听器：要制造真实状态（如冷却）就得走真路径。
+  if (typeof before === "function") {
+    await before({ listener: (hooks.get("tools/pre-execute") ?? [])[0] });
+  }
+  return {
+    calls,
+    /** 触发一次真实的守卫调用（用来制造冷却等状态）。 */
+    listener: (hooks.get("tools/pre-execute") ?? [])[0],
+    async click() {
+      const res = await routes["/api/decision-engine/test"].fetch({
+        method: "POST",
+        url: "http://localhost/api/decision-engine/test",
+      });
+      return res.json();
+    },
+    restore() {
+      globalThis.fetch = originalFetch;
+      if (originalHome === undefined) delete process.env.DSH_HOME;
+      else process.env.DSH_HOME = originalHome;
+      if (originalKey === undefined) delete process.env.BAMBOO_API_KEY;
+      else process.env.BAMBOO_API_KEY = originalKey;
+      rmSync(home, { recursive: true, force: true });
+    },
+  };
+}
+
+test("测试按钮：超时也重试一次，第二发成功即报告成功（诊断不该一次定生死）", async (t) => {
+  const mod = await loadIndexModule(t);
+  if (mod === undefined) return;
+  const env = await probeSetup(mod, {
+    decisionFetch: async (_url, _init, index) => {
+      if (index === 1) throw abortError();
+      return okResponse();
+    },
+  });
+  try {
+    const data = await env.click();
+    assert.equal(env.calls.length, 2, "probe 应对超时重试一次");
+    assert.equal(data.ok, true, `第二发成功即应报告成功，实际：${data.text}`);
+    assert.match(data.text, /HTTP 200/, "成功时应保留既有的状态行结构");
+    assert.doesNotMatch(data.text, /失败原因:/, "成功时不该出现失败说明");
+  } finally {
+    env.restore();
+  }
+});
+
+test("测试按钮：冷却中仍然照常发请求，但明确写出「本次为试探请求」", async (t) => {
+  const mod = await loadIndexModule(t);
+  if (mod === undefined) return;
+  const { writeFileSync, mkdirSync } = await import("node:fs");
+  // 决策桩的行为可切换：先失败（制造冷却），再成功（供 probe 使用）。
+  // 注意客户端在 apply 时就固化了 fetchFn，所以只能改**桩内部**的状态，
+  // 换 globalThis.fetch 是无效的——这本身就是被验证的那条性质。
+  let mode = "fail";
+  const env = await probeSetup(mod, {
+    decisionFetch: async () => {
+      if (mode === "fail") throw new TypeError("fetch failed");
+      return okResponse();
+    },
+    before: async ({ listener }) => {
+      // 造出真实冷却：写一份「一败即冷却」的配置，再由守卫真的失败一次。
+      // 直接改内部字段不算数——要验证的是 probe 读到的**真实**状态。
+      const configPath = join(process.env.DSH_HOME, "dsh-decision-engine", "config.yml");
+      mkdirSync(join(configPath, ".."), { recursive: true });
+      writeFileSync(
+        configPath,
+        [
+          "enabled: true",
+          "mode: enforce",
+          "pointAuthorize: enforce",
+          "provider: bamboonode",
+          "bamboonodeApiKey: sk-test-key-000000",
+          "timeoutMs: 5000",
+          "retryAttempts: 0",
+          "failureThreshold: 1",
+          "cooldownMs: 60000",
+          "cooldownProbeMs: 60000",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+      await listener(
+        {
+          name: "write",
+          arguments: { file_path: "src/a.ts", content: "x" },
+          agent: { session: { id: "s1", header: { cwd: "/work/repo" } } },
+          signal: new AbortController().signal,
+        },
+        () => ({ kind: "allow" }),
+      );
+      mode = "ok";
+    },
+  });
+  try {
+    const data = await env.click();
+    assert.match(
+      data.text,
+      /当前处于冷却中，距冷却结束还有 \d+ 秒；本次为试探请求/,
+      `冷却中应明确说明这是一次试探，实际：${data.text}`,
+    );
+    assert.match(data.text, /HTTP 200/, "冷却中也要照常发请求（用户点测试就是想验证端点）");
+  } finally {
+    env.restore();
+  }
+});
+
+test("测试按钮：不在冷却中时不该出现试探提示（反证上一条不是恒真）", async (t) => {
+  const mod = await loadIndexModule(t);
+  if (mod === undefined) return;
+  const env = await probeSetup(mod, { decisionFetch: async () => okResponse() });
+  try {
+    const data = await env.click();
+    assert.doesNotMatch(data.text, /本次为试探请求/, `不在冷却中时不该出现试探提示：${data.text}`);
+    assert.match(data.text, /HTTP 200/);
+  } finally {
+    env.restore();
+  }
+});
+
+test("韧性：retryAttempts=0 时连超时也不重试（配置是硬开关）", async (t) => {
+  const mod = await loadIndexModule(t);
+  if (mod === undefined) return;
+  const dir = await mkdtemp(join(tmpdir(), "de-retry-off-"));
+  try {
+    const { client, calls } = makeResilientClient(mod.StartluxClient, {
+      dir,
+      cfg: { retryAttempts: 0 },
+      fetchFn: async () => {
+        throw abortError();
+      },
+    });
+    const result = await client.classify(resilienceCall());
+    assert.equal(calls.length, 1, "retryAttempts=0 必须逐字回到「只发一次」的旧行为");
+    assert.equal(result?.degraded, "timeout");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("韧性：caller 主动取消时不重试（用户已经不等了）", async (t) => {
+  const mod = await loadIndexModule(t);
+  if (mod === undefined) return;
+  const dir = await mkdtemp(join(tmpdir(), "de-retry-cancel-"));
+  try {
+    const controller = new AbortController();
+    const { client, calls } = makeResilientClient(mod.StartluxClient, {
+      dir,
+      fetchFn: async () => {
+        controller.abort();
+        throw abortError();
+      },
+    });
+    const result = await client.classify({ ...resilienceCall(), signal: controller.signal });
+    assert.equal(calls.length, 1, "调用方已取消，重试没有意义");
+    assert.equal(result?.degraded, "caller-aborted", "detail 仍是既有取值");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("韧性：降级遥测的 detail 取值集合没变，只是最终失败多了 attempts", async (t) => {
+  const mod = await loadIndexModule(t);
+  if (mod === undefined) return;
+  const dir = await mkdtemp(join(tmpdir(), "de-retry-telemetry-"));
+  try {
+    let count = 0;
+    const { client } = makeResilientClient(mod.StartluxClient, {
+      dir,
+      fetchFn: async () => {
+        count += 1;
+        if (count === 1) throw abortError();
+        throw new TypeError("fetch failed");
+      },
+    });
+    const result = await client.classify(resilienceCall());
+    assert.equal(result?.degraded, "network-error", "两次都失败时报告最终那次的原因");
+    const lines = (await readFile(join(dir, "telemetry.jsonl"), "utf8"))
+      .split("\n")
+      .filter((line) => line.trim().length > 0);
+    const entry = JSON.parse(lines[0]);
+    // 记录形状不变：既有字段一个不少，detail 仍是既有取值。
+    assert.equal(entry.action, "degraded");
+    assert.equal(entry.detail, "network-error");
+    assert.equal(typeof entry.provider, "string");
+    assert.equal(entry.extra?.attempts, 2, "extra 里能看出试了两次");
+    assert.equal(entry.extra?.message, "fetch failed", "最后一次的底层错误要保留");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
