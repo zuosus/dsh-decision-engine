@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { codeBlock, table, ICON } from "./partials.mjs";
+import { codeBlock, table, figure, fact, DECISION_ICON, FLATMAP_ICON } from "./partials.mjs";
 
 // 与 build.mjs 同一个来源：插件 package.json 的 version。
 const VERSION = JSON.parse(
@@ -24,100 +24,85 @@ export const indexBodyEn = `
   <span class="eyebrow"><span class="dot"></span> DeepSeek Harness plugins</span>
   <h1>A <span class="grad">cheap judgement layer</span><br>for DeepSeek Harness</h1>
   <p class="lede">
-    dsh.zuos.us is the home of <strong>DeepSeek Harness (DSH)</strong> plugin
-    projects. Every plugin here follows one principle: <strong>one tiny model
-    call to replace or prevent a much larger LLM expense</strong> — and by
-    default they only observe, never interrupt your work.
+    Two open-source DSH plugins doing one thing: <strong>one tiny call to save a
+    much larger expense</strong>. Observe-only by default; on any error they fall
+    back to native behavior.
   </p>
   <div class="cta-row">
-    <a class="btn btn-primary" href="/en/dsh-decision-engine/">Read the dsh-decision-engine guide →</a>
+    <a class="btn btn-primary" href="/en/dsh-decision-engine/">dsh-decision-engine →</a>
     <a class="btn" href="/en/dsh-model-flatmap/">dsh-model-flatmap</a>
     <a class="btn" href="https://github.com/zuosus/dsh-decision-engine">Source code</a>
   </div>
 </div>
 
-<div class="wrap">
-  <hr class="rule">
-</div>
+${figure("/assets/promo.jpeg", "dsh-decision-engine promo image", "dsh-decision-engine: a small model judges before the main model acts")}
+
+<div class="wrap"><hr class="rule"></div>
 
 <section class="wrap">
-  <h2>Projects</h2>
-  <p class="sub">Two plugins so far.</p>
+  <h2>Two plugins</h2>
+  <p class="sub">One decides what to run and which model to use; the other makes picking a model one flat surface. Both free, MIT, ready to use.</p>
 
-  <div class="grid">
+  <div class="projects">
     <a class="project" href="/en/dsh-decision-engine/">
-      <div class="project-head">
-        ${ICON}
-        <div>
-          <h3>dsh-decision-engine</h3>
-        </div>
-        <div class="nav-spacer"></div>
+      ${DECISION_ICON}
+      <div>
+        <h3>dsh-decision-engine</h3>
         <span class="ver">v${VERSION}</span>
+        <p>
+          Before the main model acts, it sends the current state plus four
+          questions to a cheap small model, then <strong>allows, asks, or
+          blocks</strong> — or switches to a cheaper model / skips an expensive
+          call. All eight decision points are implemented and individually
+          switchable; shadow mode records only, never enforces.
+        </p>
+        <div class="toc">
+          <span class="badge green">Observe-only by default</span>
+          <span class="badge blue">Any decision endpoint</span>
+          <span class="badge gray">MIT</span>
+        </div>
       </div>
-      <p>
-        A judgement layer for DSH: before the main model acts, it sends
-        "current state + a set of structured questions" to a cheap decision
-        model and gets probability-bearing answers back, then allows, asks,
-        blocks, or reroutes to a cheaper model / skips an expensive call.
-        Tool authorization, for example, asks four questions — risk,
-        reversibility, task relevance, injection suspicion. All eight decision
-        points (tool authorization, model routing, delegation, compaction, turn
-        continuation, retrieval necessity, skill selection, COT translation)
-        are implemented and individually switchable.
-      </p>
-      <div class="toc">
-        <span class="badge green">Shadow mode by default</span>
-        <span class="badge blue">Any decision endpoint</span>
-        <span class="badge gray">MIT</span>
-      </div>
+      <span class="go">Read more →</span>
     </a>
 
     <a class="project" href="/en/dsh-model-flatmap/">
-      <div class="project-head">
-        ${ICON}
-        <div>
-          <h3>dsh-model-flatmap</h3>
-        </div>
-        <div class="nav-spacer"></div>
+      ${FLATMAP_ICON}
+      <div>
+        <h3>dsh-model-flatmap</h3>
         <span class="ver">v${FLATMAP_VERSION}</span>
+        <p>
+          Replaces the composer model picker with <strong>one flat panel</strong>:
+          every model, reasoning level and teamwork switch visible at once, no
+          submenus. Cross-provider search, two grouping modes, strike-through on
+          out-of-balance models. Disabling it restores the native control.
+        </p>
+        <div class="toc">
+          <span class="badge green">Flat, no submenus</span>
+          <span class="badge blue">Theme-aware</span>
+          <span class="badge gray">MIT</span>
+        </div>
       </div>
-      <p>
-        A flat, two-level-free model picker for DSH: it replaces the composer's
-        <code>conversation.input.model</code> control with one surface where
-        every model and reasoning level is visible at once — no nested popovers.
-        Cross-provider global search, by-provider / by-family grouping, reasoning
-        level and agent-teamwork switch on the same screen, and out-of-balance
-        models get a strike-through. Browser-only, no build step, and disabling
-        it restores the native control with no residue.
-      </p>
-      <div class="toc">
-        <span class="badge green">Flat, no submenus</span>
-        <span class="badge blue">Theme-aware</span>
-        <span class="badge gray">MIT</span>
-      </div>
+      <span class="go">Read more →</span>
     </a>
   </div>
 </section>
 
 <section class="wrap">
-  <h2>Shared design rules</h2>
-  <p class="sub">Every plugin here obeys the same three rules — the reason they are safe to leave installed.</p>
-  <div class="grid grid-3">
-    <div class="card">
-      <span class="kicker">fail-open</span>
-      <h4>Uncertainty passes through</h4>
-      <p>Timeouts, network errors, auth failures, malformed answers — all fall back to native behavior with one telemetry line. A failing guard never blocks a tool call.</p>
-    </div>
-    <div class="card">
-      <span class="kicker">shadow first</span>
-      <h4>Observe, then enforce</h4>
-      <p>Every decision point has off / observe / enforce. New points run in observe until their judgments match human review — only then switch to enforce.</p>
-    </div>
-    <div class="card">
-      <span class="kicker">cheap by design</span>
-      <h4>Spend less, never more</h4>
-      <p>Intervene only where a cheap call replaces a more expensive one, or prevents a bigger expense — never just to add one more check.</p>
-    </div>
+  <h2>What they look like</h2>
+  <p class="sub">Real screenshots from each repo's <code>docs/assets/</code>.</p>
+  <div class="shots">
+    ${figure("/assets/shot-decisions.png", "Decision history tab", "dsh-decision-engine: every judgement and degradation is recorded")}
+    ${figure("/assets/shot-flatmap.jpeg", "Flat model picker", "dsh-model-flatmap: models, reasoning levels and teamwork on one surface")}
+  </div>
+</section>
+
+<section class="wrap">
+  <h2>Three shared rules</h2>
+  <p class="sub">The reason they are safe to leave installed.</p>
+  <div class="facts">
+    ${fact("fail-open", "<strong>Uncertainty passes through.</strong>Timeouts, network errors, auth failures, malformed answers — all fall back to native behavior with one telemetry line. A failing guard never blocks a tool call.")}
+    ${fact("shadow first", "<strong>Observe, then enforce.</strong>Every decision point has off / observe / enforce. New points run in observe until their judgments hold up, then switch to enforce.")}
+    ${fact("cheap by design", "<strong>Spend less, never more.</strong>Intervene only where a cheap call replaces a more expensive one, or prevents a bigger expense — never to add one more check.")}
   </div>
 </section>
 `;
@@ -266,13 +251,11 @@ export const pluginBodyEn = `
   <span class="eyebrow"><span class="dot"></span> DeepSeek Harness plugin · v${VERSION} · MIT</span>
   <h1>dsh-decision-engine</h1>
   <p class="lede">
-    The <strong>judgement layer</strong> for DeepSeek Harness: before the main
-    model acts, it sends "current state + a set of structured questions" to a
-    cheap decision model, gets probability-bearing answers back, then allows,
-    asks, blocks, or reroutes to a cheaper model / skips an expensive call —
-    tool authorization, for example, asks the four questions <strong>risk,
-    reversibility, task relevance, injection suspicion</strong>. Defaults to
-    <code>shadow</code>: it records judgments and never interrupts your work.
+    Before the main model acts, a <strong>cheap small model</strong> answers four
+    questions — <strong>risk, reversibility, task relevance, injection
+    suspicion</strong> — and the result is to allow, ask, block, switch to a
+    cheaper model, or skip an expensive call entirely. Defaults to
+    <code>shadow</code>: record only, never interrupt.
   </p>
   <div class="cta-row">
     <a class="btn btn-primary" href="#install">Install</a>
@@ -292,58 +275,35 @@ export const pluginBodyEn = `
   </div>
 </div>
 
-<div class="wrap">
-  <hr class="rule">
-</div>
+<div class="wrap"><hr class="rule"></div>
 
 <section class="wrap" id="what">
   <h2>What it is</h2>
   <p class="sub">
-    Not a tool-call risk gate — <strong>a cheap judgement layer</strong>: one
-    ~1.9k-token small-model call replacing or preventing far more expensive
-    LLM work.
+    A cheap <strong>judgement layer</strong>: one ~1.9k-token small-model call
+    replacing or preventing far more expensive LLM work. All eight decision
+    points are implemented and individually switchable.
   </p>
 
   <div class="stats">
     <div class="stat"><span class="n">8</span><span class="l">decision points, all implemented</span></div>
     <div class="stat"><span class="n">~1.9k</span><span class="l">tokens per decision</span></div>
     <div class="stat"><span class="n">0.5s</span><span class="l">p50 latency</span></div>
-    <div class="stat"><span class="n">shadow</span><span class="l">default mode: record only</span></div>
+    <div class="stat"><span class="n">shadow</span><span class="l">default: record only</span></div>
   </div>
 
-  <div class="grid grid-2">
-    <div class="card">
-      <span class="kicker">Four questions</span>
-      <h4>Risk · reversibility · task relevance · injection suspicion</h4>
-      <p>
-        Every judgment asks exactly these four. The answer is parsed into an
-        outcome: <code>allow</code>, <code>ask</code> or <code>deny</code> —
-        plus, where the point demands it, swapping the model, injecting a hint,
-        or skipping a retrieval.
-      </p>
-    </div>
-    <div class="card">
-      <span class="kicker">Restrained intervention</span>
-      <h4>Only where it pays for itself</h4>
-      <p>
-        Intervention must be restrained: <strong>only replace a more expensive
-        call, or prevent a bigger expense</strong> — never add a check for its
-        own sake. Hot-path points all carry explicit trigger gates.
-      </p>
-    </div>
+  ${figure("/assets/shot-config.png", "Config page: eight decision points with tri-state toggles", "Config page: each decision point has off / observe / enforce; edits save immediately")}
+
+  <div class="facts">
+    ${fact("Four questions", "Risk · reversibility · task relevance · injection suspicion. The answer is parsed into <code>allow</code> / <code>ask</code> / <code>deny</code>, plus swapping the model, injecting a hint, or skipping a retrieval where needed.")}
+    ${fact("Restrained", "Only replace a more expensive call, or prevent a bigger expense. Hot-path points all carry trigger gates — never a check for its own sake.")}
+    ${fact("Any endpoint", "One request shape: <code>{ model, state, questions, think_mode }</code> in, <code>answers</code> out. Built-in provider presets, or any <code>custom</code> base URL.")}
   </div>
 
   <div class="note">
-    <strong>Works against any decision endpoint.</strong>
-    There is exactly one request shape —
-    <code>{ model, state, questions, think_mode }</code> in,
-    <code>answers</code> out. Built-in presets for <code>system one</code>,
-    <code>bamboonode</code>, <code>siliconflow</code>,
-    <code>siliconflow-intl</code>, <code>perplexity</code> and
-    <code>openrouter</code>, or any <code>custom</code> base URL
-    (self-hosted llama.cpp / vLLM, corporate gateways, relays). Which service
-    provides the endpoint, which path it sits on and whose key it uses are the
-    provider's business and never touch the per-point parsing logic.
+    <strong>Free channel.</strong> Toggle "use free model" to use the project's
+    decision model with no key of your own; the quota is paid by the project and
+    may be withdrawn or changed at any time — the UI says so plainly.
   </div>
 </section>
 
@@ -353,38 +313,14 @@ export const pluginBodyEn = `
   <h2>Install</h2>
   <p class="sub">From npm (recommended), or from source for local development.</p>
 
-  <h3>From npm</h3>
   ${codeBlock("dsh plugin add dsh-decision-engine")}
-  <p style="color:var(--fg-dim);font-size:14.5px;margin-top:-4px">
-    Or add it to a profile manually:
-  </p>
+  <p class="sub">Or add it to a profile manually, then add <code>"dsh-decision-engine"</code> to <code>package.json</code> → <code>dsh.profile.bundles</code> and restart DSH:</p>
   ${codeBlock("cd ~/.dsh/profiles/desktop && pnpm add dsh-decision-engine")}
-  <p style="color:var(--fg-dim);font-size:14.5px">
-    Then add <code>"dsh-decision-engine"</code> to
-    <code>package.json</code> → <code>dsh.profile.bundles</code> and restart DSH.
-  </p>
 
-  <h3>Local development</h3>
-  ${codeBlock("git clone https://github.com/zuosus/dsh-decision-engine.git")}
-  <p style="color:var(--fg-dim);font-size:14.5px">
-    The repo ships a migration script (preview-only by default;
-    <code>--write</code> applies it and keeps a backup):
-  </p>
-  ${codeBlock("node scripts/migrate-profile.mjs --write")}
-
-  <div class="note ok">
-    <strong>No re-configuration needed.</strong> On startup the plugin
-    auto-migrates config and telemetry from old directories into
-    <code>~/.dsh/dsh-decision-engine/</code>. It <strong>runs only
-    once</strong>: if a <code>config.yml</code> already exists there, nothing is
-    touched — your later edits are never overwritten.
-  </div>
-
-  <div class="note warn">
-    <strong>Since 0.5.0 the config file is <code>config.yml</code>, renamed from
-    <code>startlux.yml</code></strong> — the plugin serves more than one provider
-    now. Old files are renamed automatically on migration; if renaming fails the
-    plugin still reads the old name as a fallback.
+  <div class="facts">
+    ${fact("No re-config", "On startup config and telemetry are auto-migrated into <code>~/.dsh/dsh-decision-engine/</code>, once only — later edits are never overwritten.")}
+    ${fact("Local dev", "After <code>git clone</code>, run <code>node scripts/migrate-profile.mjs --write</code> (preview-only by default; <code>--write</code> applies with a backup).")}
+    ${fact("Since 0.5.0", "Config file renamed from <code>startlux.yml</code> to <code>config.yml</code>; old files migrate automatically, no need to re-enter keys.")}
   </div>
 </section>
 
@@ -394,49 +330,13 @@ export const pluginBodyEn = `
   <h2>Configuration</h2>
   <p class="sub">
     Open <strong>Plugins → Installed → dsh-decision-engine</strong>; a Decision
-    Engine card appears in the config area. Edits save immediately — there is no
-    save button and no restart needed.
+    Engine card appears. Edits save immediately — no save button, no restart.
   </p>
-
-  <div class="grid grid-2">
-    <div class="card">
-      <span class="kicker">Tri-state</span>
-      <h4>off / observe / enforce</h4>
-      <p>
-        <span class="badge gray">off</span> no request at all — saves tokens and the ~2s delay;
-        <span class="badge blue">observe</span> judges and records what would have happened, changes nothing;
-        <span class="badge green">enforce</span> executes the outcome for that point.
-      </p>
-    </div>
-    <div class="card">
-      <span class="kicker">Key storage</span>
-      <h4>Two places</h4>
-      <p>
-        By default keys go into the <code>refs:</code> section of
-        <code>~/.dsh/.credentials.yaml</code> (managed alongside other services,
-        no plaintext in the plugin dir); or keep the config self-contained.
-        All five providers keep their own key slots and never overwrite each other.
-      </p>
-    </div>
-    <div class="card">
-      <span class="kicker">Key precedence</span>
-      <h4>Explicit &gt; storage &gt; environment</h4>
-      <p>
-        The provider's explicit key field &gt; the matching entry in the chosen
-        storage location &gt; environment variables. Switching providers flips
-        exactly one config key; other providers keep their saved URL, model and key.
-      </p>
-    </div>
-    <div class="card">
-      <span class="kicker">Model</span>
-      <h4>A dropdown fed by the server</h4>
-      <p>
-        The model list comes live from the current provider's
-        <code>/v1/models</code>, plus an "auto (server default)" option — the
-        default. In auto mode the field is simply not sent, so a provider
-        renaming its model cannot break your config.
-      </p>
-    </div>
+  <div class="facts">
+    ${fact("Tri-state", "<span class='badge gray'>off</span> sends no request; <span class='badge blue'>observe</span> judges and records what would have happened; <span class='badge green'>enforce</span> executes the outcome.")}
+    ${fact("Key storage", "By default in the <code>refs:</code> section of <code>~/.dsh/.credentials.yaml</code> — no plaintext in the plugin dir — or self-contained in <code>config</code>. Each provider keeps its own slot.")}
+    ${fact("Precedence", "Explicit key &gt; matching entry in storage &gt; environment variables. Switching providers flips one key; the others keep their saved values.")}
+    ${fact("Model", "Dropdown fed live by <code>/v1/models</code>, default \"auto\" — the field is not sent, so a provider renaming its model cannot break your config.")}
   </div>
 </section>
 
@@ -444,44 +344,24 @@ export const pluginBodyEn = `
 
 <section class="wrap" id="points">
   <h2>Eight decision points</h2>
-  <p class="sub">
-    All eight are <strong>fully implemented</strong> — you decide which ones the
-    decision model joins. Hooks are implementation details; the config page
-    lists the points defined here.
-  </p>
+  <p class="sub">All implemented — you decide which ones the decision model joins. Hooks are implementation details.</p>
   ${pointsTableEn}
 
+  ${figure("/assets/shot-decisions.png", "Decision history tab", "Decision history: every judgement, score and degradation is inspectable")}
+
   <div class="note">
-    <strong>Why not switch every hook on:</strong> a decision costs ~1.9k
-    tokens at p50 ≈ 0.5s. <code>agent/pre-step</code> and
-    <code>agent/request</code> fire <strong>every step</strong>; both open
-    without gates would add over a second per step. So hot-path points carry
-    explicit trigger gates and can never be called unconditionally.
+    <strong>Why not switch every hook on:</strong> a decision costs ~1.9k tokens
+    at p50 ≈ 0.5s, and <code>agent/pre-step</code> / <code>agent/request</code>
+    fire every step. Hot-path points carry trigger gates and can never be called
+    unconditionally.
   </div>
 
-  <h3>Thresholds were calibrated on real endpoints</h3>
-  <p style="color:var(--fg-dim)">
-    Every threshold was validated with paired samples ("should judge A" vs
-    "should judge B") against a real endpoint — only where the two inputs
-    actually separate did the gate stay. Calibration surfaced and fixed three
-    problems:
-  </p>
-  <div class="grid grid-3">
-    <div class="card">
-      <span class="kicker">01</span>
-      <h4>confidence is the probability of the picked option</h4>
-      <p>With three equally likely choices it is naturally 0.33, so the delegation floor can never be 0.6 or <code>advise</code> would be unreachable. Now it requires "clearly above a uniform split" — 0.5.</p>
-    </div>
-    <div class="card">
-      <span class="kicker">02</span>
-      <h4>The question decides everything</h4>
-      <p>Asking "is this information already known?" produced 0.30 / 0.12 — no separation at all. Asking "does the recent context cover this fact verbatim — answer only from that text" flipped it to 0.92 / 0.01.</p>
-    </div>
-    <div class="card">
-      <span class="kicker">03</span>
-      <h4>Check order changes outcomes</h4>
-      <p>If turn continuation tests <code>closed</code> first, the "clearly unfinished" group fell through to the default <code>stop</code> at 0.28 — exactly the case that should continue. Now <code>unfinished</code> is checked first.</p>
-    </div>
+  <h3>Thresholds calibrated on real endpoints</h3>
+  <p class="sub">Validated with paired samples ("should judge A" vs "should judge B"); a gate stayed only where the inputs separate. Three issues were fixed:</p>
+  <div class="facts">
+    ${fact("01 · confidence", "With three equally likely choices it is naturally 0.33, so the delegation floor is 0.5 (clearly above a uniform split), never 0.6 — or <code>advise</code> would be unreachable.")}
+    ${fact("02 · wording", "Asking \"is this already known\" gave 0.30 / 0.12 (no separation); asking \"is it covered verbatim in recent\" gave 0.92 / 0.01.")}
+    ${fact("03 · check order", "If turn continuation tests <code>closed</code> first, \"clearly unfinished\" falls through to the default <code>stop</code>; now <code>unfinished</code> is checked first.")}
   </div>
 </section>
 
@@ -490,27 +370,22 @@ export const pluginBodyEn = `
 <section class="wrap" id="providers">
   <h2>Providers: which decision service</h2>
   <p class="sub">
-    The request shape is identical across providers. A response only needs
-    <code>answers</code>, so a provider decides exactly three things:
-    <strong>where to send, whose key to use, which model by default</strong>.
+    The request shape is identical across providers; a response only needs
+    <code>answers</code>. A provider decides exactly three things:
+    <strong>where to send, whose key, which model by default</strong>.
   </p>
-
   ${codeBlock("POST <base>/decisions  or  POST <base>/systemone")}
-
   ${providersTableEn}
 
   <div class="note ok">
-    <strong>Ready to use:</strong> for <code>siliconflow</code> /
-    <code>siliconflow-intl</code> you only paste one API key — base URL, path
+    <strong>Ready to use:</strong> <code>siliconflow</code> /
+    <code>siliconflow-intl</code> need only one API key — base URL, path
     (<code>/systemone</code>) and default model (<code>Kev-4B</code>) are
     preconfigured. The two sites are separate accounts with separate keys.
   </div>
 
   <h3>The endpoint is decided by the provider, not the model</h3>
-  <p style="color:var(--fg-dim)">
-    This is the easiest trap to fall into, so it was verified on real endpoints
-    with real keys (2026-10-25):
-  </p>
+  <p class="sub">Verified on real endpoints with real keys (2026-10-25):</p>
   ${table(
     ["Provider", "Model", "<code>/v1/decisions</code>", "<code>/v1/systemone</code>"],
     [
@@ -518,14 +393,12 @@ export const pluginBodyEn = `
       ["bamboonode", "<code>startlux-decision-27b-autothink</code>", '<span class="badge green">200 ✓</span>', '<span class="badge green">200 ✓</span>'],
     ]
   )}
-  <p style="color:var(--fg-dim)">
-    So <code>Kev-4B</code> is not "a model that only speaks /systemone" —
-    <strong>the path belongs to the provider</strong>. That is why endpoint
-    style is only the <em>preferred</em> path: send to it first; on a
-    <strong>404</strong> (path does not exist) automatically retry the other
-    one; remember whichever worked (keyed by base URL) so the next call skips
-    the extra round-trip. Only 404 triggers the switch — 400, 401 and 5xx have
-    nothing to do with the path, and switching would just burn another request.
+  <p class="sub">
+    So endpoint style is only the <strong>preferred</strong> path: send there
+    first, on a <strong>404</strong> automatically retry the other one, and
+    remember whichever worked (keyed by base URL). Only 404 triggers the switch
+    — 400 / 401 / 5xx have nothing to do with the path, and switching would just
+    burn another request.
   </p>
 </section>
 
@@ -533,48 +406,11 @@ export const pluginBodyEn = `
 
 <section class="wrap" id="tokens">
   <h2>Token-saving design</h2>
-  <div class="grid grid-2">
-    <div class="card">
-      <span class="kicker">Two-layer cache</span>
-      <h4>Exact layer on; soft layer off</h4>
-      <p>
-        <strong>Exact</strong>: reused only when the full state + question set
-        match — the only layer enabled by default. <strong>Soft reuse</strong>
-        deliberately drops argument content from its key, so it ships
-        <strong>off (fail-closed)</strong> and is <strong>permanently disabled
-        for authorization</strong>: a security decision is either bound to the
-        full call context, or not cached at all.
-      </p>
-    </div>
-    <div class="card">
-      <span class="kicker">thinkMode</span>
-      <h4>Default <code>never</code></h4>
-      <p>
-        Measured effect is mainly on <strong>latency</strong> (~1.9s vs 7.2s).
-        <code>never</code> / <code>auto</code> / <code>always</code> are switchable
-        in the config page; illegal values are normalized to <code>never</code>
-        and never sent to the server.
-      </p>
-    </div>
-    <div class="card">
-      <span class="kicker">Trigger gates</span>
-      <h4>Read-only tools pass through</h4>
-      <p>
-        <code>read</code> / <code>grep</code> / <code>glob</code> /
-        <code>todo_write</code> and friends never send a request. The state is
-        truncated too: <code>args</code> is a head/tail digest and
-        <code>recent</code> carries only the last 4 entries at 240 chars each.
-      </p>
-    </div>
-    <div class="card">
-      <span class="kicker">Cooldown</span>
-      <h4>3 failures → 60s off</h4>
-      <p>
-        Inside cooldown calls pass through in 0ms instead of burning money on a
-        broken endpoint. Each request also has a hard timeout (default 8000ms;
-        measured p50 ≈ 0.7s, cold-start p95 ≈ 6.4s).
-      </p>
-    </div>
+  <div class="facts">
+    ${fact("Two-layer cache", "<strong>Exact</strong> reuses only when full state + question set match — the only layer on by default. <strong>Soft reuse</strong> drops argument content from its key, so it is off (fail-closed) and permanently disabled for authorization.")}
+    ${fact("thinkMode", "Default <code>never</code> — measured effect is mainly latency (~1.9s vs 7.2s). <code>never</code> / <code>auto</code> / <code>always</code> switchable; illegal values normalize to <code>never</code>.")}
+    ${fact("Trigger gates", "<code>read</code> / <code>grep</code> / <code>glob</code> / <code>todo_write</code> and friends never send a request. State is truncated: <code>recent</code> carries only the last 4 entries at 240 chars each.")}
+    ${fact("Cooldown", "3 consecutive failures → 60s off; inside cooldown calls pass through in 0ms. Each request has a hard timeout (default 8000ms; measured p50 ≈ 0.7s, cold-start p95 ≈ 6.4s).")}
   </div>
 </section>
 
@@ -583,16 +419,13 @@ export const pluginBodyEn = `
 <section class="wrap" id="failopen">
   <h2>Fail-open degradation</h2>
   <p class="sub">
-    The design rule is <strong>any uncertainty falls back to native
-    behavior</strong> — a guard failure must never wedge a tool call. All cases
-    below pass through and record one <code>action=degraded</code> line in
+    <strong>Any uncertainty falls back to native behavior</strong> — a guard
+    failure must never wedge a tool call. All cases below pass through and
+    record one <code>action=degraded</code> line in
     <code>telemetry.jsonl</code>.
   </p>
   ${degradeTableEn}
-  <div class="note ok">
-    In the default <code>shadow</code> mode, even a judged <code>deny</code> is
-    only recorded, never executed.
-  </div>
+  <div class="note ok">In default <code>shadow</code> mode, even a judged <code>deny</code> is only recorded, never executed.</div>
 </section>
 
 <div class="wrap"><hr class="rule"></div>
@@ -605,51 +438,23 @@ export const pluginBodyEn = `
     ["Command", "Covers"],
     [
       ["<code>pnpm test</code>", "209 unit tests: pure functions + adapter wiring + providers + config round-trip + settings UI rendering + cache regressions"],
-      ["<code>pnpm verify:wiring</code>", "Wiring check: loads the plugin with the real schemastery and confirms the host actually provides the service"],
+      ["<code>pnpm verify:wiring</code>", "Loads the plugin with the real schemastery and confirms the host provides the service"],
       ["<code>pnpm verify:endpoint</code>", "Hits the real endpoint once per decision point, validating question shape and answer parsing"],
     ]
   )}
   <div class="note warn">
     <strong>Do not skip <code>verify:endpoint</code>.</strong> A malformed
-    question type 400s at runtime and degrades silently — from the logs alone
-    it is nearly impossible to notice "this point never actually worked".
+    question type 400s at runtime and degrades silently — from the logs alone it
+    is nearly impossible to notice "this point never actually worked".
   </div>
 
-  <h3>Manual check</h3>
-  <p style="color:var(--fg-dim)">
-    Switch a point to observe, trigger its action, then read
-    <code>~/.dsh/dsh-decision-engine/telemetry.jsonl</code>:
-  </p>
-  <div class="grid grid-2">
-    <div class="card">
-      <span class="kicker">detail</span>
-      <h4>Reading one record</h4>
-      <p>
-        <code>no-key</code> → the key was not found;
-        <code>http-404</code> / <code>http-400</code> → wrong URL or model;
-        <code>answer-shape-mismatch</code> → that point's question set needs a
-        second look.
-      </p>
-    </div>
-    <div class="card">
-      <span class="kicker">point</span>
-      <h4>Which point, what verdict</h4>
-      <p>
-        <code>point=route, action=switch</code> means the point judged "this
-        step should sink to a cheaper model". Every line carries its
-        <code>point</code> and raw <code>scores</code>.
-      </p>
-    </div>
+  <h3>Reading one record</h3>
+  <p class="sub">Switch a point to observe, trigger its action, then read <code>~/.dsh/dsh-decision-engine/telemetry.jsonl</code>:</p>
+  <div class="facts">
+    ${fact("detail", "<code>no-key</code> → key not found; <code>http-404</code> / <code>http-400</code> → wrong URL or model; <code>answer-shape-mismatch</code> → question set needs a second look.")}
+    ${fact("point", "<code>point=route, action=switch</code> means \"this step should sink to a cheaper model\". Every line carries its <code>point</code> and raw <code>scores</code>.")}
+    ${fact("Data dir", "<code>$DSH_HOME/dsh-decision-engine/</code>; <code>~/.dsh</code> is only the fallback. Blank counts as unset, <code>~</code> expansion works, relative paths normalize to absolute.")}
   </div>
-
-  <h3>Data directory</h3>
-  <p style="color:var(--fg-dim)">
-    The data directory is <code>$DSH_HOME/dsh-decision-engine/</code>;
-    <code>~/.dsh</code> is only the fallback when <code>DSH_HOME</code> is
-    unset. A blank value counts as unset (it can never resolve into the current
-    working directory), <code>~</code> expansion is supported, and relative
-    paths are normalized to absolute ones.
-  </p>
 </section>
 `;
 
@@ -662,11 +467,10 @@ export const flatmapBodyEn = `
   <span class="eyebrow"><span class="dot"></span> DeepSeek Harness plugin · v${FLATMAP_VERSION} · MIT</span>
   <h1>dsh-model-flatmap</h1>
   <p class="lede">
-    A <strong>flat, two-level-free</strong> model picker for DeepSeek Harness:
-    it replaces the composer's <code>conversation.input.model</code> control with
-    one surface where <strong>every model and reasoning level is visible at
-    once</strong> — no nested popovers. The model grid, the current model's
-    reasoning levels, and the agent-teamwork switch are all on the same plane.
+    Replaces the composer model picker with <strong>one flat panel</strong>:
+    every model, reasoning level and teamwork switch on the same surface,
+    visible at once — no nested popovers. Search, grouping and theme-awareness
+    all live in that one panel.
   </p>
   <div class="cta-row">
     <a class="btn btn-primary" href="#install">Install</a>
@@ -682,17 +486,13 @@ export const flatmapBodyEn = `
   </div>
 </div>
 
-<div class="wrap">
-  <hr class="rule">
-</div>
+<div class="wrap"><hr class="rule"></div>
 
 <section class="wrap" id="what">
   <h2>What it is</h2>
   <p class="sub">
     A <strong>browser-only</strong> DSH plugin. It swaps the composer's
-    <code>conversation.input.model</code> control for a searchable flat grid,
-    laying the model catalogue, the current model's reasoning levels, and the
-    agent-teamwork switch all on one surface.
+    <code>conversation.input.model</code> control for a searchable flat grid.
   </p>
 
   <div class="stats">
@@ -702,35 +502,12 @@ export const flatmapBodyEn = `
     <div class="stat"><span class="n">shadow</span><span class="l">disabling restores native</span></div>
   </div>
 
-  <div class="grid grid-2">
-    <div class="card">
-      <span class="kicker">Public Client APIs only</span>
-      <h4>Contributes no host capability</h4>
-      <p>
-        The plugin <strong>reads and writes through public Client APIs only</strong>
-        — the per-Session model directory, the teamwork setting, and the host's
-        locale. The host half (<code>index.js</code>) contributes no service,
-        tool, or event; the UI lives in <code>client.js</code>, registered with a
-        negative priority so it shadows the native <code>ModelSelect</code> while
-        active. <strong>Disabling it restores the native control with no residue.</strong>
-      </p>
-    </div>
-    <div class="card">
-      <span class="kicker">One surface</span>
-      <h4>No nested popovers</h4>
-      <p>
-        The trigger opens one panel capped at 320px. The header, the reasoning
-        row, and the teamwork row stay fixed; only the model grid scrolls — see
-        everything at once instead of drilling through popovers.
-      </p>
-    </div>
-  </div>
+  ${figure("/assets/shot-flatmap.jpeg", "The flat model picker in action", "The panel: model grid, reasoning levels and teamwork switch on one surface")}
 
-  <div class="note">
-    <strong>A picture says it best.</strong> The panel in action — a flat grid of
-    models, the current model's reasoning levels, and the agent-teamwork switch on
-    one surface:
-    <a href="https://github.com/zuosus/dsh-model-flatmap/blob/main/docs/model-picker.jpeg">docs/model-picker.jpeg</a>.
+  <div class="facts">
+    ${fact("One surface", "The trigger opens one panel capped at 320px. Header, reasoning row and teamwork row stay fixed; only the model grid scrolls — see everything at once instead of drilling through popovers.")}
+    ${fact("Public APIs only", "Reads and writes through public Client APIs only — the per-Session model directory, teamwork setting and host locale. The host half <code>index.js</code> contributes no service, tool or event; the UI lives in <code>client.js</code> and shadows the native <code>ModelSelect</code> with a negative priority.")}
+    ${fact("Disable to restore", "Turning the bundle off touches no native control and restores <code>ModelSelect</code> with no residue. Plain ES modules, no build step.")}
   </div>
 </section>
 
@@ -738,66 +515,16 @@ export const flatmapBodyEn = `
 
 <section class="wrap" id="features">
   <h2>Features</h2>
-  <p class="sub">
-    No nested submenus — instead, one searchable, groupable, theme-aware surface.
-  </p>
-
-  <div class="grid grid-3">
-    <div class="card">
-      <span class="kicker">Global search</span>
-      <h4>Across every provider and family</h4>
-      <p>Groups that end up empty are dropped, so no stray headings remain. Ranking: prefix matches first, then substring matches, then ordered character matches.</p>
-    </div>
-    <div class="card">
-      <span class="kicker">Word-wise search</span>
-      <h4>Every token must land</h4>
-      <p>Whitespace splits the query into tokens, and every token must land somewhere in the name. A hit ranks by its weakest token.</p>
-    </div>
-    <div class="card">
-      <span class="kicker">Provider-wide</span>
-      <h4>Matching a provider keeps its whole catalogue</h4>
-      <p>A query that matches a provider (its id, catalog name, or section label) keeps that provider's entire catalogue in the grid.</p>
-    </div>
-    <div class="card">
-      <span class="kicker">Two grouping modes</span>
-      <h4>By provider / By family</h4>
-      <p>A segment control switches the grid between By provider and By family. Grouping and search are independent and combine freely.</p>
-    </div>
-    <div class="card">
-      <span class="kicker">Model families</span>
-      <h4>Dictionary + generation splits</h4>
-      <p>Recognises DeepSeek, Grok, Opus, Haiku, Sonnet, Claude, Qwen, GLM, Kimi, GPT, Gemini, Llama, Mistral and others; registered brands split by generation (HY3 / HY4 / HY), unrecognised models are inferred from their id, anything unjudgeable falls into Others (always sorts last). Families stay flat — no nesting.</p>
-    </div>
-    <div class="card">
-      <span class="kicker">Provider-primary rows</span>
-      <h4>No repeated family name under By family</h4>
-      <p>Under By family the heading already says what the models are, so the row's primary text is the provider name; only when one provider offers several models in the same family does a short id-derived suffix differentiate them. The full model name and description stay in the tooltip.</p>
-    </div>
-    <div class="card">
-      <span class="kicker">Reasoning effort</span>
-      <h4>Exclusive, keyboard-operable</h4>
-      <p>The current model's reasoning levels render as an exclusive, keyboard-operable group ("推理等级" / "Reasoning effort") driven by radio semantics.</p>
-    </div>
-    <div class="card">
-      <span class="kicker">Adaptive footer</span>
-      <h4>One row when it fits</h4>
-      <p>The reasoning group and the agent-teamwork switch share one line when both fit with a 30px gap, and fall back to one row each when they do not — the break is CSS flex wrapping, not a measured pixel threshold.</p>
-    </div>
-    <div class="card">
-      <span class="kicker">Strike-through on balance</span>
-      <h4>Only the model the failing call used</h4>
-      <p>A model whose call failed on insufficient balance, credit, or quota keeps a <code>line-through</code> until a later call for that same model returns anything else. Covers the host's <code>QUOTA</code> / <code>ACCOUNT_QUOTA</code> codes, a provider <code>402</code>, and a <code>429</code> whose body reports an empty balance — a plain rate limit never strikes.</p>
-    </div>
-    <div class="card">
-      <span class="kicker">Theme-aware</span>
-      <h4>Correct in light and dark</h4>
-      <p>Styled with host theme tokens only; looks correct in both light and dark themes, with no third-party styles.</p>
-    </div>
-    <div class="card">
-      <span class="kicker">No build</span>
-      <h4>Plain ES modules</h4>
-      <p>The plugin is plain ES modules with no build step. Tests read <code>client.js</code> directly and drive the real component through a minimal hook runtime to catch crashes, missing sections, and wrong column counts.</p>
-    </div>
+  <p class="sub">No nested submenus — instead, one searchable, groupable, theme-aware surface.</p>
+  <div class="facts">
+    ${fact("Global search", "Across every provider and family; empty groups are dropped, so no stray headings. Ranking: prefix &gt; substring &gt; ordered character matches.")}
+    ${fact("Word-wise search", "Whitespace splits the query into tokens; every token must land in the name. A hit ranks by its weakest token.")}
+    ${fact("Provider-wide", "A query matching a provider (id / catalog name / section label) keeps that provider's entire catalogue in the grid.")}
+    ${fact("Two groupings", "A segment control switches between By provider and By family. Grouping and search are independent and combine freely.")}
+    ${fact("Model families", "Dictionary recognises DeepSeek, Grok, Claude, Qwen, GLM, Kimi, GPT, Gemini, Llama and more; registered brands split by generation (HY3 / HY4 / HY), unrecognised models infer from their id, anything unjudgeable falls into Others (always last). Families stay flat.")}
+    ${fact("Reasoning effort", "The current model's reasoning levels render as an exclusive, keyboard-operable group (radio semantics). They share a line with the teamwork switch when it fits, else wrap — decided by CSS flex.")}
+    ${fact("Strike-through", "A model whose call failed on insufficient balance keeps a <code>line-through</code> until a later call for that same model returns anything else; a plain rate-limit 429 never strikes.")}
+    ${fact("Theme-aware · no build", "Styled with host theme tokens only, correct in light and dark; plain ES modules. Tests read <code>client.js</code> directly and drive the real component to catch crashes, missing sections and wrong column counts.")}
   </div>
 </section>
 
@@ -805,19 +532,14 @@ export const flatmapBodyEn = `
 
 <section class="wrap" id="install">
   <h2>Install</h2>
-  <p class="sub">This package is a DSH <strong>bundle</strong>. Install it from your DSH profile's plugin manager, or drop it into the profile's bundle directory.</p>
-
+  <p class="sub">This package is a DSH <strong>bundle</strong>. Install it from the plugin manager, or drop it into the profile's bundle directory.</p>
   ${codeBlock("dsh plugin add dsh-model-flatmap")}
-  <p style="color:var(--fg-dim);font-size:14.5px;margin-top:-4px">
-    Or copy it into a profile manually (paths vary by install):
-  </p>
-  ${codeBlock("cp -r . \"<profile>/bundles/dsh-model-flatmap\"")}
-  <p style="color:var(--fg-dim);font-size:14.5px">
-    Then enable or disable it from the profile's plugin list — turning the bundle off touches no native control; the <code>dsh</code> loader reads <code>cordis.patch.yml</code> to mount it.
-  </p>
-
+  <p class="sub">Or copy it into a profile manually (paths vary by install):</p>
+  ${codeBlock('cp -r . "<profile>/bundles/dsh-model-flatmap"')}
   <div class="note ok">
-    <strong>Disable to restore.</strong> The host half (<code>index.js</code>) contributes nothing at runtime; the UI shadows the native <code>ModelSelect</code> through a negative priority, so disabling the plugin restores the native control with no residue.
+    <strong>Disable to restore.</strong> Enable/disable from the plugin list;
+    the <code>dsh</code> loader reads <code>cordis.patch.yml</code> to mount it,
+    and turning it off restores the native control with no residue.
   </div>
 </section>
 
@@ -832,8 +554,7 @@ export const flatmapBodyEn = `
       ["<code>index.js</code>", "Host half — bundle entry, contributes nothing at runtime."],
       ["<code>client.js</code>", "Browser half — the entire flat picker UI."],
       ["<code>cordis.patch.yml</code>", "Cordis patch applied by the <code>dsh</code> bundle loader."],
-      ["<code>locale/en.json</code>", "English copy and metadata."],
-      ["<code>locale/zh.json</code>", "Simplified-Chinese copy and metadata."],
+      ["<code>locale/en.json</code> / <code>locale/zh.json</code>", "English / Simplified-Chinese copy and metadata."],
       ["<code>docs/DETAIL.md</code>", "Detailed behaviour specification."],
       ["<code>test/</code>", "Render-path tests driven through a minimal hook runtime."],
     ]
@@ -846,10 +567,9 @@ export const flatmapBodyEn = `
   <h2>Development</h2>
   <p class="sub">Plain ES modules, no build step.</p>
   ${codeBlock("node --test test/")}
-  <p style="color:var(--fg-dim);font-size:14.5px">
-    Tests read <code>client.js</code> directly and drive the real component through a minimal hook runtime to catch crashes, missing sections, and wrong column counts. The full behaviour spec is in
-    <a href="https://github.com/zuosus/dsh-model-flatmap/blob/main/docs/DETAIL.md">docs/DETAIL.md</a>,
-    and the design decisions are in <a href="https://github.com/zuosus/dsh-model-flatmap/blob/main/DECISIONS.md">DECISIONS.md</a>.
+  <p class="sub">
+    The full behaviour spec is in <a href="https://github.com/zuosus/dsh-model-flatmap/blob/main/docs/DETAIL.md">docs/DETAIL.md</a>,
+    and the design decisions in <a href="https://github.com/zuosus/dsh-model-flatmap/blob/main/DECISIONS.md">DECISIONS.md</a>.
   </p>
 </section>
 `;

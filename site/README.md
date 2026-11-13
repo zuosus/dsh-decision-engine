@@ -13,11 +13,12 @@ site/
   package.json         site/ 自己的包：build / deploy 脚本 + wrangler 依赖
   package-lock.json    锁 wrangler 版本，保证 CI 与本地一致
   wrangler.jsonc       Workers Builds 的配置（name / main / build.command）
-  lib/partials.mjs     共用 HTML 片段（导航含主题按钮 + 语言按钮）
+  lib/partials.mjs     共用 HTML 片段（导航含主题按钮 + 语言按钮；站点图标、figure/fact 片段）
   lib/content-en.mjs   英文版页面内容（章节 id 与中文版一致）
-  assets/style.css     样式（light/dark 双调色板）
+  assets/style.css     样式（light/dark 双调色板；少卡片，用留白与细分隔线分层）
   assets/theme.js      <head> 同步落 data-theme，防主题闪白
   assets/app.js        交互（命令块复制、主题切换）
+  assets/*.png/*.jpeg  两个插件的宣传图与截图（优化过的副本，随站点嵌入 Worker）
   dist/               构建产物（gitignore）
   worker/             Worker 脚本与 payload（gitignore）
 ```
@@ -155,12 +156,23 @@ npx wrangler deploy --dry-run   # 只打包不上传
 
 ## 为什么是「把文件嵌进 Worker」
 
-部署走 Cloudflare API，而站点是 5 个静态文件。用 Workers 的 assets
+部署走 Cloudflare API，站点是几个静态文件。用 Workers 的 assets
 上传会话要额外的往返，因此构建时把整个站点 gzip + base64 嵌进一段很短的
 Worker——部署只是一次脚本上传，运行时用 `DecompressionStream` 解压。
 
-代价是每次冷启动解一次压（约 12 KB，可忽略），换来的是部署路径极短、
-没有额外的资产上传状态要管理。
+代价是每次冷启动解一次压，换来的是部署路径极短、没有额外的资产上传状态要管理。
+
+### 图片是二进制，不能按文本读
+
+页面里的宣传图与截图放在 `assets/*.png|*.jpeg`，源文件来自两个插件仓库的
+`docs/assets/`（以及 flatmap 的 `docs/model-picker.jpeg`），**优化过的副本提交在本仓库**，
+不引用 GitHub，因此 CSP 不需要放行外域、也不依赖外链可用性。
+
+`make-bundle.mjs` 对 `.png/.jpg/.jpeg/.webp` 等二进制扩展名单独处理：构建期存
+base64 文本并打 `bin:1` 标记，运行时先 `atob` 还原成字节再交给 `Response`，
+否则 PNG/JPEG 会被当成 UTF-8 文本发出去（浏览器解码失败）。`build.mjs` 负责把这些
+图片从 `assets/` 拷进 `dist/assets/`。新增图片时把文件放进 `assets/` 并加进
+`build.mjs` 顶部的拷贝列表即可。
 
 ## 部署凭据
 
@@ -173,7 +185,7 @@ Worker——部署只是一次脚本上传，运行时用 `DecompressionStream` 
 ## 加一个新项目
 
 1. 在 `build.mjs` 里加一段 `xxxBody`（中文）并写进 `dist/xxx/index.html`；英文版放 `lib/content-en.mjs` 的 `xxxBodyEn`，由 `build.mjs` 顶部 import；
-2. 在首页 `indexBody`（中文）与 `indexBodyEn`（英文）的项目列表里各加一张卡片，并把「目前收录 N 个插件」的计数 +1；
+2. 在首页 `indexBody`（中文）与 `indexBodyEn`（英文）的 `<div class="projects">` 里各加一个 `<a class="project">` 条目（结构见现有两条），并在 `partials.mjs` 里给它画一个图标；
 3. 在 `build.mjs` 顶部 `navLinksFor` 里给新插件加一条导航（`${prefix}/xxx/#...`），双语共用；
 4. `make-bundle.mjs` 会从 `dist/` 自动推导目录重定向列表（含 `/xxx`、`/en/xxx`），无需手动加 `DIRS`。
 

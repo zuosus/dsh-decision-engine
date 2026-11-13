@@ -26,7 +26,15 @@ const MIME = {
   ".css": "text/css; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
 };
+
+// 二进制资源不能按 utf8 读成字符串（会把 PNG/JPEG 直接读坏），因此单独标成
+// base64：构建期存 b64 文本，运行时先 atob 回字节再交给 Response。
+const BINARY_EXT = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".ico"]);
 
 async function walk(dir, base = dir) {
   const out = [];
@@ -48,9 +56,14 @@ const dirs = files
   .map((f) => "/" + f.split("/").slice(0, -1).join("/"));
 const payload = {};
 for (const rel of files) {
+  const ext = path.extname(rel).toLowerCase();
+  const buf = await readFile(path.join(DIST, rel));
+  const isBin = BINARY_EXT.has(ext);
   payload["/" + rel] = {
-    t: MIME[path.extname(rel).toLowerCase()] ?? "application/octet-stream",
-    b: (await readFile(path.join(DIST, rel))).toString("utf8"),
+    t: MIME[ext] ?? "application/octet-stream",
+    // bin 标记只对图片为真；运行时据此把 b 从 base64 还原成 Uint8Array。
+    ...(isBin ? { bin: 1 } : {}),
+    b: isBin ? buf.toString("base64") : buf.toString("utf8"),
   };
 }
 
@@ -348,7 +361,10 @@ export default{fetch:async(rq,env,ctx)=>{
   if(!k)return new Response("Not Found\\n",{status:404,headers:{"content-type":"text/plain; charset=utf-8"}});
   const f=F[k],et='"'+k+'"';
   if(rq.headers.get("if-none-match")===et)return new Response(null,{status:304,headers:{etag:et}});
-  return new Response(f.b,{status:200,headers:{
+  // 文本资源直接给字符串；图片在构建期是 base64，运行时先还原成字节，
+  // 否则 PNG/JPEG 会被当成 UTF-8 文本发出去（浏览器解码失败）。
+  const body=f.bin?Uint8Array.from(atob(f.b),c=>c.charCodeAt(0)):f.b;
+  return new Response(body,{status:200,headers:{
     "content-type":f.t,etag:et,
     "cache-control":"public, max-age=300, must-revalidate",
     "x-content-type-options":"nosniff",
