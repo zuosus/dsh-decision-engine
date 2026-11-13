@@ -11,10 +11,10 @@ const DIST = path.join(HERE, "dist");
 // 版本号只有一个来源：插件自己的 package.json。写死在这里必然漂移
 // （曾经停在 0.7.1，而包已经走到 0.9.x，站点上挂的就是旧号）。
 const VERSION = JSON.parse(readFileSync(path.join(HERE, "..", "package.json"), "utf8")).version;
-// flatmap 的版本号同样只来自它自己的 package.json，避免写死漂移。
-const FLATMAP_VERSION = JSON.parse(
-  readFileSync(path.join(HERE, "..", "..", "dsh-model-flatmap", "package.json"), "utf8")
-).version;
+// flatmap 版本号写死在这里：构建环境（Cloudflare Workers Builds）只拉取本仓库
+// (dsh-decision-engine)，没有平级的 dsh-model-flatmap 仓库，无法在构建期读到它的
+// package.json。升级 flatmap 时记得手动同步这个数字（见 DEC 记录）。
+const FLATMAP_VERSION = "1.0.0";
 const ORIGIN = "https://dsh.zuos.us";
 
 // 两个语言的顶部导航。链接都写绝对路径，子目录页也能正确跳转。

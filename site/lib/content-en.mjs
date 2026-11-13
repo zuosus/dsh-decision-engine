@@ -11,13 +11,9 @@ const VERSION = JSON.parse(
   readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "package.json"), "utf8"),
 ).version;
 
-// 同样的来源：dsh-model-flatmap 的 version（与 build.mjs 一致，避免写死漂移）。
-const FLATMAP_VERSION = JSON.parse(
-  readFileSync(
-    path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "dsh-model-flatmap", "package.json"),
-    "utf8",
-  ),
-).version;
+// flatmap 版本号（与 build.mjs 保持一致，写死）：构建环境只拉取本仓库，读不到
+// 平级的 dsh-model-flatmap/package.json。升级 flatmap 时和 build.mjs 一起同步。
+const FLATMAP_VERSION = "1.0.0";
 
 /* ------------------------------------------------------------------ *
  * Home (en)
