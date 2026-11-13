@@ -21,27 +21,20 @@ const FLATMAP_VERSION = "1.0.0";
 
 export const indexBodyEn = `
 <div class="wrap hero">
-  <span class="eyebrow"><span class="dot"></span> DeepSeek Harness plugins</span>
-  <h1>A <span class="grad">cheap judgement layer</span><br>for DeepSeek Harness</h1>
+  <span class="eyebrow"><span class="dot"></span> DeepSeek Harness plugin index</span>
+  <h1>A small set of <span class="grad">plugins</span><br>for DeepSeek Harness</h1>
   <p class="lede">
-    Two open-source DSH plugins doing one thing: <strong>one tiny call to save a
-    much larger expense</strong>. Observe-only by default; on any error they fall
-    back to native behavior.
+    <strong>dsh.zuos.us</strong> collects DeepSeek Harness (DSH) plugins.
+    All free, open source, MIT, ready to use — pick one below for its guide
+    and install steps.
   </p>
-  <div class="cta-row">
-    <a class="btn btn-primary" href="/en/dsh-decision-engine/">dsh-decision-engine →</a>
-    <a class="btn" href="/en/dsh-model-flatmap/">dsh-model-flatmap</a>
-    <a class="btn" href="https://github.com/zuosus/dsh-decision-engine">Source code</a>
-  </div>
 </div>
-
-${figure("/assets/promo.jpeg", "dsh-decision-engine promo image", "dsh-decision-engine: a small model judges before the main model acts")}
 
 <div class="wrap"><hr class="rule"></div>
 
 <section class="wrap">
-  <h2>Two plugins</h2>
-  <p class="sub">One decides what to run and which model to use; the other makes picking a model one flat surface. Both free, MIT, ready to use.</p>
+  <h2>Plugins</h2>
+  <p class="sub">Two so far. Click a title to open its page.</p>
 
   <div class="projects">
     <a class="project" href="/en/dsh-decision-engine/">
@@ -50,11 +43,9 @@ ${figure("/assets/promo.jpeg", "dsh-decision-engine promo image", "dsh-decision-
         <h3>dsh-decision-engine</h3>
         <span class="ver">v${VERSION}</span>
         <p>
-          Before the main model acts, it sends the current state plus four
-          questions to a cheap small model, then <strong>allows, asks, or
-          blocks</strong> — or switches to a cheaper model / skips an expensive
-          call. All eight decision points are implemented and individually
-          switchable; shadow mode records only, never enforces.
+          Before the main model acts, a cheap small model judges — allow, ask,
+          block, switch to a cheaper model, or skip an expensive call. Eight
+          decision points, individually switchable.
         </p>
         <div class="toc">
           <span class="badge green">Observe-only by default</span>
@@ -71,10 +62,9 @@ ${figure("/assets/promo.jpeg", "dsh-decision-engine promo image", "dsh-decision-
         <h3>dsh-model-flatmap</h3>
         <span class="ver">v${FLATMAP_VERSION}</span>
         <p>
-          Replaces the composer model picker with <strong>one flat panel</strong>:
-          every model, reasoning level and teamwork switch visible at once, no
-          submenus. Cross-provider search, two grouping modes, strike-through on
-          out-of-balance models. Disabling it restores the native control.
+          Replaces the model picker with one flat panel: every model and
+          reasoning level at once, no submenus, with search and grouping.
+          Disabling restores the native control.
         </p>
         <div class="toc">
           <span class="badge green">Flat, no submenus</span>
@@ -88,21 +78,12 @@ ${figure("/assets/promo.jpeg", "dsh-decision-engine promo image", "dsh-decision-
 </section>
 
 <section class="wrap">
-  <h2>What they look like</h2>
-  <p class="sub">Real screenshots from each repo's <code>docs/assets/</code>.</p>
-  <div class="shots">
-    ${figure("/assets/shot-decisions.png", "Decision history tab", "dsh-decision-engine: every judgement and degradation is recorded")}
-    ${figure("/assets/shot-flatmap.jpeg", "Flat model picker", "dsh-model-flatmap: models, reasoning levels and teamwork on one surface")}
-  </div>
-</section>
-
-<section class="wrap">
-  <h2>Three shared rules</h2>
-  <p class="sub">The reason they are safe to leave installed.</p>
+  <h2>Shared rules</h2>
+  <p class="sub">Every plugin here follows these, so they are safe to leave installed.</p>
   <div class="facts">
-    ${fact("fail-open", "<strong>Uncertainty passes through.</strong>Timeouts, network errors, auth failures, malformed answers — all fall back to native behavior with one telemetry line. A failing guard never blocks a tool call.")}
-    ${fact("shadow first", "<strong>Observe, then enforce.</strong>Every decision point has off / observe / enforce. New points run in observe until their judgments hold up, then switch to enforce.")}
-    ${fact("cheap by design", "<strong>Spend less, never more.</strong>Intervene only where a cheap call replaces a more expensive one, or prevents a bigger expense — never to add one more check.")}
+    ${fact("fail-open", "<strong>Uncertainty passes through.</strong>Any error falls back to native behavior; a failing guard never blocks a tool call.")}
+    ${fact("shadow first", "<strong>Observe, then enforce.</strong>Records judgments by default; switch to enforce only once they hold up.")}
+    ${fact("cheap by design", "<strong>Spend less, never more.</strong>Intervene only to replace or prevent a more expensive call.")}
   </div>
 </section>
 `;
@@ -274,6 +255,8 @@ export const pluginBodyEn = `
     <a href="#verify">Verification</a>
   </div>
 </div>
+
+${figure("/assets/promo.jpeg", "dsh-decision-engine promo image", "A small model judges before the main model acts")}
 
 <div class="wrap"><hr class="rule"></div>
 

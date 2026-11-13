@@ -21,11 +21,10 @@ const ORIGIN = "https://dsh.zuos.us";
 function navLinksFor(locale) {
   const prefix = locale === "zh" ? "" : "/en";
   const L = locale === "zh";
+  // 首页是插件索引，导航也保持中立：两个插件各一条，不带某插件的章节锚点。
   return [
-    { href: `${prefix}/dsh-decision-engine/#points`, label: L ? "决策点" : "Decision points", opt: true },
-    { href: `${prefix}/dsh-decision-engine/#providers`, label: "Provider", opt: true },
-    { href: `${prefix}/dsh-decision-engine/#verify`, label: L ? "验证" : "Verification", opt: true },
-    { href: `${prefix}/dsh-model-flatmap/#what`, label: "flatmap", opt: true },
+    { href: `${prefix}/dsh-decision-engine/`, label: L ? "决策引擎" : "Decision engine" },
+    { href: `${prefix}/dsh-model-flatmap/`, label: L ? "模型平铺" : "Model flatmap" },
     { href: "https://github.com/zuosus/dsh-decision-engine", label: "GitHub" },
   ];
 }
@@ -83,26 +82,19 @@ ${footer()}
 
 const indexBody = `
 <div class="wrap hero">
-  <span class="eyebrow"><span class="dot"></span> DeepSeek Harness 插件</span>
-  <h1>给 <span class="grad">DeepSeek Harness</span><br>加一层便宜的判断</h1>
+  <span class="eyebrow"><span class="dot"></span> DeepSeek Harness 插件索引</span>
+  <h1>给 <span class="grad">DeepSeek Harness</span><br>做的一小把插件</h1>
   <p class="lede">
-    两个开源 DSH 插件，做同一件事：<strong>用一次很小的调用，省下一次很大的开销</strong>。
-    默认只观察、不打断；任何出错都退回原生行为。
+    这里是 <strong>dsh.zuos.us</strong> 收录的 DeepSeek Harness（DSH）插件。
+    都免费、开源、MIT，装上就能用；下面挑一个看详细介绍与安装方式。
   </p>
-  <div class="cta-row">
-    <a class="btn btn-primary" href="/dsh-decision-engine/">dsh-decision-engine →</a>
-    <a class="btn" href="/dsh-model-flatmap/">dsh-model-flatmap</a>
-    <a class="btn" href="https://github.com/zuosus/dsh-decision-engine">源码</a>
-  </div>
 </div>
-
-${figure("/assets/promo.jpeg", "dsh-decision-engine 宣传图", "dsh-decision-engine：主模型动手前，先用一个小模型做判断")}
 
 <div class="wrap"><hr class="rule"></div>
 
 <section class="wrap">
-  <h2>两个插件</h2>
-  <p class="sub">一个管「该不该做、用哪个模型」，一个管「选模型别再层层点开」。都免费、MIT、装了就能用。</p>
+  <h2>收录的插件</h2>
+  <p class="sub">目前 2 个。点标题进入各自的介绍页。</p>
 
   <div class="projects">
     <a class="project" href="/dsh-decision-engine/">
@@ -111,9 +103,8 @@ ${figure("/assets/promo.jpeg", "dsh-decision-engine 宣传图", "dsh-decision-en
         <h3>dsh-decision-engine</h3>
         <span class="ver">v${VERSION}</span>
         <p>
-          在主模型动手前，把「当前状态 + 四个问题」发给一个便宜的小模型，
-          拿回答案后决定<strong>放行、询问、拦截</strong>，或换用便宜模型、跳过一次昂贵调用。
-          八个决策点全部实装、逐个可切换；默认 shadow 只记录不生效。
+          主模型动手前，用一个便宜的小模型做判断，决定放行、询问、拦截，
+          或换便宜模型、跳过一次昂贵调用。八个决策点逐个可切换。
         </p>
         <div class="toc">
           <span class="badge green">默认只观察</span>
@@ -130,9 +121,8 @@ ${figure("/assets/promo.jpeg", "dsh-decision-engine 宣传图", "dsh-decision-en
         <h3>dsh-model-flatmap</h3>
         <span class="ver">v${FLATMAP_VERSION}</span>
         <p>
-          把输入框里的模型选择器换成<strong>一块平铺面板</strong>：所有模型、推理等级、
-          协作开关一次看完，没有二级菜单。支持跨 provider 搜索、两种分组；
-          额度不足的模型自动加删除线。关闭插件即复原原生控件。
+          把模型选择器换成一块平铺面板：所有模型与推理等级一次看完，
+          没有二级菜单，支持搜索与分组。关闭即复原原生控件。
         </p>
         <div class="toc">
           <span class="badge green">平铺无二级菜单</span>
@@ -146,21 +136,12 @@ ${figure("/assets/promo.jpeg", "dsh-decision-engine 宣传图", "dsh-decision-en
 </section>
 
 <section class="wrap">
-  <h2>界面长这样</h2>
-  <p class="sub">都是运行中的真实截图，来自各自仓库的 <code>docs/assets/</code>。</p>
-  <div class="shots">
-    ${figure("/assets/shot-decisions.png", "决策历史标签页", "dsh-decision-engine：每一次判断与降级都有记录")}
-    ${figure("/assets/shot-flatmap.jpeg", "平铺模型选择器", "dsh-model-flatmap：模型、推理等级、协作开关同屏")}
-  </div>
-</section>
-
-<section class="wrap">
-  <h2>三条共同约定</h2>
-  <p class="sub">也是它们能被放心常驻的原因。</p>
+  <h2>共同约定</h2>
+  <p class="sub">这里的插件都守这几条，可以放心常驻。</p>
   <div class="facts">
-    ${fact("fail-open", "<strong>不确定就放行。</strong>超时、网络错误、鉴权失败、返回异常，一律退回原生行为并记一条遥测；守卫自己故障不会卡住工具调用。")}
-    ${fact("shadow first", "<strong>先观察，再生效。</strong>每个决策点有 关闭 / 观察 / 生效 三态；新点默认跑「观察」，确认判断靠谱后再切「生效」。")}
-    ${fact("cheap by design", "<strong>只省更大的开销。</strong>只在「替代更贵的调用」或「阻止更大的开销」处介入，不为多一道检查而介入。")}
+    ${fact("fail-open", "<strong>不确定就放行。</strong>任何异常一律退回原生行为，守卫故障不会卡住工具调用。")}
+    ${fact("shadow first", "<strong>先观察，再生效。</strong>默认只记录判断，确认靠谱后才切到生效。")}
+    ${fact("cheap by design", "<strong>只省更大的开销。</strong>只为替代或阻止更贵的调用而介入。")}
   </div>
 </section>
 `;
@@ -317,6 +298,8 @@ const pluginBody = `
     <a href="#verify">验证</a>
   </div>
 </div>
+
+${figure("/assets/promo.jpeg", "dsh-decision-engine 宣传图", "主模型动手前，先用一个小模型做判断")}
 
 <div class="wrap"><hr class="rule"></div>
 
@@ -665,8 +648,8 @@ const EN_FLATMAP = {
 await writeFile(
   path.join(DIST, "index.html"),
   page(
-    "dsh.zuos.us — DeepSeek Harness 插件项目",
-    "DeepSeek Harness 插件项目主页：dsh-decision-engine —— 便宜的决策层，在主模型动手前用小的决策模型做结构化判断。",
+    "dsh.zuos.us — DeepSeek Harness 插件索引",
+    "dsh.zuos.us 收录的 DeepSeek Harness 插件索引：dsh-decision-engine 与 dsh-model-flatmap 的介绍与安装入口。",
     indexBody,
     ZH_HOME
   )
@@ -685,8 +668,8 @@ await writeFile(
 await writeFile(
   path.join(DIST, "en/index.html"),
   page(
-    "dsh.zuos.us — DeepSeek Harness plugin projects",
-    "Home of DeepSeek Harness plugin projects: dsh-decision-engine — a cheap judgement layer for DSH.",
+    "dsh.zuos.us — DeepSeek Harness plugin index",
+    "An index of DeepSeek Harness plugins on dsh.zuos.us: guides and install links for dsh-decision-engine and dsh-model-flatmap.",
     indexBodyEn,
     EN_HOME
   )
