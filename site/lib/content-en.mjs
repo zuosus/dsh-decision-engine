@@ -11,6 +11,14 @@ const VERSION = JSON.parse(
   readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "package.json"), "utf8"),
 ).version;
 
+// 同样的来源：dsh-model-flatmap 的 version（与 build.mjs 一致，避免写死漂移）。
+const FLATMAP_VERSION = JSON.parse(
+  readFileSync(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "dsh-model-flatmap", "package.json"),
+    "utf8",
+  ),
+).version;
+
 /* ------------------------------------------------------------------ *
  * Home (en)
  * ------------------------------------------------------------------ */
@@ -27,6 +35,7 @@ export const indexBodyEn = `
   </p>
   <div class="cta-row">
     <a class="btn btn-primary" href="/en/dsh-decision-engine/">Read the dsh-decision-engine guide →</a>
+    <a class="btn" href="/en/dsh-model-flatmap/">dsh-model-flatmap</a>
     <a class="btn" href="https://github.com/zuosus/dsh-decision-engine">Source code</a>
   </div>
 </div>
@@ -37,7 +46,7 @@ export const indexBodyEn = `
 
 <section class="wrap">
   <h2>Projects</h2>
-  <p class="sub">One plugin so far.</p>
+  <p class="sub">Two plugins so far.</p>
 
   <div class="grid">
     <a class="project" href="/en/dsh-decision-engine/">
@@ -63,6 +72,31 @@ export const indexBodyEn = `
       <div class="toc">
         <span class="badge green">Shadow mode by default</span>
         <span class="badge blue">Any decision endpoint</span>
+        <span class="badge gray">MIT</span>
+      </div>
+    </a>
+
+    <a class="project" href="/en/dsh-model-flatmap/">
+      <div class="project-head">
+        ${ICON}
+        <div>
+          <h3>dsh-model-flatmap</h3>
+        </div>
+        <div class="nav-spacer"></div>
+        <span class="ver">v${FLATMAP_VERSION}</span>
+      </div>
+      <p>
+        A flat, two-level-free model picker for DSH: it replaces the composer's
+        <code>conversation.input.model</code> control with one surface where
+        every model and reasoning level is visible at once — no nested popovers.
+        Cross-provider global search, by-provider / by-family grouping, reasoning
+        level and agent-teamwork switch on the same screen, and out-of-balance
+        models get a strike-through. Browser-only, no build step, and disabling
+        it restores the native control with no residue.
+      </p>
+      <div class="toc">
+        <span class="badge green">Flat, no submenus</span>
+        <span class="badge blue">Theme-aware</span>
         <span class="badge gray">MIT</span>
       </div>
     </a>
@@ -619,6 +653,207 @@ export const pluginBodyEn = `
     unset. A blank value counts as unset (it can never resolve into the current
     working directory), <code>~</code> expansion is supported, and relative
     paths are normalized to absolute ones.
+  </p>
+</section>
+`;
+
+/* ------------------------------------------------------------------ *
+ * flatmap plugin page (en)
+ * ------------------------------------------------------------------ */
+
+export const flatmapBodyEn = `
+<div class="wrap hero">
+  <span class="eyebrow"><span class="dot"></span> DeepSeek Harness plugin · v${FLATMAP_VERSION} · MIT</span>
+  <h1>dsh-model-flatmap</h1>
+  <p class="lede">
+    A <strong>flat, two-level-free</strong> model picker for DeepSeek Harness:
+    it replaces the composer's <code>conversation.input.model</code> control with
+    one surface where <strong>every model and reasoning level is visible at
+    once</strong> — no nested popovers. The model grid, the current model's
+    reasoning levels, and the agent-teamwork switch are all on the same plane.
+  </p>
+  <div class="cta-row">
+    <a class="btn btn-primary" href="#install">Install</a>
+    <a class="btn" href="#what">What it is</a>
+    <a class="btn" href="https://github.com/zuosus/dsh-model-flatmap">GitHub</a>
+  </div>
+  <div class="toc">
+    <a href="#what">What it is</a>
+    <a href="#features">Features</a>
+    <a href="#install">Install</a>
+    <a href="#layout">Layout</a>
+    <a href="#dev">Development</a>
+  </div>
+</div>
+
+<div class="wrap">
+  <hr class="rule">
+</div>
+
+<section class="wrap" id="what">
+  <h2>What it is</h2>
+  <p class="sub">
+    A <strong>browser-only</strong> DSH plugin. It swaps the composer's
+    <code>conversation.input.model</code> control for a searchable flat grid,
+    laying the model catalogue, the current model's reasoning levels, and the
+    agent-teamwork switch all on one surface.
+  </p>
+
+  <div class="stats">
+    <div class="stat"><span class="n">0</span><span class="l">submenus</span></div>
+    <div class="stat"><span class="n">320px</span><span class="l">panel height cap</span></div>
+    <div class="stat"><span class="n">2</span><span class="l">grouping modes</span></div>
+    <div class="stat"><span class="n">shadow</span><span class="l">disabling restores native</span></div>
+  </div>
+
+  <div class="grid grid-2">
+    <div class="card">
+      <span class="kicker">Public Client APIs only</span>
+      <h4>Contributes no host capability</h4>
+      <p>
+        The plugin <strong>reads and writes through public Client APIs only</strong>
+        — the per-Session model directory, the teamwork setting, and the host's
+        locale. The host half (<code>index.js</code>) contributes no service,
+        tool, or event; the UI lives in <code>client.js</code>, registered with a
+        negative priority so it shadows the native <code>ModelSelect</code> while
+        active. <strong>Disabling it restores the native control with no residue.</strong>
+      </p>
+    </div>
+    <div class="card">
+      <span class="kicker">One surface</span>
+      <h4>No nested popovers</h4>
+      <p>
+        The trigger opens one panel capped at 320px. The header, the reasoning
+        row, and the teamwork row stay fixed; only the model grid scrolls — see
+        everything at once instead of drilling through popovers.
+      </p>
+    </div>
+  </div>
+
+  <div class="note">
+    <strong>A picture says it best.</strong> The panel in action — a flat grid of
+    models, the current model's reasoning levels, and the agent-teamwork switch on
+    one surface:
+    <a href="https://github.com/zuosus/dsh-model-flatmap/blob/main/docs/model-picker.jpeg">docs/model-picker.jpeg</a>.
+  </div>
+</section>
+
+<div class="wrap"><hr class="rule"></div>
+
+<section class="wrap" id="features">
+  <h2>Features</h2>
+  <p class="sub">
+    No nested submenus — instead, one searchable, groupable, theme-aware surface.
+  </p>
+
+  <div class="grid grid-3">
+    <div class="card">
+      <span class="kicker">Global search</span>
+      <h4>Across every provider and family</h4>
+      <p>Groups that end up empty are dropped, so no stray headings remain. Ranking: prefix matches first, then substring matches, then ordered character matches.</p>
+    </div>
+    <div class="card">
+      <span class="kicker">Word-wise search</span>
+      <h4>Every token must land</h4>
+      <p>Whitespace splits the query into tokens, and every token must land somewhere in the name. A hit ranks by its weakest token.</p>
+    </div>
+    <div class="card">
+      <span class="kicker">Provider-wide</span>
+      <h4>Matching a provider keeps its whole catalogue</h4>
+      <p>A query that matches a provider (its id, catalog name, or section label) keeps that provider's entire catalogue in the grid.</p>
+    </div>
+    <div class="card">
+      <span class="kicker">Two grouping modes</span>
+      <h4>By provider / By family</h4>
+      <p>A segment control switches the grid between By provider and By family. Grouping and search are independent and combine freely.</p>
+    </div>
+    <div class="card">
+      <span class="kicker">Model families</span>
+      <h4>Dictionary + generation splits</h4>
+      <p>Recognises DeepSeek, Grok, Opus, Haiku, Sonnet, Claude, Qwen, GLM, Kimi, GPT, Gemini, Llama, Mistral and others; registered brands split by generation (HY3 / HY4 / HY), unrecognised models are inferred from their id, anything unjudgeable falls into Others (always sorts last). Families stay flat — no nesting.</p>
+    </div>
+    <div class="card">
+      <span class="kicker">Provider-primary rows</span>
+      <h4>No repeated family name under By family</h4>
+      <p>Under By family the heading already says what the models are, so the row's primary text is the provider name; only when one provider offers several models in the same family does a short id-derived suffix differentiate them. The full model name and description stay in the tooltip.</p>
+    </div>
+    <div class="card">
+      <span class="kicker">Reasoning effort</span>
+      <h4>Exclusive, keyboard-operable</h4>
+      <p>The current model's reasoning levels render as an exclusive, keyboard-operable group ("推理等级" / "Reasoning effort") driven by radio semantics.</p>
+    </div>
+    <div class="card">
+      <span class="kicker">Adaptive footer</span>
+      <h4>One row when it fits</h4>
+      <p>The reasoning group and the agent-teamwork switch share one line when both fit with a 30px gap, and fall back to one row each when they do not — the break is CSS flex wrapping, not a measured pixel threshold.</p>
+    </div>
+    <div class="card">
+      <span class="kicker">Strike-through on balance</span>
+      <h4>Only the model the failing call used</h4>
+      <p>A model whose call failed on insufficient balance, credit, or quota keeps a <code>line-through</code> until a later call for that same model returns anything else. Covers the host's <code>QUOTA</code> / <code>ACCOUNT_QUOTA</code> codes, a provider <code>402</code>, and a <code>429</code> whose body reports an empty balance — a plain rate limit never strikes.</p>
+    </div>
+    <div class="card">
+      <span class="kicker">Theme-aware</span>
+      <h4>Correct in light and dark</h4>
+      <p>Styled with host theme tokens only; looks correct in both light and dark themes, with no third-party styles.</p>
+    </div>
+    <div class="card">
+      <span class="kicker">No build</span>
+      <h4>Plain ES modules</h4>
+      <p>The plugin is plain ES modules with no build step. Tests read <code>client.js</code> directly and drive the real component through a minimal hook runtime to catch crashes, missing sections, and wrong column counts.</p>
+    </div>
+  </div>
+</section>
+
+<div class="wrap"><hr class="rule"></div>
+
+<section class="wrap" id="install">
+  <h2>Install</h2>
+  <p class="sub">This package is a DSH <strong>bundle</strong>. Install it from your DSH profile's plugin manager, or drop it into the profile's bundle directory.</p>
+
+  ${codeBlock("dsh plugin add dsh-model-flatmap")}
+  <p style="color:var(--fg-dim);font-size:14.5px;margin-top:-4px">
+    Or copy it into a profile manually (paths vary by install):
+  </p>
+  ${codeBlock("cp -r . \"<profile>/bundles/dsh-model-flatmap\"")}
+  <p style="color:var(--fg-dim);font-size:14.5px">
+    Then enable or disable it from the profile's plugin list — turning the bundle off touches no native control; the <code>dsh</code> loader reads <code>cordis.patch.yml</code> to mount it.
+  </p>
+
+  <div class="note ok">
+    <strong>Disable to restore.</strong> The host half (<code>index.js</code>) contributes nothing at runtime; the UI shadows the native <code>ModelSelect</code> through a negative priority, so disabling the plugin restores the native control with no residue.
+  </div>
+</section>
+
+<div class="wrap"><hr class="rule"></div>
+
+<section class="wrap" id="layout">
+  <h2>Project layout</h2>
+  <p class="sub">The plugin is light: the host half is almost nil, and all of the UI lives in <code>client.js</code>.</p>
+  ${table(
+    ["Path", "Purpose"],
+    [
+      ["<code>index.js</code>", "Host half — bundle entry, contributes nothing at runtime."],
+      ["<code>client.js</code>", "Browser half — the entire flat picker UI."],
+      ["<code>cordis.patch.yml</code>", "Cordis patch applied by the <code>dsh</code> bundle loader."],
+      ["<code>locale/en.json</code>", "English copy and metadata."],
+      ["<code>locale/zh.json</code>", "Simplified-Chinese copy and metadata."],
+      ["<code>docs/DETAIL.md</code>", "Detailed behaviour specification."],
+      ["<code>test/</code>", "Render-path tests driven through a minimal hook runtime."],
+    ]
+  )}
+</section>
+
+<div class="wrap"><hr class="rule"></div>
+
+<section class="wrap" id="dev">
+  <h2>Development</h2>
+  <p class="sub">Plain ES modules, no build step.</p>
+  ${codeBlock("node --test test/")}
+  <p style="color:var(--fg-dim);font-size:14.5px">
+    Tests read <code>client.js</code> directly and drive the real component through a minimal hook runtime to catch crashes, missing sections, and wrong column counts. The full behaviour spec is in
+    <a href="https://github.com/zuosus/dsh-model-flatmap/blob/main/docs/DETAIL.md">docs/DETAIL.md</a>,
+    and the design decisions are in <a href="https://github.com/zuosus/dsh-model-flatmap/blob/main/DECISIONS.md">DECISIONS.md</a>.
   </p>
 </section>
 `;

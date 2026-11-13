@@ -4,13 +4,17 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { nav, footer, codeBlock, table, ICON, esc } from "./lib/partials.mjs";
-import { indexBodyEn, pluginBodyEn } from "./lib/content-en.mjs";
+import { indexBodyEn, pluginBodyEn, flatmapBodyEn } from "./lib/content-en.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DIST = path.join(HERE, "dist");
 // 版本号只有一个来源：插件自己的 package.json。写死在这里必然漂移
 // （曾经停在 0.7.1，而包已经走到 0.9.x，站点上挂的就是旧号）。
 const VERSION = JSON.parse(readFileSync(path.join(HERE, "..", "package.json"), "utf8")).version;
+// flatmap 的版本号同样只来自它自己的 package.json，避免写死漂移。
+const FLATMAP_VERSION = JSON.parse(
+  readFileSync(path.join(HERE, "..", "..", "dsh-model-flatmap", "package.json"), "utf8")
+).version;
 const ORIGIN = "https://dsh.zuos.us";
 
 // 两个语言的顶部导航。链接都写绝对路径，子目录页也能正确跳转。
@@ -21,6 +25,7 @@ function navLinksFor(locale) {
     { href: `${prefix}/dsh-decision-engine/#points`, label: L ? "决策点" : "Decision points", opt: true },
     { href: `${prefix}/dsh-decision-engine/#providers`, label: "Provider", opt: true },
     { href: `${prefix}/dsh-decision-engine/#verify`, label: L ? "验证" : "Verification", opt: true },
+    { href: `${prefix}/dsh-model-flatmap/#what`, label: "flatmap", opt: true },
     { href: "https://github.com/zuosus/dsh-decision-engine", label: "GitHub" },
   ];
 }
@@ -87,6 +92,7 @@ const indexBody = `
   </p>
   <div class="cta-row">
     <a class="btn btn-primary" href="/dsh-decision-engine/">查看 dsh-decision-engine →</a>
+    <a class="btn" href="/dsh-model-flatmap/">dsh-model-flatmap</a>
     <a class="btn" href="https://github.com/zuosus/dsh-decision-engine">源码</a>
   </div>
 </div>
@@ -97,7 +103,7 @@ const indexBody = `
 
 <section class="wrap">
   <h2>项目</h2>
-  <p class="sub">目前收录 1 个插件。</p>
+  <p class="sub">目前收录 2 个插件。</p>
 
   <div class="grid">
     <a class="project" href="/dsh-decision-engine/">
@@ -119,6 +125,29 @@ const indexBody = `
       <div class="toc">
         <span class="badge green">默认 shadow，不打断</span>
         <span class="badge blue">任意决策端点</span>
+        <span class="badge gray">MIT</span>
+      </div>
+    </a>
+
+    <a class="project" href="/dsh-model-flatmap/">
+      <div class="project-head">
+        ${ICON}
+        <div>
+          <h3>dsh-model-flatmap</h3>
+        </div>
+        <div class="nav-spacer"></div>
+        <span class="ver">v${FLATMAP_VERSION}</span>
+      </div>
+      <p>
+        一个平铺、无二级菜单的 DSH 模型选择器：把会话输入框里的
+        <code>conversation.input.model</code> 控件换成一个平面面板，所有模型与推理等级
+        都在同一平面上，没有层层弹层。跨 provider 的全局搜索、按 provider / 按 family
+        两种分组、推理等级与智能体协作开关同屏可见；额度不足的模型自动加删除线。
+        纯浏览器端、零构建、关闭即复原原生控件。
+      </p>
+      <div class="toc">
+        <span class="badge green">平铺无二级菜单</span>
+        <span class="badge blue">跟随主题</span>
         <span class="badge gray">MIT</span>
       </div>
     </a>
@@ -630,6 +659,200 @@ const pluginBody = `
 `;
 
 /* ------------------------------------------------------------------ *
+ * flatmap 插件页（中文）
+ * ------------------------------------------------------------------ */
+
+const flatmapBody = `
+<div class="wrap hero">
+  <span class="eyebrow"><span class="dot"></span> DeepSeek Harness 插件 · v${FLATMAP_VERSION} · MIT</span>
+  <h1>dsh-model-flatmap</h1>
+  <p class="lede">
+    一个<strong>平铺、无二级菜单</strong>的模型选择器：把会话输入框里的
+    <code>conversation.input.model</code> 控件换成一个平面面板，<strong>所有模型与推理等级都在同一平面上</strong>，
+    没有层层弹层。模型网格、当前模型的推理等级、智能体协作开关同时可见。
+  </p>
+  <div class="cta-row">
+    <a class="btn btn-primary" href="#install">安装</a>
+    <a class="btn" href="#what">它是什么</a>
+    <a class="btn" href="https://github.com/zuosus/dsh-model-flatmap">GitHub</a>
+  </div>
+  <div class="toc">
+    <a href="#what">它是什么</a>
+    <a href="#features">功能</a>
+    <a href="#install">安装</a>
+    <a href="#layout">目录结构</a>
+    <a href="#dev">开发</a>
+  </div>
+</div>
+
+<div class="wrap">
+  <hr class="rule">
+</div>
+
+<section class="wrap" id="what">
+  <h2>它是什么</h2>
+  <p class="sub">
+    <strong>纯浏览器端</strong>的 DSH 插件。它替换 composer 里的
+    <code>conversation.input.model</code> 控件，渲染一个搜索式的平铺网格，
+    把模型目录、当前模型的推理等级、智能体协作开关全部摊在一块表面上。
+  </p>
+
+  <div class="stats">
+    <div class="stat"><span class="n">0</span><span class="l">个二级菜单</span></div>
+    <div class="stat"><span class="n">320px</span><span class="l">面板高度上限</span></div>
+    <div class="stat"><span class="n">2</span><span class="l">种分组模式</span></div>
+    <div class="stat"><span class="n">shadow</span><span class="l">禁用即复原原生</span></div>
+  </div>
+
+  <div class="grid grid-2">
+    <div class="card">
+      <span class="kicker">只走公开 Client API</span>
+      <h4>不贡献任何宿主能力</h4>
+      <p>
+        插件<strong>只通过公开的 Client API 读写数据</strong>——每个会话的模型目录、
+        协作设置，以及宿主的语言文案。宿主部分（<code>index.js</code>）不提供任何服务、
+        工具或事件；UI 全部在 <code>client.js</code> 中，注册时使用负优先级以在启用期间
+        覆盖原生的 <code>ModelSelect</code>。<strong>关闭插件即可无残留地恢复原生控件。</strong>
+      </p>
+    </div>
+    <div class="card">
+      <span class="kicker">一块平面</span>
+      <h4>没有层层弹层</h4>
+      <p>
+        触发器打开一个高度上限 320px 的面板。头部、推理等级行与协作行固定常驻，
+        只有模型网格可滚动——所有信息一次看完，不用在弹层之间来回钻。
+      </p>
+    </div>
+  </div>
+
+  <div class="note">
+    <strong>一图胜千言。</strong>运行中的面板——模型平铺网格、当前模型的推理等级，
+    以及智能体协作开关，全部位于同一平面上：
+    <a href="https://github.com/zuosus/dsh-model-flatmap/blob/main/docs/model-picker.jpeg">docs/model-picker.jpeg</a>。
+  </div>
+</section>
+
+<div class="wrap"><hr class="rule"></div>
+
+<section class="wrap" id="features">
+  <h2>功能</h2>
+  <p class="sub">
+    没有嵌套的二级菜单，取而代之的是一块可搜索、可分组、可跟随主题的平面。
+  </p>
+
+  <div class="grid grid-3">
+    <div class="card">
+      <span class="kicker">全局搜索</span>
+      <h4>跨 provider 与 family 过滤</h4>
+      <p>过滤后为空的组会被丢弃，不会留下空标题。命中排序：前缀优先，其次子串，最后有序字符匹配。</p>
+    </div>
+    <div class="card">
+      <span class="kicker">分词搜索</span>
+      <h4>每个 token 都要命中</h4>
+      <p>空白把查询拆成多个 token，每个 token 都要在名称中命中；一次命中的排序取决于最弱的那一个 token。</p>
+    </div>
+    <div class="card">
+      <span class="kicker">按 provider 整体</span>
+      <h4>命中 provider 即保留整目录</h4>
+      <p>一个查询若命中某个 provider（其 id、目录名或分组标签），该 provider 的整个目录都会保留在网格中。</p>
+    </div>
+    <div class="card">
+      <span class="kicker">两种分组</span>
+      <h4>按 provider / 按 family</h4>
+      <p>分段控件在「按 provider」与「按 family」之间切换。分组与搜索彼此独立，可任意组合。</p>
+    </div>
+    <div class="card">
+      <span class="kicker">模型家族</span>
+      <h4>内置词典 + 生成代拆分</h4>
+      <p>识别 DeepSeek、Grok、Opus、Haiku、Sonnet、Claude、Qwen、GLM、Kimi、GPT、Gemini、Llama、Mistral 等；已注册品牌按 generation 分节（HY3 / HY4 / HY），未覆盖模型按 id 推断，无法判断的归入 Others（永远排最后）。家族保持平铺，不嵌套。</p>
+    </div>
+    <div class="card">
+      <span class="kicker">row 以 provider 为主</span>
+      <h4>按 family 下不重复家族名</h4>
+      <p>「按 family」时标题已说明模型是什么，行里主文本改为 provider 名；仅当同一 provider 同 family 下有多个模型时才补一个由 id 推出的短后缀。完整模型名 / 描述保留在 tooltip。</p>
+    </div>
+    <div class="card">
+      <span class="kicker">推理等级</span>
+      <h4>互斥、可键盘操作</h4>
+      <p>当前模型的推理等级渲染为一个互斥、可键盘操作的分组（"推理等级" / "Reasoning effort"），基于 radio 语义。</p>
+    </div>
+    <div class="card">
+      <span class="kicker">自适应底栏</span>
+      <h4>放得下就共用一行</h4>
+      <p>推理等级组与智能体协作开关在放得下（中间至少 30px）时共用一行，放不下时各自占一行——换行由 CSS flex 换行决定，不靠 JS 量像素。</p>
+    </div>
+    <div class="card">
+      <span class="kicker">额度不足划删除线</span>
+      <h4>失败那次用的模型才划线</h4>
+      <p>某模型调用因额度 / 余额 / 信用不足而失败后，该行文字带 <code>line-through</code>，直到同模型下一次调用返回非额度不足的结果才去掉。覆盖宿主的 <code>QUOTA</code> / <code>ACCOUNT_QUOTA</code> 代码、provider 的 <code>402</code>，以及正文说明余额不足的 <code>429</code>；纯限流的 429 不会划线。</p>
+    </div>
+    <div class="card">
+      <span class="kicker">跟随主题</span>
+      <h4>浅色 / 深色都正确</h4>
+      <p>仅使用宿主主题令牌着色，在浅色与深色主题下都正确，不引入第三方样式。</p>
+    </div>
+    <div class="card">
+      <span class="kicker">零构建</span>
+      <h4>纯 ES 模块</h4>
+      <p>插件是纯 ES 模块，没有构建步骤。测试直接读取 <code>client.js</code> 并通过最小化 hook 运行时驱动真实组件，捕获崩溃、缺失区块和错误的列数。</p>
+    </div>
+  </div>
+</section>
+
+<div class="wrap"><hr class="rule"></div>
+
+<section class="wrap" id="install">
+  <h2>安装</h2>
+  <p class="sub">本包是一个 DSH <strong>bundle</strong>。从 DSH 配置文件的插件管理器安装，或手动放入 profile 的 bundle 目录。</p>
+
+  ${codeBlock("dsh plugin add dsh-model-flatmap")}
+  <p style="color:var(--fg-dim);font-size:14.5px;margin-top:-4px">
+    或手动装进 profile（路径因安装而异）：
+  </p>
+  ${codeBlock("cp -r . \"<profile>/bundles/dsh-model-flatmap\"")}
+  <p style="color:var(--fg-dim);font-size:14.5px">
+    然后在 profile 的插件列表里启用或停用本插件——关闭 bundle 不会触碰任何原生控件，<code>dsh</code> 加载器读取 <code>cordis.patch.yml</code> 完成挂载。
+  </p>
+
+  <div class="note ok">
+    <strong>禁用即复原。</strong>宿主部分（<code>index.js</code>）运行时不提供任何能力，UI 通过负优先级覆盖原生 <code>ModelSelect</code>；关闭插件后原生控件无残留地恢复。
+  </div>
+</section>
+
+<div class="wrap"><hr class="rule"></div>
+
+<section class="wrap" id="layout">
+  <h2>目录结构</h2>
+  <p class="sub">插件很轻：宿主部分几乎为零，全部 UI 集中在 <code>client.js</code>。</p>
+  ${table(
+    ["路径", "用途"],
+    [
+      ["<code>index.js</code>", "宿主部分——bundle 入口，运行时不提供任何能力。"],
+      ["<code>client.js</code>", "浏览器部分——完整的平铺选择器 UI。"],
+      ["<code>cordis.patch.yml</code>", "由 <code>dsh</code> bundle 加载器应用的 Cordis 补丁。"],
+      ["<code>locale/en.json</code>", "英文文案与元数据。"],
+      ["<code>locale/zh.json</code>", "简体中文文案与元数据。"],
+      ["<code>docs/DETAIL.md</code>", "详细行为规格。"],
+      ["<code>test/</code>", "通过最小化 hook 运行时驱动的渲染路径测试。"],
+    ]
+  )}
+</section>
+
+<div class="wrap"><hr class="rule"></div>
+
+<section class="wrap" id="dev">
+  <h2>开发</h2>
+  <p class="sub">纯 ES 模块，无需构建步骤。</p>
+  ${codeBlock("node --test test/")}
+  <p style="color:var(--fg-dim);font-size:14.5px">
+    测试直接读取 <code>client.js</code>，并通过最小化 hook 运行时驱动真实组件，以捕获崩溃、缺失区块和错误的列数。完整行为规格见
+    <a href="https://github.com/zuosus/dsh-model-flatmap/blob/main/docs/DETAIL.md">docs/DETAIL.md</a>，
+    设计决策见 <a href="https://github.com/zuosus/dsh-model-flatmap/blob/main/DECISIONS.md">DECISIONS.md</a>。
+  </p>
+</section>
+`;
+
+/* ------------------------------------------------------------------ *
  * 渲染
  * ------------------------------------------------------------------ */
 
@@ -655,7 +878,9 @@ const favicon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
 if (existsSync(DIST)) await rm(DIST, { recursive: true, force: true });
 await mkdir(path.join(DIST, "assets"), { recursive: true });
 await mkdir(path.join(DIST, "dsh-decision-engine"), { recursive: true });
+await mkdir(path.join(DIST, "dsh-model-flatmap"), { recursive: true });
 await mkdir(path.join(DIST, "en", "dsh-decision-engine"), { recursive: true });
+await mkdir(path.join(DIST, "en", "dsh-model-flatmap"), { recursive: true });
 
 await copyFile(path.join(HERE, "assets/style.css"), path.join(DIST, "assets/style.css"));
 await copyFile(path.join(HERE, "assets/app.js"), path.join(DIST, "assets/app.js"));
@@ -668,11 +893,21 @@ const ZH_PROJ = {
   self: "/dsh-decision-engine/",
   alt: { path: "/en/dsh-decision-engine/", label: "English" },
 };
+const ZH_FLATMAP = {
+  lang: "zh-CN",
+  self: "/dsh-model-flatmap/",
+  alt: { path: "/en/dsh-model-flatmap/", label: "English" },
+};
 const EN_HOME = { lang: "en", self: "/en/", alt: { path: "/", label: "中文" } };
 const EN_PROJ = {
   lang: "en",
   self: "/en/dsh-decision-engine/",
   alt: { path: "/dsh-decision-engine/", label: "中文" },
+};
+const EN_FLATMAP = {
+  lang: "en",
+  self: "/en/dsh-model-flatmap/",
+  alt: { path: "/dsh-model-flatmap/", label: "中文" },
 };
 
 await writeFile(
@@ -712,6 +947,26 @@ await writeFile(
     "A cheap judgement layer for DeepSeek Harness: sends state plus a set of structured questions to a small decision model and uses the probability-bearing answers to allow, ask, block, reroute or skip. All eight decision points implemented; shadow mode by default.",
     pluginBodyEn,
     EN_PROJ
+  )
+);
+
+await writeFile(
+  path.join(DIST, "dsh-model-flatmap/index.html"),
+  page(
+    "dsh-model-flatmap — 平铺的 DSH 模型选择器",
+    "一个平铺、无二级菜单的 DSH 模型选择器：把会话输入框的 model 控件换成一个平面面板，所有模型与推理等级都在同一平面上，没有层层弹层。跨 provider 全局搜索、按 provider / 按 family 两分组、额度不足自动划删除线，纯浏览器端、零构建。",
+    flatmapBody,
+    ZH_FLATMAP
+  )
+);
+
+await writeFile(
+  path.join(DIST, "en/dsh-model-flatmap/index.html"),
+  page(
+    "dsh-model-flatmap — a flat model picker for DeepSeek Harness",
+    "A flat, two-level-free model picker for DeepSeek Harness: replaces the composer model control with one surface where every model and reasoning level is visible at once, no nested popovers. Cross-provider search, by-provider / by-family grouping, strike-through on out-of-balance models. Browser-only, no build step.",
+    flatmapBodyEn,
+    EN_FLATMAP
   )
 );
 

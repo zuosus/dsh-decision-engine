@@ -26,8 +26,8 @@ site/
 
 | 路径 | 语言 |
 |---|---|
-| `/`、`/dsh-decision-engine/` | 中文（默认） |
-| `/en/`、`/en/dsh-decision-engine/` | English |
+| `/`、`/dsh-decision-engine/`、`/dsh-model-flatmap/` | 中文（默认） |
+| `/en/`、`/en/dsh-decision-engine/`、`/en/dsh-model-flatmap/` | English |
 
 无尾斜杠的目录访问返回 308。每页都有 `canonical` + 双向 `hreflang`，
 导航右侧是「中文 / English」按钮与太阳/月亮主题按钮。
@@ -172,10 +172,10 @@ Worker——部署只是一次脚本上传，运行时用 `DecompressionStream` 
 
 ## 加一个新项目
 
-1. 在 `build.mjs` 里加一段 `xxxBody`，并写进 `dist/xxx/index.html`；
-2. 在首页 `indexBody` 的项目列表里加一张卡片；
-3. `make-bundle.mjs` 会把 `/xxx` 自动加进目录重定向列表吗 —— 不会，
-   需要手动把新目录加进 `bundle` 里的 `DIRS` 数组。
+1. 在 `build.mjs` 里加一段 `xxxBody`（中文）并写进 `dist/xxx/index.html`；英文版放 `lib/content-en.mjs` 的 `xxxBodyEn`，由 `build.mjs` 顶部 import；
+2. 在首页 `indexBody`（中文）与 `indexBodyEn`（英文）的项目列表里各加一张卡片，并把「目前收录 N 个插件」的计数 +1；
+3. 在 `build.mjs` 顶部 `navLinksFor` 里给新插件加一条导航（`${prefix}/xxx/#...`），双语共用；
+4. `make-bundle.mjs` 会从 `dist/` 自动推导目录重定向列表（含 `/xxx`、`/en/xxx`），无需手动加 `DIRS`。
 
 ## 注意
 
