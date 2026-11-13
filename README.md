@@ -2,50 +2,49 @@
 
 ![dsh-decision-engine — decision engine for DeepSeek Harness](docs/assets/hero.jpeg)
 
-**提供免费决策模型 / Free decision model usage provided**
+**Free decision model usage provided**
 
 [website](https://dsh.zuos.us/dsh-decision-engine/) ·
 [config.example.yml](config.example.yml) · [DECISIONS.md](DECISIONS.md)
 
-给 DeepSeek Harness 的决策层：主模型动手之前，用一个便宜的决策小模型做结构化判断。
-A judgement layer for DeepSeek Harness: a cheap decision model judges before the main model acts.
+[简体中文](./README.zh.md)
 
-## 功能 / Features
+A judgement layer for DeepSeek Harness: a cheap decision model judges before the
+main model acts.
 
-**八个决策点 / Eight decision points**
+## Features
 
-- 工具授权 / tool authorization
-- 模型路由 / model routing
-- 子任务分派 / delegation
-- 上下文压缩 / compaction
-- 轮次延续 / turn continuation
-- 检索必要性 / retrieval necessity
-- 技能选择 / skill selection
-- 思维链翻译 / COT translation gate
+**Eight decision points**
 
-**三态 / Modes**：关闭 off · 观察 observe · 生效 enforce
+- tool authorization
+- model routing
+- delegation
+- compaction
+- turn continuation
+- retrieval necessity
+- skill selection
+- COT translation gate
 
-**决策服务 / Providers**：system one · bamboonode · 硅基流动 SiliconFlow（国内 / 国际）·
+**Modes**: off · observe · enforce
+
+**Providers**: system one · bamboonode · 硅基流动 SiliconFlow (CN / Global) ·
 Perplexity · OpenRouter · custom base URL
 
-**人工审核比例 / Review tolerance**：自治 autonomous · 轻松 relaxed · 默认 default ·
-谨慎 cautious
+**Review tolerance**: autonomous · relaxed · default · cautious
 
-**界面 / UI**：配置页（四个可折叠分组）/ config page with collapsible sections ·
-决策历史标签页 / Decisions tab · 统计与对比 / stats · 审批卡正文可读化 / readable approval card
+**UI**: config page with collapsible sections · Decisions tab · stats ·
+readable approval card
 
-| 配置页 / Config page | 决策历史 / Decisions tab |
+| Config page | Decisions tab |
 |---|---|
 | ![config page](docs/assets/config-page.png) | ![decisions tab](docs/assets/decisions-tab.png) |
 
-> 截图拍于分组折叠（DEC-051）之前的版式，当前界面为四个可折叠分组。 /
 > Screenshots predate the collapsible-section layout (DEC-051).
 
-**省 token / Token saving**：精确缓存 / exact cache · 只读工具放行 / read-only tools bypass ·
-state 截断 / state trimming
+**Token saving**: exact cache · read-only tools bypass · state trimming
 
-**可靠性 / Reliability**：默认只记录不拦截 / shadow by default · 任何异常 fail-open 放行 /
-fail open on any error · 超时降级 / timeout degrades · 匿名统计可关 / stats can be turned off
+**Reliability**: shadow by default · fail open on any error · timeout degrades ·
+stats can be turned off
 
 ## License
 
