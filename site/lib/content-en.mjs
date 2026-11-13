@@ -1,19 +1,9 @@
 // 英文版页面内容。结构与 content（build.mjs 中的中文段落）逐节对应，
 // 章节 id 保持一致（#what / #install / #config / #points / #providers /
 // #tokens / #failopen / #verify），中文页的锚点链接可以直接复用。
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { codeBlock, table, figure, fact, DECISION_ICON, FLATMAP_ICON } from "./partials.mjs";
 
-// 与 build.mjs 同一个来源：插件 package.json 的 version。
-const VERSION = JSON.parse(
-  readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "package.json"), "utf8"),
-).version;
-
-// flatmap 版本号（与 build.mjs 保持一致，写死）：构建环境只拉取本仓库，读不到
-// 平级的 dsh-model-flatmap/package.json。升级 flatmap 时和 build.mjs 一起同步。
-const FLATMAP_VERSION = "1.0.0";
+// 页面不展示版本号：版本随时会更新，不显示以免挂旧号。
 
 /* ------------------------------------------------------------------ *
  * Home (en)
@@ -41,7 +31,6 @@ export const indexBodyEn = `
       ${DECISION_ICON}
       <div>
         <h3>dsh-decision-engine</h3>
-        <span class="ver">v${VERSION}</span>
         <p>
           Before the main model acts, a cheap small model judges — allow, ask,
           block, switch to a cheaper model, or skip an expensive call. Eight
@@ -60,7 +49,6 @@ export const indexBodyEn = `
       ${FLATMAP_ICON}
       <div>
         <h3>dsh-model-flatmap</h3>
-        <span class="ver">v${FLATMAP_VERSION}</span>
         <p>
           Replaces the model picker with one flat panel: every model and
           reasoning level at once, no submenus, with search and grouping.
@@ -229,7 +217,7 @@ const degradeTableEn = table(
 
 export const pluginBodyEn = `
 <div class="wrap hero">
-  <span class="eyebrow"><span class="dot"></span> DeepSeek Harness plugin · v${VERSION} · MIT</span>
+  <span class="eyebrow"><span class="dot"></span> DeepSeek Harness plugin · MIT</span>
   <h1>dsh-decision-engine</h1>
   <p class="lede">
     Before the main model acts, a <strong>cheap small model</strong> answers four
@@ -447,7 +435,7 @@ ${figure("/assets/promo.jpeg", "dsh-decision-engine promo image", "A small model
 
 export const flatmapBodyEn = `
 <div class="wrap hero">
-  <span class="eyebrow"><span class="dot"></span> DeepSeek Harness plugin · v${FLATMAP_VERSION} · MIT</span>
+  <span class="eyebrow"><span class="dot"></span> DeepSeek Harness plugin · MIT</span>
   <h1>dsh-model-flatmap</h1>
   <p class="lede">
     Replaces the composer model picker with <strong>one flat panel</strong>:

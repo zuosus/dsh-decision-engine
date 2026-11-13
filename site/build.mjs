@@ -1,6 +1,6 @@
 // 把站点源文件渲染成 dist/ 下的静态文件。运行：node site/build.mjs
 import { mkdir, writeFile, copyFile, rm } from "node:fs/promises";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { nav, footer, codeBlock, table, figure, fact, DECISION_ICON, FLATMAP_ICON, esc } from "./lib/partials.mjs";
@@ -8,13 +8,7 @@ import { indexBodyEn, pluginBodyEn, flatmapBodyEn } from "./lib/content-en.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DIST = path.join(HERE, "dist");
-// 版本号只有一个来源：插件自己的 package.json。写死在这里必然漂移
-// （曾经停在 0.7.1，而包已经走到 0.9.x，站点上挂的就是旧号）。
-const VERSION = JSON.parse(readFileSync(path.join(HERE, "..", "package.json"), "utf8")).version;
-// flatmap 版本号写死在这里：构建环境（Cloudflare Workers Builds）只拉取本仓库
-// (dsh-decision-engine)，没有平级的 dsh-model-flatmap 仓库，无法在构建期读到它的
-// package.json。升级 flatmap 时记得手动同步这个数字（见 DEC 记录）。
-const FLATMAP_VERSION = "1.0.0";
+// 页面不展示版本号：版本随时会更新，写死/读取都会立刻漂移，索性不显示。
 const ORIGIN = "https://dsh.zuos.us";
 
 // 两个语言的顶部导航。链接都写绝对路径，子目录页也能正确跳转。
@@ -101,7 +95,6 @@ const indexBody = `
       ${DECISION_ICON}
       <div>
         <h3>dsh-decision-engine</h3>
-        <span class="ver">v${VERSION}</span>
         <p>
           主模型动手前，用一个便宜的小模型做判断，决定放行、询问、拦截，
           或换便宜模型、跳过一次昂贵调用。八个决策点逐个可切换。
@@ -119,7 +112,6 @@ const indexBody = `
       ${FLATMAP_ICON}
       <div>
         <h3>dsh-model-flatmap</h3>
-        <span class="ver">v${FLATMAP_VERSION}</span>
         <p>
           把模型选择器换成一块平铺面板：所有模型与推理等级一次看完，
           没有二级菜单，支持搜索与分组。关闭即复原原生控件。
@@ -273,7 +265,7 @@ const degradeTable = table(
 
 const pluginBody = `
 <div class="wrap hero">
-  <span class="eyebrow"><span class="dot"></span> DeepSeek Harness 插件 · v${VERSION} · MIT</span>
+  <span class="eyebrow"><span class="dot"></span> DeepSeek Harness 插件 · MIT</span>
   <h1>dsh-decision-engine</h1>
   <p class="lede">
     主模型动手前，先让一个<strong>便宜的小模型</strong>回答四个问题——
@@ -477,7 +469,7 @@ ${figure("/assets/promo.jpeg", "dsh-decision-engine 宣传图", "主模型动手
 
 const flatmapBody = `
 <div class="wrap hero">
-  <span class="eyebrow"><span class="dot"></span> DeepSeek Harness 插件 · v${FLATMAP_VERSION} · MIT</span>
+  <span class="eyebrow"><span class="dot"></span> DeepSeek Harness 插件 · MIT</span>
   <h1>dsh-model-flatmap</h1>
   <p class="lede">
     把输入框里的模型选择器换成<strong>一块平铺面板</strong>：所有模型、推理等级、

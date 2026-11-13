@@ -275,10 +275,6 @@ h3 { font-size: 19px; margin: 34px 0 10px; font-weight: 640; }
 .project p { margin: 0 0 14px; color: var(--fg-dim); max-width: 66ch; }
 .project .go { color: var(--accent-3); font-size: 14px; white-space: nowrap; padding-top: 6px; }
 .project:hover .go { text-decoration: underline; }
-.project .ver {
-  font-family: var(--mono); font-size: 12px; color: var(--fg-faint);
-  display: block; margin-bottom: 10px;
-}
 @media (max-width: 640px) {
   .project { grid-template-columns: 40px 1fr; gap: 14px; }
   .project > svg { width: 36px; height: 36px; }
