@@ -53,7 +53,7 @@ const rec = (over = {}) =>
   buildRecord({
     ts: "2026-10-20T10:00:00.000Z",
     provider: "bamboonode",
-    model: "startlux-decision-27b-autothink",
+    model: "startlux-decision-v1.1-27b-autothink",
     point: "authorize",
     mode: "observe",
     action: "delegate",
@@ -567,7 +567,7 @@ test("回填：从旧遥测推算历史统计，并标明是推算值", async ()
         JSON.stringify({
           ts: "2026-10-27T10:00:00.000Z",
           point: "authorize",
-          model: "startlux-decision-27b-autothink",
+          model: "startlux-decision-v1.1-27b-autothink",
           action: "delegate",
           latencyMs: 640,
           inputTokens: 2000,
@@ -588,7 +588,7 @@ test("回填：从旧遥测推算历史统计，并标明是推算值", async ()
     assert.equal(records.length, 2, "降级记录也要回填（否则历史降级凭空消失）");
     assert.equal(records[0].estimated, true);
     assert.equal(records[0].provider, "bamboonode", "老遥测的 startlux 模型按模型名反推为 bamboonode");
-    assert.equal(records[0].model, "startlux-decision-27b-autothink");
+    assert.equal(records[0].model, "startlux-decision-v1.1-27b-autothink");
     assert.equal(records[0].inputTokens, 2000);
     assert.equal(records[0].durationMs, 640);
     assert.equal(records[0].outputTokens, 0, "老遥测没有 output token");
@@ -802,7 +802,7 @@ test("回填：缓存命中记的是「省下的一次请求」，不是实际�
       JSON.stringify({
         ts: "2026-10-27T10:00:00.000Z",
         point: "authorize",
-        model: "startlux-decision-27b-autothink",
+        model: "startlux-decision-v1.1-27b-autothink",
         action: "delegate",
         latencyMs: 0,
         cached: true,
@@ -1088,7 +1088,7 @@ test("迁移：已经有 mode 的记录不被覆盖", async () => {
 // ------------------------------------------- 老遥测按模型名反推 provider
 
 test("inferLegacyProvider：startlux→bamboonode、Kev/SemIf→硅基流动，其余 unknown", () => {
-  assert.equal(inferLegacyProvider("startlux-decision-27b-autothink"), "bamboonode");
+  assert.equal(inferLegacyProvider("startlux-decision-v1.1-27b-autothink"), "bamboonode");
   assert.equal(inferLegacyProvider("STARTLUX-XYZ"), "bamboonode", "大小写不敏感");
   assert.equal(inferLegacyProvider("Kev-4B"), "siliconflow");
   assert.equal(inferLegacyProvider("kev-4b"), "siliconflow", "大小写不敏感");
@@ -1104,7 +1104,7 @@ test("回填：startlux 模型的记录反推为 bamboonode，不再 unknown", a
     await writeFile(
       join(dir, "telemetry.jsonl"),
       [
-        JSON.stringify({ ts: "2026-10-27T10:00:00.000Z", point: "authorize", model: "startlux-decision-27b-autothink", action: "delegate", latencyMs: 640, inputTokens: 2000 }),
+        JSON.stringify({ ts: "2026-10-27T10:00:00.000Z", point: "authorize", model: "startlux-decision-v1.1-27b-autothink", action: "delegate", latencyMs: 640, inputTokens: 2000 }),
         JSON.stringify({ ts: "2026-10-27T10:01:00.000Z", point: "authorize", model: "Kev-4B", action: "delegate", latencyMs: 471, inputTokens: 2201 }),
         JSON.stringify({ ts: "2026-10-27T10:02:00.000Z", point: "authorize", model: "gpt-4o", action: "delegate", latencyMs: 500, inputTokens: 2000 }),
       ].join("\n"),
@@ -1126,7 +1126,7 @@ test("迁移：把已落盘的 estimated 记录按模型名补回 provider（只
       join(dir, "stats.jsonl"),
       [
         // 历史回填记录：startlux → bamboonode。
-        JSON.stringify({ ts: "2026-10-23T06:30:46.613Z", provider: "unknown", model: "startlux-decision-27b-autothink", point: "authorize", action: "delegate", inputTokens: 2565, outputTokens: 0, durationMs: 640, baseInputTokens: 2565, baseOutputTokens: 0, baseDurationMs: 640, inputSource: "api", outputSource: "unknown", estimated: true }),
+        JSON.stringify({ ts: "2026-10-23T06:30:46.613Z", provider: "unknown", model: "startlux-decision-v1.1-27b-autothink", point: "authorize", action: "delegate", inputTokens: 2565, outputTokens: 0, durationMs: 640, baseInputTokens: 2565, baseOutputTokens: 0, baseDurationMs: 640, inputSource: "api", outputSource: "unknown", estimated: true }),
         // 历史回填记录：Kev → siliconflow。
         JSON.stringify({ ts: "2026-10-23T06:30:47.166Z", provider: "unknown", model: "Kev-4B", point: "authorize", action: "delegate", inputTokens: 2201, outputTokens: 0, durationMs: 471, baseInputTokens: 2201, baseOutputTokens: 0, baseDurationMs: 471, inputSource: "api", outputSource: "unknown", estimated: true }),
         // 历史回填记录：匹配不上 → 保持 unknown。
@@ -1157,7 +1157,7 @@ test("迁移：降级记录的 unknown model 回落到 provider 默认模型（�
     await writeFile(
       join(dir, "stats.jsonl"),
       [
-        // 降级记录：bamboonode 且 model 空 → 回落 startlux-decision-27b-autothink。
+        // 降级记录：bamboonode 且 model 空 → 回落 startlux-decision-v1.1-27b-autothink。
         JSON.stringify({ ts: "2026-10-27T08:00:00.000Z", provider: "bamboonode", model: "unknown", point: "authorize", action: "degraded", inputTokens: 0, outputTokens: 0, durationMs: 8000, degraded: true, inputSource: "unknown", outputSource: "unknown" }),
         // 降级记录：siliconflow 且 model 空 → 回落 Kev-4B。
         JSON.stringify({ ts: "2026-10-27T08:01:00.000Z", provider: "siliconflow", model: "unknown", point: "authorize", action: "degraded", inputTokens: 0, outputTokens: 0, durationMs: 8000, degraded: true, inputSource: "unknown", outputSource: "unknown" }),
@@ -1172,7 +1172,7 @@ test("迁移：降级记录的 unknown model 回落到 provider 默认模型（�
     const repaired = await store.repairLegacyProviderOnce();
     assert.equal(repaired, 2, "两条降级空 model 应被补回默认模型");
     const records = await store.read();
-    assert.equal(records[0].model, "startlux-decision-27b-autothink", "bamboonode 降级回落到默认模型");
+    assert.equal(records[0].model, "startlux-decision-v1.1-27b-autothink", "bamboonode 降级回落到默认模型");
     assert.equal(records[1].model, "Kev-4B", "siliconflow 降级回落到默认模型");
     assert.equal(records[2].model, "Kev-4B", "已正常的 model 不被覆盖");
     assert.equal(records[3].model, "unknown", "非降级的空 model 不动");
@@ -1198,7 +1198,7 @@ test("providerOfTelemetryEntry：按可靠度取 provider（字段→extra→end
     "siliconflow",
   );
   // 4. 老遥测最后的手段：按模型名反推。
-  assert.equal(providerOfTelemetryEntry({}, "startlux-decision-27b-autothink"), "bamboonode");
+  assert.equal(providerOfTelemetryEntry({}, "startlux-decision-v1.1-27b-autothink"), "bamboonode");
   // 全无线索 → unknown（绝不猜）。
   assert.equal(providerOfTelemetryEntry({}, "unknown"), "unknown");
   assert.equal(providerOfTelemetryEntry({ extra: { endpoint: "https://my-own.box/v1" } }, "unknown"), "unknown");
@@ -1215,7 +1215,7 @@ test("providerByEndpoint：只认内置预设的主机名，自建地址不猜",
 });
 
 test("defaultModelOf：取 provider 的默认模型，没有则 unknown", () => {
-  assert.equal(defaultModelOf("bamboonode"), "startlux-decision-27b-autothink");
+  assert.equal(defaultModelOf("bamboonode"), "startlux-decision-v1.1-27b-autothink");
   assert.equal(defaultModelOf("siliconflow"), "Kev-4B");
   assert.equal(defaultModelOf("custom"), "unknown", "custom 没有默认模型");
   assert.equal(defaultModelOf("unknown"), "unknown");
@@ -1253,14 +1253,14 @@ test("回填：降级记录落到服务商的默认模型，不自成「provider
     await writeFile(
       join(dir, "telemetry.jsonl"),
       [
-        JSON.stringify({ ts: "2026-10-27T10:00:00.000Z", point: "authorize", provider: "bamboonode", model: "startlux-decision-27b-autothink", action: "delegate", latencyMs: 500, inputTokens: 100 }),
+        JSON.stringify({ ts: "2026-10-27T10:00:00.000Z", point: "authorize", provider: "bamboonode", model: "startlux-decision-v1.1-27b-autothink", action: "delegate", latencyMs: 500, inputTokens: 100 }),
         JSON.stringify({ ts: "2026-10-27T10:01:00.000Z", point: "authorize", provider: "bamboonode", action: "degraded", detail: "timeout", latencyMs: 8000 }),
       ].join("\n"),
       "utf8",
     );
     const rows = await backfillFromTelemetry({ dir });
-    assert.equal(rows[0].model, "startlux-decision-27b-autothink");
-    assert.equal(rows[1].model, "startlux-decision-27b-autothink", "降级记录用同一个模型名");
+    assert.equal(rows[0].model, "startlux-decision-v1.1-27b-autothink");
+    assert.equal(rows[1].model, "startlux-decision-v1.1-27b-autothink", "降级记录用同一个模型名");
     assert.equal(rows[0].model, rows[1].model, "同一服务商的两条记录并到同一行");
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -1289,7 +1289,7 @@ test("迁移：按时间戳与遥测对上，补回真实记录里 unknown 的 p
     assert.equal(repaired, 2, "补回 provider 与 model 各算一次改动");
     const records = await store.read();
     assert.equal(records[0].provider, "bamboonode");
-    assert.equal(records[0].model, "startlux-decision-27b-autothink", "补回 provider 后落到默认模型");
+    assert.equal(records[0].model, "startlux-decision-v1.1-27b-autothink", "补回 provider 后落到默认模型");
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -1348,7 +1348,7 @@ test("迁移：老回填行的 point=unknown 按时间戳与遥测对上后补�
     await writeFile(
       join(dir, "stats.jsonl"),
       [
-        JSON.stringify({ ts: "2026-10-23T06:30:46.613Z", provider: "bamboonode", model: "startlux-decision-27b-autothink", point: "unknown", action: "delegate", detail: "delegate", inputTokens: 2000, outputTokens: 0, durationMs: 640, baseInputTokens: 2000, baseOutputTokens: 0, baseDurationMs: 640, inputSource: "api", outputSource: "unknown", estimated: true }),
+        JSON.stringify({ ts: "2026-10-23T06:30:46.613Z", provider: "bamboonode", model: "startlux-decision-v1.1-27b-autothink", point: "unknown", action: "delegate", detail: "delegate", inputTokens: 2000, outputTokens: 0, durationMs: 640, baseInputTokens: 2000, baseOutputTokens: 0, baseDurationMs: 640, inputSource: "api", outputSource: "unknown", estimated: true }),
       ].join("\n"),
       "utf8",
     );

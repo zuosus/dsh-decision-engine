@@ -10,7 +10,7 @@ provider 点『测试』大约 2/3 会报错」。同一个端点、同一把 ke
 把用户推回随机。
 
 实测（bamboonode `https://api.bamboonode.dev/v1/decisions`，模型
-`startlux-decision-27b-autothink`，生产遥测 2573 次请求 / 358 次降级）：
+`startlux-decision-v1.1-27b-autothink`，生产遥测 2573 次请求 / 358 次降级）：
 
 | 场景 | 实测延迟 |
 |---|---|
@@ -472,7 +472,7 @@ React 在渲染期抛异常就会**卸载整棵组件树**——所以用户看�
 - 颜色沿用 `--mc-cat-N` 色序，与圆环一致；
 - 另塞一句视觉隐藏的汇总文本，让读屏软件能读到条形长度编码的信息。
 
-**为什么不改成纵向柱状图**：provider × model 的名字很长（`bamboonode · startlux-decision-27b-autothink`），
+**为什么不改成纵向柱状图**：provider × model 的名字很长（`bamboonode · startlux-decision-v1.1-27b-autothink`），
 纵向柱的 x 轴标签要么斜排要么截断，在卡片宽度里都读不出来。
 
 **验证**：`test/client-ui.test.js` 新增 3 项（图例是按钮且默认可参与、全部隐藏时给可撤销
@@ -1786,7 +1786,7 @@ DEC-031 的迁移规则刻意不给「没有自己 baseUrl 的用户」补地址
    （systemone / bamboonode / siliconflow / siliconflow-intl / custom），
    `DEFAULT_PROVIDER = "bamboonode"`。不写 provider 键的老配置，行为与 DEC-031
    之前逐字一致：端点 `https://api.bamboonode.dev/v1/decisions`、key 变量
-   `BAMBOO_API_KEY`、默认模型 `startlux-decision-27b-autothink`。
+   `BAMBOO_API_KEY`、默认模型 `startlux-decision-v1.1-27b-autothink`。
 2. **恢复 bamboonode 的解析特例**：`baseUrl` 覆盖（`/v1` 与 `/v1/decisions`
    两种写法都接受，`source` 记为 `legacy`）、历史字段 `apiKeyEnv` 的变量名覆盖、
    `bamboonodeApiKeyEnv` 的显式覆盖优先于 `apiKeyEnv`、以及历史共享字段
@@ -1858,7 +1858,7 @@ custom 的用户。
 
 **背景**：bamboonode.dev（StartLux 官方端点）作为预设 provider 下线。它此前是
 `DEFAULT_PROVIDER`，预设表里还有一个完整条目（地址 `https://api.bamboonode.dev/v1`、
-key 名 `BAMBOO_API_KEY`、默认模型 `startlux-decision-27b-autothink`）。
+key 名 `BAMBOO_API_KEY`、默认模型 `startlux-decision-v1.1-27b-autothink`）。
 
 **决定**：
 
@@ -1888,7 +1888,7 @@ key 名 `BAMBOO_API_KEY`、默认模型 `startlux-decision-27b-autothink`）。
      配置被损坏。
 4. **历史统计归属保留**（lib/stats-store.js）：老统计/遥测里大量行属于 bamboonode，
    `providerByEndpoint` 继续认识 `api.bamboonode.dev` 主机名，
-   `defaultModelOf("bamboonode")` 仍返回 `startlux-decision-27b-autothink`，
+   `defaultModelOf("bamboonode")` 仍返回 `startlux-decision-v1.1-27b-autothink`，
    模型名反推表（`startlux-*` → bamboonode）原样保留——历史行不因此变成 unknown。
 5. **已知的取舍**：曾短暂用过 `DECISION_ENGINE_KEY` 变量名的极老安装，迁移后
    key 不再被自动读到（custom 只认一个变量名），需在设置页重填；模型默认值残留
@@ -2794,7 +2794,7 @@ Kev/SemIf→硅基流动），于是「未知（历史）」看起来只是**老
 模拟结果是：
 
 ```
-bamboonode / startlux-decision-27b-autothink   记录 2281  降级   0
+bamboonode / startlux-decision-v1.1-27b-autothink   记录 2281  降级   0
 unknown / unknown                              记录  349  降级 349   ← 整块「未知（历史）」
 siliconflow / Kev-4B                           记录   85  降级   0
 ```
@@ -2878,7 +2878,7 @@ provider 的遥测行。
    回落测试）。
 
 **已对用户现网数据执行**：删除旧 `stats.provider-repaired` 标记后重跑迁移，
-共改写 47 条（40 条降级 bamboonode→startlux-decision-27b-autothink 等），
+共改写 47 条（40 条降级 bamboonode→startlux-decision-v1.1-27b-autothink 等），
 `model=unknown` 归零；备份 `stats.jsonl.bak-20261027-165636`。**注意**：代码改动
 要在**重启 DSH** 后才生效，否则运行中的旧实例仍会写出 `model=unknown` 的降级
 记录，需再跑一次迁移即可补齐。
@@ -3444,7 +3444,7 @@ append-only 规则原样保留，此处声明：那个输入框已随本条目�
 | 服务商 | 模型 | `/v1/decisions` | `/v1/systemone` |
 |---|---|---|---|
 | SiliconFlow | `Kev-4B` | 404 Not Found | **200 ✅** |
-| bamboonode | `startlux-decision-27b-autothink` | 200 ✅ | 200 ✅ |
+| bamboonode | `startlux-decision-v1.1-27b-autothink` | 200 ✅ | 200 ✅ |
 
 **路径后缀由服务商决定，不由模型决定**——`Kev-4B` 换个服务商路径就得跟着换。
 旧实现只拼一条路径（`auto` 的真实含义是「按 decisions 拼」），配到只认

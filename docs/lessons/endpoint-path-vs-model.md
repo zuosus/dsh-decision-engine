@@ -6,7 +6,7 @@
  *   服务商            模型                          /v1/decisions      /v1/systemone
  *   ──────────────── ──────────────────────────── ────────────────── ──────────────────
  *   SiliconFlow      Kev-4B                        404 Not Found      200 ✅
- *   bamboonode       startlux-decision-27b-autothink 200 ✅          200 ✅
+ *   bamboonode       startlux-decision-v1.1-27b-autothink 200 ✅          200 ✅
  *   bamboonode       typesafe/jev-1.14             400 not served     400 not served
  *
  * 结论：

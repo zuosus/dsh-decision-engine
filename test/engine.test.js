@@ -201,7 +201,7 @@ test("遥测带 provider：它是回填历史统计时唯一可靠的归因来�
     modes: { retrieval: "observe" },
     classify: () => ({
       answers: { covered: { type: "noul", noul: 0.95 }, would_add: { type: "noul", noul: 0.05 } },
-      model: "startlux-decision-27b-autothink",
+      model: "startlux-decision-v1.1-27b-autothink",
       provider: "bamboonode",
       latencyMs: 12,
       cached: false,
@@ -217,7 +217,7 @@ test("遥测带 provider：答案形状不符的降级记录也带", async () =>
     modes: { retrieval: "enforce" },
     classify: () => ({
       answers: { covered: { type: "noul", noul: 0.9 } },
-      model: "startlux-decision-27b-autothink",
+      model: "startlux-decision-v1.1-27b-autothink",
       provider: "bamboonode",
       latencyMs: 3,
       cached: false,

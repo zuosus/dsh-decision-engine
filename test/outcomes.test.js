@@ -30,7 +30,7 @@ const rec = (over = {}) =>
   buildRecord({
     ts: "2026-10-20T10:00:00.000Z",
     provider: "bamboonode",
-    model: "startlux-decision-27b-autothink",
+    model: "startlux-decision-v1.1-27b-autothink",
     point: "authorize",
     action: "delegate",
     inputTokens: 1000,

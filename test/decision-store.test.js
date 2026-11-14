@@ -58,7 +58,7 @@ function record(over = {}) {
     tag: "guard",
     mode: "enforce",
     provider: "bamboonode",
-    model: "startlux-decision-27b-autothink",
+    model: "startlux-decision-v1.1-27b-autothink",
     action: "delegate",
     detail: "delegate",
     latencyMs: 1200,

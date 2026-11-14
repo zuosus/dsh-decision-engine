@@ -93,7 +93,7 @@ function entry(over = {}) {
     sessionId: "session-abcdef0123456789",
     point: "authorize",
     provider: "bamboonode",
-    model: "startlux-decision-27b-autothink",
+    model: "startlux-decision-v1.1-27b-autothink",
     action: "delegate",
     detail: "decision-engine: 风险低，放行",
     cached: false,
@@ -751,7 +751,7 @@ test("列出本会话的决策：时间、决策点、提供方、模型、裁�
   });
   assert.match(text, /工具授权/, "应显示决策点的中文名");
   assert.match(text, /bamboonode/, "应显示提供方");
-  assert.match(text, /startlux-decision-27b-autothink/, "应显示模型");
+  assert.match(text, /startlux-decision-v1.1-27b-autothink/, "应显示模型");
   assert.match(text, /交给主模型/, "应显示裁决（中文名）");
   assert.match(text, /1689ms/, "应显示耗时");
   assert.match(text, /2026-11-03 16:30:00/, "应显示时间");

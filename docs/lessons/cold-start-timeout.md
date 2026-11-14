@@ -8,7 +8,7 @@
  *     『测试』大约 2/3 会报错。」
  *
  * 2026-11 实测（bamboonode `https://api.bamboonode.dev/v1/decisions`，
- * 模型 startlux-decision-27b-autothink，生产遥测 2573 次请求 / 358 次降级）：
+ * 模型 startlux-decision-v1.1-27b-autothink，生产遥测 2573 次请求 / 358 次降级）：
  *
  *   场景                              实测延迟
  *   ────────────────────────────────  ────────────────────────────────

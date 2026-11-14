@@ -227,7 +227,7 @@ function statsWith(over = {}) {
       savedDurationMs: 7000, savedRatio: 0.5797, savedTimeRatio: 0.3181, avgDurationMs: 1250,
     },
     rows: [{
-      provider: "bamboonode", model: "startlux-decision-27b-autothink", requests: 8, cached: 4,
+      provider: "bamboonode", model: "startlux-decision-v1.1-27b-autothink", requests: 8, cached: 4,
       inputTokens: 16000, outputTokens: 2400, durationMs: 10000, avgDurationMs: 1250,
       observeRequests: 8, observeInputTokens: 16000, observeOutputTokens: 2400, observeDurationMs: 10000,
       savedInputTokens: 12000, savedOutputTokens: 0, savedDurationMs: 5000, savedRatio: 0.6,

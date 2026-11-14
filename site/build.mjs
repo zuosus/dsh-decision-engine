@@ -401,7 +401,7 @@ ${figure("/assets/promo.jpeg", "dsh-decision-engine 宣传图", "主模型动手
     ["服务商", "模型", "<code>/v1/decisions</code>", "<code>/v1/systemone</code>"],
     [
       ["SiliconFlow", "<code>Kev-4B</code>", "<strong>404 Not Found</strong>", '<span class="badge green">200 ✓</span>'],
-      ["bamboonode", "<code>startlux-decision-27b-autothink</code>", '<span class="badge green">200 ✓</span>', '<span class="badge green">200 ✓</span>'],
+      ["bamboonode", "<code>startlux-decision-v1.1-27b-autothink</code>", '<span class="badge green">200 ✓</span>', '<span class="badge green">200 ✓</span>'],
     ]
   )}
   <p class="sub">

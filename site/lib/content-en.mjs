@@ -361,7 +361,7 @@ ${figure("/assets/promo.jpeg", "dsh-decision-engine promo image", "A small model
     ["Provider", "Model", "<code>/v1/decisions</code>", "<code>/v1/systemone</code>"],
     [
       ["SiliconFlow", "<code>Kev-4B</code>", "<strong>404 Not Found</strong>", '<span class="badge green">200 ✓</span>'],
-      ["bamboonode", "<code>startlux-decision-27b-autothink</code>", '<span class="badge green">200 ✓</span>', '<span class="badge green">200 ✓</span>'],
+      ["bamboonode", "<code>startlux-decision-v1.1-27b-autothink</code>", '<span class="badge green">200 ✓</span>', '<span class="badge green">200 ✓</span>'],
     ]
   )}
   <p class="sub">

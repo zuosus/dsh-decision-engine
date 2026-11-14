@@ -993,7 +993,7 @@ function statsWith(over) {
     rows: [
       {
         provider: "bamboonode",
-        model: "startlux-decision-27b-autothink",
+        model: "startlux-decision-v1.1-27b-autothink",
         requests: 8,
         cached: 4,
         inputTokens: 16000,

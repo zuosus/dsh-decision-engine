@@ -185,7 +185,7 @@ test("bamboonode 继续尊重老 baseUrl 覆盖（含完整端点写法）", () 
 test("模型按 provider 分开存：切到 system one 不会带过去 bamboonode 的模型名", () => {
   // 老配置里 model 是 bamboonode 的模型名；切到 system one 后必须不发送它，
   // 否则 TypeSafe 会回 400 `model not served`——「一切换就坏」的典型来源。
-  const cfg = { provider: "systemone", model: "startlux-decision-27b-autothink" };
+  const cfg = { provider: "systemone", model: "startlux-decision-v1.1-27b-autothink" };
   const systemOne = resolveProvider(cfg);
   assert.equal(systemOne.model, "", "system one 不应读到 bamboonode 的 model 字段");
 
@@ -199,7 +199,7 @@ test("模型按 provider 分开存：切到 system one 不会带过去 bamboonod
 
 test("bamboonode 的模型默认值与历史常量一致", () => {
   // 老版本 DEFAULTS.model 就是这个名字，升级后不能悄悄换掉。
-  assert.equal(PROVIDER_PRESETS.bamboonode.defaultModel, "startlux-decision-27b-autothink");
+  assert.equal(PROVIDER_PRESETS.bamboonode.defaultModel, "startlux-decision-v1.1-27b-autothink");
   const provider = resolveProvider({ provider: "bamboonode", model: "" });
   // 模型留空 = 自动，必须原样保留空串（发送时省略字段）。
   assert.equal(provider.model, "");
