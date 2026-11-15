@@ -440,3 +440,27 @@ test("状态文件损坏后重新上报，而不是静默死掉", async () => {
     assert.doesNotThrow(() => JSON.parse(repaired));
   });
 });
+
+test("buildPayload 可声明 day（补报上一完整自然日），非法日期省略", () => {
+  const base = { pluginId: PLUGIN, installId: newInstallId(), kind: "heartbeat", version: "1.0.0", decisions: 5 };
+  assert.equal(buildPayload({ ...base, day: "2026-11-14" }).day, "2026-11-14");
+  assert.equal(buildPayload({ ...base, day: "11-14" }).day, undefined);
+  assert.equal(buildPayload({ ...base, day: "2026-13-40" }).day, "2026-13-40", "格式合法即透传，语义由服务端按窗口校验");
+  assert.equal(buildPayload({ ...base, day: 20261114 }).day, undefined);
+});
+
+test("prepare 把 day 原样送进 payload（服务端按声明日归档，审计 P0-3）", async () => {
+  await withTempDir(async (dir) => {
+    const reporter = new TelemetryReporter({
+      pluginId: PLUGIN,
+      dir,
+      level: "daily",
+      fetchImpl: stubFetch().impl,
+      clock: () => Date.parse("2026-11-15T02:00:00Z"),
+    });
+    const prepared = await reporter.prepare({ version: "1.0.0", decisions: 9, day: "2026-11-14" });
+    assert.ok(prepared !== null);
+    assert.equal(prepared.payload.day, "2026-11-14");
+    assert.equal(prepared.payload.d, 9);
+  });
+});

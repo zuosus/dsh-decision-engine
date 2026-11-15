@@ -388,7 +388,10 @@ test("节省量：缓存命中按「替掉的那次请求」计基线", () => {
   assert.equal(row.savedDurationMs, 800);
 });
 
-test("节省量：历史记录（无基线字段）的缓存命中用同组平均耗时补基线", () => {
+test("节省量：历史缓存命中缺基线时不再插补，节省为 0 且可计数", () => {
+  // 审计 P1：用查询区间内同组均值插补会造成时间泄漏与不可加（S(A∪B)≠S(A)+S(B)）。
+  // 现在只用写入时就持久化的精确基线；历史缺基线的命中不计入节省，
+  // 但 estimatedBaselineMissing 让界面能说明「有多少条无法估计」。
   const range = resolveRange({ preset: "custom", start: "2026-10-20T00:00", end: "2026-10-20T23:59" });
   const result = aggregate(
     [
@@ -400,14 +403,11 @@ test("节省量：历史记录（无基线字段）的缓存命中用同组平�
     range,
   );
   const row = result.rows[0];
-  // 基线耗时 = 实际 1400 + 平均 700（两次真实请求的均值）。
-  assert.equal(row.observeBaseDurationMs, 2100);
-  assert.equal(row.savedDurationMs, 700);
-  // token 基线同样补齐：真实请求平均 input 500、output 50。
-  assert.equal(row.observeBaseInputTokens, 1500);
-  assert.equal(row.savedInputTokens, 500);
-  assert.equal(row.observeBaseOutputTokens, 150);
-  assert.equal(row.savedOutputTokens, 50);
+  assert.equal(row.observeBaseDurationMs, 1400, "只累加真实请求的基线，不插补");
+  assert.equal(row.savedDurationMs, 0);
+  assert.equal(row.observeBaseInputTokens, 1000);
+  assert.equal(row.savedInputTokens, 0);
+  assert.equal(result.estimatedBaselineMissing, 1, "缺基线的历史命中应被计数");
 });
 
 test("聚合：区间外的记录被排除", () => {
@@ -856,9 +856,9 @@ test("聚合：节省量永远不为负", () => {
   ]) {
     assert.ok(value >= 0, `${name} 不该为负，实际 ${value}`);
   }
-  // 缺的耗时基线被同组均值（1000ms）补上，而不是留成 0。
-  assert.equal(t.savedDurationMs, 1000);
-  assert.equal(t.observeBaseDurationMs, 900 + 1100 + 1000);
+  // 缺的耗时基线**不再**用同组均值补（审计 P1）：留 0，节省量为 0。
+  assert.equal(t.savedDurationMs, 0);
+  assert.equal(t.observeBaseDurationMs, 900 + 1100);
 });
 
 test("回填只做一次，且落盘后与新记录同处一个文件", async () => {
@@ -1376,4 +1376,65 @@ test("迁移：老回填行的 point=unknown 按时间戳与遥测对上后补�
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+// -------------------------------------------- 审计 P0：未知值与分母对账
+
+test("未知 output token 不再写成 0：单独计数、不进入已知总量（审计 P0-1）", () => {
+  const range = resolveRange({ preset: "custom", start: "2026-10-20T00:00", end: "2026-10-20T23:59" });
+  const result = aggregate(
+    [
+      rec({ outputTokens: 40, outputSource: "api" }),
+      rec({ outputTokens: 0, outputSource: "missing", outputTokensMissing: true }),
+    ],
+    range,
+  );
+  const t = result.totals;
+  assert.equal(t.outputTokens, 40, "未知值不能被加进已知总量（此前会得到 40+0）");
+  assert.equal(t.outputTokensUnmeasured, 1);
+  assert.equal(t.measuredRequests, 1, "两条真实请求里只有一条有 output 计量");
+  assert.equal(t.avgOutputTokens, 40, "平均 output 的分母只算有计量的记录");
+  const row = result.rows[0];
+  assert.equal(row.outputTokensUnmeasured, 1);
+});
+
+test("请求数对账：attempts = requests + degraded，趋势与汇总同口径（审计 P0-2）", () => {
+  const range = resolveRange({ preset: "custom", start: "2026-10-20T00:00", end: "2026-10-20T23:59" });
+  const result = aggregate(
+    [
+      rec({ durationMs: 100 }),
+      rec({ durationMs: 300 }),
+      rec({ degraded: true, action: "", durationMs: 50 }),
+    ],
+    range,
+  );
+  const t = result.totals;
+  assert.equal(t.attempts, 3);
+  assert.equal(t.requests, 2);
+  assert.equal(t.degraded, 1);
+  assert.equal(t.attempts, t.requests + t.degraded);
+  const sum = (key) => result.series.series[key].reduce((a, b) => a + b, 0);
+  assert.equal(sum("attempts"), t.attempts, "分桶 attempts 之和应等于汇总 attempts");
+  assert.equal(sum("requests"), t.requests, "分桶 requests 之和应等于汇总 requests");
+  assert.equal(sum("degraded"), t.degraded);
+  assert.equal(sum("durationMs"), t.durationMs, "回答耗时只在 requests 侧累加");
+  assert.equal(sum("degradedDurationMs"), t.degradedDurationMs);
+});
+
+test("安全分账：只有 authorize 的 reject 进入安全拦截率（审计 P1）", () => {
+  const range = resolveRange({ preset: "custom", start: "2026-10-20T00:00", end: "2026-10-20T23:59" });
+  const result = aggregate(
+    [
+      rec({ point: "authorize", action: "deny" }),
+      rec({ point: "retrieval", action: "skip" }),
+      rec({ point: "skillPick", action: "redirect" }),
+      rec({ point: "authorize", action: "delegate" }),
+    ],
+    range,
+  );
+  assert.equal(result.safety.point, "authorize");
+  assert.equal(result.safety.reject, 1, "安全拒绝只算 authorize");
+  assert.equal(result.safety.allow, 1);
+  assert.equal(result.safety.otherPointRejects, 2, "流程优化的 reject 单独计数");
+  assert.equal(result.safety.reject + result.safety.otherPointRejects, 3);
 });
