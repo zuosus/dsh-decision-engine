@@ -370,9 +370,16 @@ test("检索：缺字段即视为形状不合格", () => {
 
 test("技能：高置信给出更匹配的技能", () => {
   const parsed = POINT_SPECS.skillPick.parse({ best: choice("dsh-hooks", 0.85) });
-  const action = POINT_SPECS.skillPick.decide(parsed, CFG);
+  const action = POINT_SPECS.skillPick.decide(parsed, CFG, { requested: "agent-browser" });
   assert.equal(action.kind, "redirect");
   assert.equal(action.suggest, "dsh-hooks");
+});
+
+test("技能：请求技能就是最匹配项时放行，不记录换技能", () => {
+  const parsed = POINT_SPECS.skillPick.parse({ best: choice("agent-browser", 0.85) });
+  const action = POINT_SPECS.skillPick.decide(parsed, CFG, { requested: "agent-browser" });
+  assert.equal(action.kind, "allow");
+  assert.match(action.reason, /已是最匹配项/);
 });
 
 test("技能：低置信放行，不打断", () => {
