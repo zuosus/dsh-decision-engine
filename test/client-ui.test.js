@@ -440,6 +440,13 @@ function findNode(node, predicate) {
  * `div > [标题/说明, 控件]`（见 client.js 的 row()），因此按标题找到行节点，
  * 再取行内的 button[aria-pressed] 即可。标题用**当前界面上的名字**。
  */
+/** 按 config.yml 字段名定位一行里的开关（比按标题稳：不受同组其它开关干扰）。 */
+function toggleOfField(node, field) {
+  const row = findNode(node, (item) => item?.props?.["data-field"] === field);
+  if (row === null) return undefined;
+  return findNode(row.children, (item) => item.type === "button" && item.props["aria-pressed"] !== undefined);
+}
+
 function toggleOfRow(node, title) {
   const row = findNode(node, (item) => {
     const children = Array.isArray(item?.children) ? item.children : [];
@@ -2990,4 +2997,106 @@ test("图表：读数元素不能塞进 chartBox 的样式参数（真机白屏�
     [],
     `样式对象里出现了 React 元素的键，说明有元素被当成样式展开：${JSON.stringify(offenders.slice(0, 2))}`,
   );
+});
+
+// ---------------------------------------------------------------------------
+// 免费模型兜底（backup model）：主模型 4xx/5xx 时自动改用免费模型
+//
+// 这一行的验收有三层：开关能拨且真的落盘（否则是「面板能拨、值没存」的
+// 老毛病）；四种状态各自说得清「现在到底会不会兜底」；以及它必须出现在
+// 「连接方式」组里（它是地址来源的一部分，不是守卫行为）。
+// ---------------------------------------------------------------------------
+
+/** 一份「兜底」的 status 片段。 */
+function backupModelWith(over) {
+  return {
+    enabled: true,
+    ready: true,
+    blocked: "",
+    uses: 0,
+    ...over,
+  };
+}
+
+test("「免费模型兜底」默认关，且说明与现在完全一致", async () => {
+  const { text, tree } = await render(stateWith({}));
+  assert.ok(text.includes("免费模型兜底"), `缺少兜底开关行：\n${text.slice(0, 800)}`);
+  const toggle = toggleOfField(tree, "backupModel");
+  assert.ok(toggle !== undefined, "没有找到「免费模型兜底」的开关控件");
+  assert.equal(toggle.props["aria-pressed"], false, "默认必须是关");
+  assert.ok(
+    text.includes("关闭：主模型失败时直接降级放行，与现在完全一致"),
+    `关闭时未说明行为：\n${text.slice(0, 900)}`,
+  );
+  // 小字「需要提前获取免费模型配置」是这件事的代价，不是附注——
+  // 与「使用免费模型」下面那行「可能会失效」同一层信息。
+  assert.ok(
+    text.includes("需要提前获取免费模型配置"),
+    "缺少「需要提前获取」这行小字（它是开启这个开关的真实代价）",
+  );
+});
+
+test("兜底就绪时说明当前生效，并报已兜底次数", async () => {
+  const { text } = await render(stateWith({ backupModel: backupModelWith({ uses: 3 }) }));
+  assert.ok(
+    text.includes("主模型失败（4xx/5xx）时改用免费模型") && text.includes("已兜底 3 次"),
+    `就绪状态文案不对：\n${text.slice(0, 900)}`,
+  );
+});
+
+test("兜底未就绪时说明配置尚未获取（而不是让人以为开关坏了）", async () => {
+  const { text } = await render(
+    stateWith({ backupModel: backupModelWith({ ready: false, blocked: "no-config" }) }),
+  );
+  assert.ok(
+    text.includes("免费模型配置尚未获取"),
+    `未就绪时未说明原因：\n${text.slice(0, 900)}`,
+  );
+});
+
+test("「使用免费模型」已开时，明确说明兜底不生效", async () => {
+  // 这时免费模型就是主模型，兜底毫无意义。不自动替用户关掉任何开关
+  // （DEC-062），但必须说清为什么这一项不起作用。
+  const { text } = await render(
+    stateWith({
+      serverProvider: serverProviderWith({}),
+      backupModel: backupModelWith({ ready: false, blocked: "primary-is-free" }),
+    }),
+  );
+  assert.ok(
+    text.includes("已开启「使用免费模型」，兜底不生效"),
+    `未说明互斥关系：\n${text.slice(0, 900)}`,
+  );
+});
+
+test("播兜底开关会 PUT /config 且带上 backupModel: true", async () => {
+  const { tree } = await render(stateWith({}));
+  // 用 `data-field` 精确定位这一行：`toggleOfRow` 从最外层开始匹配，
+  // 而这一组里第一个带 aria-pressed 的按钮是「使用免费模型」那个——
+  // 按标题找会静默指到上一行的开关。
+  const toggle = toggleOfField(tree, "backupModel");
+  assert.ok(toggle !== undefined, "没有找到「免费模型兜底」的开关");
+
+  const stub = stubFetch();
+  try {
+    toggle.props.onClick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  } finally {
+    stub.restore();
+  }
+  const call = stub.calls.find((item) => item.url.endsWith("/api/decision-engine/config"));
+  assert.ok(call !== undefined, `应 PUT /config，实际：${stub.calls.map((c) => c.url).join(", ")}`);
+  const body = JSON.parse(call.init.body);
+  assert.equal(body.backupModel, true, `patch 应带 backupModel: true，实际：${call.init.body}`);
+});
+
+test("兜底开关归属「连接方式」组（它是地址来源的一部分）", async () => {
+  const { tree } = await render(stateWith({}), { slots: { [SLOTS.decisions]: decisionsFixture } });
+  const sections = sectionsOf(tree);
+  const byId = new Map(sections.map((section) => [section.props["data-section"], section]));
+  const connectionText = textsOf(bodyOf(byId.get("connection"))).join("\n");
+  assert.ok(connectionText.includes("免费模型兜底"), "「免费模型兜底」应在连接方式组里");
+  // 反向：它不该出现在守卫组（防止「两处都写、反正都在页面上」）。
+  const guardText = textsOf(bodyOf(byId.get("guard"))).join("\n");
+  assert.equal(guardText.includes("免费模型兜底"), false, "兜底开关不该出现在守卫行为组");
 });

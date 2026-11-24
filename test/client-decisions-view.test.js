@@ -1931,3 +1931,63 @@ test("英文界面下这个滑块不残留中文（服务端中文标签有词�
   assert.match(text, /Review tolerance/, "滑块标题应显示英文");
   assert.match(text, /Autonomous|Relaxed|Cautious/, "四个段应显示英文");
 });
+
+// ------------------------------------------------------------------ 免费模型兜底
+//
+// 「标记」列已经承担了「缓存命中 / 已降级」两种特殊情况。兜底是第三种，
+// 也是**唯一**一种「这次是别人答的、但结果可用」——用户扫表时最需要
+// 一眼看出它，否则会把免费模型的消耗算到主模型头上。
+test("兜底记录在「标记」列显示「免费兜底」，排序排在已降级与缓存命中之间", async () => {
+  const view = await renderDecisions({
+    slots: {
+      [SLOTS.page]: {
+        entries: [
+          entry({ seq: 1, id: "rec-backup", backup: true, provider: "server" }),
+          entry({ seq: 2, id: "rec-degraded", degraded: true, detail: "http-429" }),
+          entry({ seq: 3, id: "rec-cached", cached: true }),
+          entry({ seq: 4, id: "rec-plain" }),
+        ],
+        total: 4,
+      },
+      [SLOTS.loading]: false,
+    },
+  });
+  assert.equal(view.cellsOf("rec-backup")[COL.flags], "免费兜底", "兜底记录应显示「免费兜底」");
+  assert.equal(view.cellsOf("rec-cached")[COL.flags], "缓存命中", "缓存命中不受影响");
+  assert.equal(view.cellsOf("rec-plain")[COL.flags], "", "普通记录不显示标记");
+});
+
+test("兜底记录排在「已降级」之上、「缓存命中」之下", async () => {
+  // 排序值按状态分组，让「哪几次花了钱、哪几次是降级放行、哪几次是兜底」
+  // 各自聚在一起。这里钉住三者的相对次序，避免新增标记时挤掉既有分组。
+  //
+  // 用**不同的 ts** 让每条记录可区分：同毫秒时行序会退到写入顺序，
+  // 断言就测不出排序本身了。
+  const view = await renderDecisions({
+    slots: {
+      [SLOTS.page]: {
+        entries: [
+          entry({ seq: 1, id: "rec-plain", ts: "2026-11-03T08:00:00.000Z" }),
+          entry({ seq: 2, id: "rec-cached", ts: "2026-11-03T08:01:00.000Z", cached: true }),
+          entry({ seq: 3, id: "rec-backup", ts: "2026-11-03T08:02:00.000Z", backup: true, provider: "server" }),
+          entry({ seq: 4, id: "rec-degraded", ts: "2026-11-03T08:03:00.000Z", degraded: true, detail: "http-429" }),
+        ],
+        total: 4,
+      },
+      [SLOTS.loading]: false,
+    },
+  });
+  // 首次点击是降序（缓存 → 兜底 → 已降级 → 无），再点一次换成升序。
+  await view.clickTh(COL.flags);
+  assert.deepEqual(
+    view.rowIds(),
+    ["rec-cached", "rec-backup", "rec-degraded", "rec-plain"],
+    `降序应是 缓存 → 兜底 → 已降级 → 无，实际：${view.rowIds().join(" | ")}`,
+  );
+  await view.clickTh(COL.flags);
+  assert.deepEqual(
+    view.rowIds(),
+    ["rec-plain", "rec-degraded", "rec-backup", "rec-cached"],
+    `升序应是 无 → 已降级 → 兜底 → 缓存，实际：${view.rowIds().join(" | ")}`,
+  );
+});
