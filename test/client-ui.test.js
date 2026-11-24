@@ -55,6 +55,7 @@ let loadSeq = 0;
  */
 const SLOTS = {
   status: 0,
+  msg: 3,
   decisions: 11,
   stats: 13,
   statsError: 14,
@@ -1721,8 +1722,15 @@ test("每一项都归属正确的那一组（断言父子关系，不是「页�
   }
 });
 
-test("测试端点在连接方式分组的最后一项，页脚只保留保存状态与状态信息（DEC-051）", async () => {
-  const { tree } = await render(stateWith({}), { slots: { [SLOTS.decisions]: decisionsFixture } });
+test("测试端点、状态信息与诊断结果都在连接方式分组，页脚只保留保存状态（DEC-051）", async () => {
+  // msg 槽注入的是点过「测试端点」之后 runTest 写入的结果，
+  // 钉住的是「结果显示在哪」，不是测试逻辑本身。
+  const { tree } = await render(stateWith({}), {
+    slots: {
+      [SLOTS.decisions]: decisionsFixture,
+      [SLOTS.msg]: { ok: true, text: "端点连通 ✅\nprovider: test POST /v1 HTTP 200" },
+    },
+  });
   const sections = sectionsOf(tree);
   const byId = new Map(sections.map((section) => [section.props["data-section"], section]));
   const connectionBody = bodyOf(byId.get("connection"));
@@ -1737,8 +1745,16 @@ test("测试端点在连接方式分组的最后一项，页脚只保留保存�
   );
   assert.ok(textsOf(connectionBody).join("\n").includes("测试端点"), "连接方式分组应有测试端点");
 
-  // 页脚回答的是「刚才存没存、端点通不通」中的保存与状态信息；
-  // 测试端点已移入连接方式分组，不再出现在页脚容器里。
+  // 状态信息（提供方 / 端点 / 模型 / 超时 / 请求次数 / 密钥来源）与诊断结果
+  // 回答的都是「连的这家通不通」，和测试端点按钮是同一个问题的两面：
+  // 配完地址与密钥，在这里看到当前生效的端点，点一下测试，结果就显示在旁边。
+  // 留在页脚的话，分组一折叠用户就看不到刚测出来的结果了。
+  const connectionText = textsOf(connectionBody).join("\n");
+  assert.ok(connectionText.includes("超时"), "连接方式分组应有状态信息（超时 / 请求次数）");
+  assert.ok(connectionText.includes("密钥来源"), "连接方式分组应有密钥来源状态");
+  assert.ok(connectionText.includes("端点连通 ✅"), "测试结果应显示在连接方式分组里");
+
+  // 页脚只回答「刚才存没存」。
   const container = findNode(tree, (node) => node.type === "div" && node.props?.className === "de-cfg");
   assert.ok(container !== null, "没找到 .de-cfg 容器");
   const kids = (container.children ?? []).filter((child) => child !== null && child !== undefined);
@@ -1752,6 +1768,8 @@ test("测试端点在连接方式分组的最后一项，页脚只保留保存�
   const footerText = textsOf(kids[footerAt]).join("\n");
   assert.ok(footerText.includes("改动即保存"), "页脚应有保存状态");
   assert.equal(footerText.includes("测试端点"), false, "测试端点不应仍在页脚里");
+  assert.equal(footerText.includes("超时"), false, "状态信息不应留在页脚里");
+  assert.equal(footerText.includes("端点连通 ✅"), false, "测试结果不应留在页脚里");
 });
 
 test("分组展开状态记在 localStorage，刷新后不弹回（DEC-051）", async () => {
