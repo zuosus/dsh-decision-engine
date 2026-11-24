@@ -123,6 +123,24 @@
     "hintEn": "Decision Models (decisionmodels.io) System One endpoint (POST /v1/systemone); models s1-fast / s1-pro / s1-vision / reax-1, default s1-fast — just add an API key"
   },
   {
+    "id": "google-decisions",
+    "label": "Google AI Studio Decisions",
+    "labelEn": "Google AI Studio Decisions",
+    "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+    "endpointStyle": "decisions",
+    "protocol": "google-decisions",
+    "apiKeyEnv": "GEMINI_API_KEY",
+    "legacyApiKeyEnvs": [],
+    "keyField": "googleDecisionsApiKey",
+    "requiresModel": true,
+    "defaultModel": "gemini-decision-1",
+    "modelField": "googleDecisionsModel",
+    "keyEnvField": "googleDecisionsApiKeyEnv",
+    "models": ["gemini-decision-1"],
+    "hint": "Google AI Studio Decisions API（gemini-decision-1）的 REST 端点（POST /v1beta/decisions），使用 x-goog-api-key 鉴权",
+    "hintEn": "Google AI Studio Decisions API REST endpoint (POST /v1beta/decisions) with gemini-decision-1 and x-goog-api-key authentication"
+  },
+  {
     "id": "custom",
     "label": "custom",
     "labelEn": "custom",

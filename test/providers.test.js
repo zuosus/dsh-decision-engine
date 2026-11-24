@@ -55,6 +55,7 @@ test("内置预设齐备", () => {
       "perplexity",
       "openrouter",
       "decisionmodels",
+      "google-decisions",
       "custom",
     ],
   );
@@ -219,6 +220,7 @@ test("providerCatalog 覆盖全部 provider 且带展示信息", () => {
     "perplexityApiKey",
     "openrouterApiKey",
     "decisionModelsApiKey",
+    "googleDecisionsApiKey",
     "customApiKey",
   ]);
   // 字段必须互不相同：共用一格会导致切换 provider 时互相覆盖。
@@ -233,6 +235,7 @@ test("providerCatalog 覆盖全部 provider 且带展示信息", () => {
     "perplexityModel",
     "openrouterModel",
     "decisionModelsModel",
+    "googleDecisionsModel",
     "customModel",
   ]);
   assert.equal(new Set(modelFields).size, modelFields.length);
@@ -914,14 +917,79 @@ test("decisionmodels：显式 key 从自己的字段读，鉴权头是 Bearer", 
   assert.ok(!JSON.stringify(headers).includes("decisionmodels.io"));
 });
 
-test("decisionmodels：在下拉清单里、紧挨 custom 之前，catalog 下发 label/models", () => {
+test("Google AI Studio Decisions API 预设使用 REST 端点、key 与模型", () => {
+  const provider = resolveProvider({
+    provider: "google-decisions",
+    googleDecisionsApiKey: "gemini-test-key",
+  });
+  assert.equal(provider.valid, true);
+  assert.equal(provider.endpoint, "https://generativelanguage.googleapis.com/v1beta/decisions");
+  assert.equal(provider.apiKeyEnv, "GEMINI_API_KEY");
+  assert.equal(provider.model, "gemini-decision-1");
+  assert.equal(provider.explicitKey, "gemini-test-key");
+  assert.equal(provider.protocol, "google-decisions");
+
+  const headers = buildHeaders(provider, "gemini-test-key");
+  assert.equal(headers["x-goog-api-key"], "gemini-test-key");
+  assert.equal(headers["content-type"], "application/json");
+  assert.equal(headers.authorization, undefined);
+});
+
+test("Google Decisions 请求体转换为官方 REST input/questions 格式", () => {
+  const provider = resolveProvider({ provider: "google-decisions" });
+  const body = buildRequestBody(provider, {
+    state: { cwd: "/tmp/demo", command: "rm -rf /tmp/demo/cache" },
+    questions: {
+      irreversible: {
+        type: "noul",
+        instructions: "Is this action irreversible?",
+        criteria: { true: "It cannot be undone.", false: "It can be reversed." },
+      },
+      route: {
+        type: "choice",
+        instructions: "Which route should handle this?",
+        criteria: { fast: "Cheap and sufficient.", strong: "Needs deep reasoning." },
+      },
+      depth: {
+        type: "score",
+        instructions: "How much deliberation is required?",
+        criteria: ["none", "some", "deep"],
+      },
+    },
+  });
+
+  assert.equal(body.model, "gemini-decision-1");
+  assert.equal(body.think_mode, undefined);
+  assert.equal(body.state, undefined);
+  assert.equal(body.input, JSON.stringify({ cwd: "/tmp/demo", command: "rm -rf /tmp/demo/cache" }));
+  assert.deepEqual(body.questions.irreversible, {
+    type: "noul",
+    instructions: "Is this action irreversible?",
+    criteria: {
+      true_description: "It cannot be undone.",
+      false_description: "It can be reversed.",
+    },
+  });
+  assert.deepEqual(body.questions.route.criteria, {
+    fast: "Cheap and sufficient.",
+    strong: "Needs deep reasoning.",
+  });
+  assert.deepEqual(body.questions.depth.criteria, ["none", "some", "deep"]);
+});
+
+test("Decision Models 与 Google Decisions 在下拉清单里，custom 收尾", () => {
   const ids = [...PROVIDER_IDS];
   const index = ids.indexOf("decisionmodels");
   assert.ok(index >= 0, "provider 清单缺少 decisionmodels");
-  assert.equal(ids[index + 1], "custom", "custom 必须收尾");
+  assert.equal(ids[index + 1], "google-decisions");
+  assert.equal(ids.at(-1), "custom", "custom 必须收尾");
   const item = providerCatalog().find((entry) => entry.id === "decisionmodels");
   assert.equal(item.label, "Decision Models");
   assert.equal(item.labelEn, "Decision Models");
   assert.deepEqual(item.models, ["s1-fast", "s1-pro", "s1-vision", "reax-1"]);
   assert.equal(item.requiresModel, true);
+  const google = providerCatalog().find((entry) => entry.id === "google-decisions");
+  assert.equal(google.label, "Google AI Studio Decisions");
+  assert.deepEqual(google.models, ["gemini-decision-1"]);
+  assert.equal(google.protocol, "google-decisions");
 });
