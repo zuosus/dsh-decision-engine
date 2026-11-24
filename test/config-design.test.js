@@ -224,6 +224,43 @@ test("provider 已在别处配好 key 的按钮右侧显示小字「已配置Key
   assert.ok(systemone && !text(systemone).includes("已配置Key"), "unconfigured provider button must not show the badge");
 });
 
+test("模型 picker 改成标题与说明之间的 grid 按钮，含自动项与候选项", async () => {
+  const root = await render({ 9: [{ id: "Kev-4B" }, { id: "SemIf" }], 10: "ok" });
+  const row = nodes(root, (node) => hasClass(node, "de-cfg__row") && node.props["data-field"] === "model")[0];
+  assert.ok(row, "model row missing");
+  const textCol = nodes(row, (node) => hasClass(node, "de-cfg__text"))[0];
+  const children = (textCol.children ?? []).filter((node) => node !== null && typeof node === "object");
+  const label = children.find((node) => hasClass(node, "de-cfg__label"));
+  const hint = children.find((node) => hasClass(node, "de-cfg__hint"));
+  const grid = children.find((node) => hasClass(node, "de-cfg__model-grid"));
+  assert.ok(grid, "model grid must live between title and desc");
+  assert.ok(children.indexOf(grid) > children.indexOf(label) && children.indexOf(grid) < children.indexOf(hint),
+    "model grid must be placed between title and desc");
+  const buttons = nodes(grid, (node) => node.type === "button" && Object.hasOwn(node.props, "aria-pressed"));
+  // 自动 + 两个候选项（无 custom 输入框时）
+  assert.equal(buttons.length, 3, `应有 自动+Kev-4B+SemIf 三个按钮，实际 ${buttons.length}`);
+  assert.ok(text(buttons[0]).includes("自动"), "第一个按钮应为自动项");
+  assert.equal(buttons.filter((b) => b.props["aria-pressed"] === true).length, 1, "only one model selected");
+});
+
+test("密钥保存位置 picker 改成标题与说明之间的 grid 按钮", async () => {
+  const root = await render();
+  const row = nodes(root, (node) => hasClass(node, "de-cfg__row") && node.props["data-field"] === "keyStorage")[0];
+  assert.ok(row, "keyStorage row missing");
+  const textCol = nodes(row, (node) => hasClass(node, "de-cfg__text"))[0];
+  const children = (textCol.children ?? []).filter((node) => node !== null && typeof node === "object");
+  const label = children.find((node) => hasClass(node, "de-cfg__label"));
+  const hint = children.find((node) => hasClass(node, "de-cfg__hint"));
+  const grid = children.find((node) => hasClass(node, "de-cfg__storage-grid"));
+  assert.ok(grid, "storage grid must live between title and desc");
+  assert.ok(children.indexOf(grid) > children.indexOf(label) && children.indexOf(grid) < children.indexOf(hint),
+    "storage grid must be placed between title and desc");
+  const buttons = nodes(grid, (node) => node.type === "button" && Object.hasOwn(node.props, "aria-pressed"));
+  assert.equal(buttons.length, 2, "应有 credentials 与 config 两个按钮");
+  assert.equal(buttons.filter((b) => b.props["aria-pressed"] === true).length, 1, "only one storage selected");
+  assert.ok(text(buttons[0]).includes(".credentials.yaml"), "默认应高亮 .credentials.yaml");
+});
+
 test("failed autosave is readable inside config root, retryable, and announced", async () => {
   const failure = "未保存：磁盘写入失败";
   const root = await render({ 18: { error: failure } });

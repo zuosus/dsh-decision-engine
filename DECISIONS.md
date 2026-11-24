@@ -2,6 +2,30 @@
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
 
+## DEC-084 模型 / 密钥保存位置 picker 同样改成 grid 线框按钮（2026-11-25）
+
+**背景**：DEC-082 把「服务提供方」的下拉改成标题下方的 grid 线框按钮后，用户要求「模型」与「密钥保存位置」两个 picker 采用同样的 UI 改动。这两个原来也是 `<select>`：模型候选项一多就得点开翻找、选中态藏在列表里；存储位置只有两档，却也要点一下才看清当前是哪档。
+
+**决定**：
+
+- **模型行**：在「模型」标题与说明之间插入 `de-cfg__model-grid`，按钮 = 「自动/默认」+ 探测到的候选 + 当前配置但不在候选里的值（避免已配置值没有对应高亮）。点选走 `setModelValue`（离散控件，即选即存）。custom 的可手填组合框（issue #2）**保留在右侧 control 区**——有些服务的 `/v1/models` 里没有它的决策模型，纯按钮会把用户卡死；输入框与 grid 写的是同一格 `draft[modelField]`。「获取」按钮也留在右侧，负责刷新候选。
+- **密钥保存位置行**：在标题与说明之间插入 `de-cfg__storage-grid`，两档 `.credentials.yaml（默认）` / `插件配置 config.yml` 各一按钮；点选走 `setStorageDraft` + `scheduleSave(..., true)`，与旧下拉的保存节奏逐字一致。右控件位置留空（传 `null`）。
+- **样式共用**：把 DEC-082 的 provider 网格样式抽成 `:is(.de-cfg__provider-grid, .de-cfg__model-grid, .de-cfg__storage-grid)` 一组规则——三处视觉完全一致（线框、选中 `--de-accent` 高亮 + 反色文字、`aria-pressed` 表达语义），不复制三份 CSS。CSS 仍只改可编辑源 `lib/client.config.css`，改完 `node scripts/build-client.mjs` 重建 bundle。
+- **测试随之更新**：模型写入格测试改为点 grid 按钮（注入 `/models` 候选夹具）；存储位置测试改为断言两档按钮与默认高亮；人工审核比例的两条测试原来全局扫 `aria-pressed` 且按「默认」字样匹配，会被 `.credentials.yaml（默认）` 误命中，改为只在 `key=tolerance` 区块内扫描。
+
+**为什么**：
+
+- **三处 picker 视觉与交互必须一致**：同一页里 provider 用按钮、模型用下拉、存储位置又用下拉，会让用户反复切换心智。共用 CSS 也避免三份样式各自漂移。
+- **custom 的模型框不能删**：DEC-031 / issue #2 的教训是「列表里没有、界面又不能填」会把用户卡死。grid 是快捷方式，自由输入是后路，两者并存才不回退。
+- **列表现取的候选也现取高亮**：当前值不在探测列表里时补一个「（当前值）」按钮，否则界面上没有任何按钮高亮，用户会以为配置丢了。
+- **落在分片上而不是产物上**：本条目落地时 main 已合入 DEC-083（client.js 拆成 `lib/client-src` 分片）。按拆分约定只改 `34-config-page-connection-items.js` 与 CSS 可编辑源，再构建回 bundle；直接改 `client.js` 会在 `build-client --check` 里被判为漂移。
+
+**被否决的方案**：
+
+- **把模型 grid 塞进右侧 control 区**：否决。模型候选可能很多，右侧只有 5/12 列宽，会重演 tolerance 滑块竖排事故（那条的回归守卫仍在）。按钮必须像 provider 一样占位整行、放在标题与说明之间。
+- **custom 也改成纯按钮网格**：否决，理由同上（issue #2）。
+
+
 ## DEC-083 把 8355 行的 client.js 拆成 lib/client-src 分片，构建期拼回单文件 bundle（2026-11-25）
 
 **背景**：`lib/client.js` 涨到 8355 行 / 318 KB，远超 AI_CODING 的 500 行文件预算。后果是具体的：`grep` 一次命中一屏、读一段就要花掉大量上下文，而且「配置页」「统计页」「图表」「i18n」四种职责挤在同一个路径里，改任何一处都要先读完整个文件才能确认该动哪里。

@@ -579,12 +579,13 @@ test("硅基流动：粘贴 key 写进它自己那一格（字段名来自服务
 
 test("硅基流动：改模型写进它自己那一格，且「留空」被说成预设默认", async () => {
   const preset = PROVIDER_PRESETS.siliconflow;
-  const { text, controls } = await render(
+  const { text, tree } = await render(
     stateWith({
       provider: "siliconflow",
       providerLabel: "硅基流动",
       baseUrl: "https://api.siliconflow.cn/v1/systemone",
     }),
+    { slots: { 9: [{ id: "Kev-4B" }, { id: "SemIf" }], 10: "ok" } },
   );
   // 该端点 model 必填（实测省略回 400），所以「留空」不能说成「服务端默认」。
   assert.ok(
@@ -592,12 +593,26 @@ test("硅基流动：改模型写进它自己那一格，且「留空」被说�
     `模型栏应说明留空的含义，实际文案：\n${text.slice(0, 700)}`,
   );
 
-  const modelSelect = controls.find((node) => node.type === "select" && node.props.value === "");
-  assert.ok(modelSelect !== undefined, "没有找到模型下拉（当前值应为空 = 走预设默认）");
+  const grid = findNode(connectionRow(tree, "model"),
+    (node) => (node.props?.className ?? "").split(/\s+/).includes("de-cfg__model-grid"));
+  assert.ok(grid !== undefined, "模型行应有 de-cfg__model-grid");
+  const semIf = findNode(grid, (node) => node.type === "button" && collectText(node).join("").includes("SemIf"));
+  assert.ok(semIf !== undefined, "模型 grid 应包含候选 SemIf");
+  // 默认高亮的是「自动」（当前值为空 = 走预设默认）。
+  const selectedButtons = [];
+  (function walk(node) {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) return node.forEach(walk);
+    if (node.type === "button" && node.props?.["aria-pressed"] === true) selectedButtons.push(node);
+    walk(node.children);
+  })(grid);
+  assert.equal(selectedButtons.length, 1, "当前值为空时应只有一个高亮项（自动/默认）");
+  assert.ok(/默认|自动/.test(collectText(selectedButtons[0]).join("")),
+    "当前值为空时自动/默认项应高亮");
 
   const stub = stubFetch();
   try {
-    modelSelect.props.onChange({ target: { value: "SemIf" } });
+    semIf.props.onClick();
     await new Promise((resolve) => setTimeout(resolve, 0));
   } finally {
     stub.restore();
@@ -786,17 +801,81 @@ test("服务端拒绝的原因会显示在界面上", async () => {
   assert.ok(text.includes("自定义 provider 的 base URL 不可用"), "服务端错误原因没有显示");
 });
 
-test("密钥保存位置有下拉，默认 .credentials.yaml", async () => {
-  const { text, controls } = await render(stateWith({}));
+test("模型 picker 是 grid 按钮：自动项 + 候选项，点选即落盘", async () => {
+  const { tree } = await render(stateWith({}), {
+    slots: { [SLOTS.decisions]: decisionsFixture, 9: [{ id: "Kev-4B" }, { id: "SemIf" }], 10: "ok" },
+  });
+  const grid = findNode(connectionRow(tree, "model"),
+    (node) => (node.props?.className ?? "").split(/\s+/).includes("de-cfg__model-grid"));
+  assert.ok(grid !== undefined, "模型行应含 de-cfg__model-grid");
+  const buttons = [];
+  (function walk(node) {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) return node.forEach(walk);
+    if (node.type === "button" && Object.hasOwn(node.props ?? {}, "aria-pressed")) buttons.push(node);
+    walk(node.children);
+  })(grid);
+  assert.equal(buttons.length, 3, "应渲染 自动 + 两个候选项");
+  const auto = buttons.find((b) => textsOf(b).join("").includes("自动"));
+  assert.ok(auto?.props["aria-pressed"] === true, "默认应高亮自动项");
+
+  const stub = stubFetch();
+  try {
+    buttons.find((b) => textsOf(b).join("").includes("SemIf")).props.onClick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  } finally {
+    stub.restore();
+  }
+  const call = stub.calls.find((item) => item.url.endsWith("/api/decision-engine/config"));
+  assert.ok(call !== undefined, "点选模型应落盘");
+  assert.equal(JSON.parse(call.init.body).systemoneModel, "SemIf");
+});
+
+test("密钥保存位置 picker 是 grid 按钮：默认 credentials，点 config 即落盘", async () => {
+  const { tree } = await render(stateWith({}), {
+    slots: { [SLOTS.decisions]: decisionsFixture },
+  });
+  const grid = findNode(connectionRow(tree, "keyStorage"),
+    (node) => (node.props?.className ?? "").split(/\s+/).includes("de-cfg__storage-grid"));
+  assert.ok(grid !== undefined, "密钥保存位置行应含 de-cfg__storage-grid");
+  const buttons = [];
+  (function walk(node) {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) return node.forEach(walk);
+    if (node.type === "button" && Object.hasOwn(node.props ?? {}, "aria-pressed")) buttons.push(node);
+    walk(node.children);
+  })(grid);
+  assert.equal(buttons.length, 2, "应有 credentials 与 config 两个按钮");
+  assert.ok(buttons[0].props["aria-pressed"] === true, "默认高亮 credentials");
+
+  const stub = stubFetch();
+  try {
+    buttons[1].props.onClick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  } finally {
+    stub.restore();
+  }
+  const call = stub.calls.find((item) => item.url.endsWith("/api/decision-engine/config"));
+  assert.ok(call !== undefined, "切换存储位置应落盘");
+  assert.equal(JSON.parse(call.init.body).keyStorage, "config");
+});
+
+test("密钥保存位置是两档 grid 按钮，默认 .credentials.yaml", async () => {
+  const { text, tree } = await render(stateWith({}));
   assert.ok(text.includes("密钥保存位置"), "缺少「密钥保存位置」");
-  const storageSelect = controls.find(
-    (node) => node.type === "select" && node.props.value === "credentials",
-  );
-  assert.ok(storageSelect !== undefined, "没有找到存储位置下拉（默认值应为 credentials）");
-  const values = storageSelect.children
-    .filter((child) => child !== null && typeof child === "object" && child.type === "option")
-    .map((child) => child.props.value);
-  assert.deepEqual(values, ["credentials", "config"]);
+  const grid = findNode(connectionRow(tree, "keyStorage"),
+    (node) => (node.props?.className ?? "").split(/\s+/).includes("de-cfg__storage-grid"));
+  assert.ok(grid !== undefined, "没有找到存储位置 grid");
+  const buttons = [];
+  (function walk(node) {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) return node.forEach(walk);
+    if (node.type === "button" && Object.hasOwn(node.props ?? {}, "aria-pressed")) buttons.push(node);
+    walk(node.children);
+  })(grid);
+  assert.equal(buttons.length, 2, "应有 credentials 与 config 两档");
+  assert.ok(buttons[0].props["aria-pressed"] === true, "默认应高亮 credentials");
+  assert.ok(buttons[1].props["aria-pressed"] === false, "config 默认不高亮");
   assert.ok(text.includes(".credentials.yaml"), "没有说明会存进 .credentials.yaml");
 });
 
@@ -2339,6 +2418,10 @@ test("当前档位被打勾（aria-pressed），其余为 false", async () => {
       [SLOTS.decisions]: { ...decisionsFixture, tolerance: toleranceFixture({ level: "relaxed" }) },
     },
   });
+  // 只扫人工审核比例那一块：新加的 provider / 模型 / 存储 grid 按钮也用
+  // aria-pressed，且 `.credentials.yaml（默认）` 含「默认」二字，全局扫会误命中。
+  const tolerance = findNode(tree, (node) => node.props?.key === "tolerance");
+  assert.ok(tolerance !== undefined, "缺少人工审核比例区块");
   const pressed = [];
   const walk = (node) => {
     if (node === null || typeof node !== "object") return;
@@ -2350,7 +2433,7 @@ test("当前档位被打勾（aria-pressed），其余为 false", async () => {
     }
     (node.children ?? []).forEach(walk);
   };
-  walk(tree);
+  walk(tolerance);
   assert.equal(pressed.length, 4, `应有四个带 aria-pressed 的段，实际 ${pressed.length}`);
   const active = pressed.filter((item) => item.pressed === true);
   assert.equal(active.length, 1, `只能有一个选中段，实际 ${JSON.stringify(active)}`);
@@ -2430,10 +2513,13 @@ test("滑块独占一整行，没被塞进 rowLine 的右半边（真机竖排�
     slots: { [SLOTS.decisions]: decisionsFixture },
   });
 
-  // 收集「段按钮」：带 aria-pressed 且文案是四档之一的 button。
+  // 收集「段按钮」：只在人工审核比例区块内找，避免把新 grid 按钮（也带
+  // aria-pressed，且 `.credentials.yaml（默认）` 含「默认」）算进来。
   const NAMES = ["自治", "轻松", "默认", "谨慎"];
   const stopButtons = [];
   const rowLineContainers = [];
+  const tolerance = findNode(tree, (node) => node.props?.key === "tolerance");
+  assert.ok(tolerance !== undefined, "缺少人工审核比例区块");
   const walk = (node, ancestors) => {
     if (node === null || node === undefined || typeof node !== "object") return;
     const style = node.props?.style ?? {};
@@ -2453,7 +2539,7 @@ test("滑块独占一整行，没被塞进 rowLine 的右半边（真机竖排�
     }
     (node.children ?? []).forEach((child) => walk(child, [...ancestors, node]));
   };
-  walk(tree, []);
+  walk(tolerance, []);
 
   assert.equal(stopButtons.length, 4, `应有四个落点按钮，实际 ${stopButtons.length}`);
   for (const button of stopButtons) {
