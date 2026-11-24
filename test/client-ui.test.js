@@ -1132,7 +1132,10 @@ test("统计：横向对比表按 provider × model 列出，节省量另有对�
   const { text } = await render(stateWith({}), {
     slots: { [SLOTS.tab]: "stats", [SLOTS.stats]: statsWith({}) },
   });
-  assert.ok(text.includes("system one"), "对比表应列出 provider");
+  // 展示名来自 providerCatalog（lib/providers.json 的 label），不是硬编码：
+  // 数据文件里改成 "System One" 之后这里必须跟着走，否则就是「界面显示 A、
+  // 数据是 B」的漂移。
+  assert.ok(text.includes("System One"), "对比表应列出 provider");
   assert.ok(text.includes("Kev-4B"), "对比表应列出 model");
   assert.ok(text.includes("provider / model"), "应有一列说明这是 provider/model 组合");
   assert.ok(text.includes("横向对比"), "应有「横向对比」一节");

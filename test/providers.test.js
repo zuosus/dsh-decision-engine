@@ -140,7 +140,7 @@ test("parseProviderPresets：坏数据在加载时就报错（不能静默半生
 
 test("system one 预设有显示名、默认地址、默认模型与端点风格", () => {
   const preset = PROVIDER_PRESETS.systemone;
-  assert.equal(preset.label, "system one");
+  assert.equal(preset.label, "System One");
   assert.equal(preset.baseUrl, "https://api.typesafe.ai/v1");
   assert.equal(preset.endpointStyle, "systemone");
   assert.equal(preset.defaultModel, "jev-latest");
