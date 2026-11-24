@@ -147,6 +147,42 @@ test("超过 maxQuestions 的题目集被拆成多次请求，答案合并后仍
   }
 });
 
+test("s1-pro 按模型上限 3 拆题：四道题是两发，不是 s1-fast 的四发", async () => {
+  // 上限写在模型上（DEC-081）：同一家 s1-fast 收 1 道、s1-pro 收 3 道。
+  // 若仍读 provider 级默认模型的保守值 1，s1-pro 会被白拆成四发。
+  const { client, calls, dir } = await makeClient((url, init) => {
+    const ids = Object.keys(JSON.parse(init.body).questions);
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: () => undefined },
+      async json() {
+        return { ...answersFor(ids), model: "s1-pro" };
+      },
+      async text() {
+        return "{}";
+      },
+    };
+  });
+  try {
+    const proClient = new StartluxClient({
+      getConfig: () => ({ ...CFG, decisionModelsModel: "s1-pro" }),
+      logger: { warn() {}, info() {} },
+      telemetryDir: dir,
+      fetchFn: client.fetchFn,
+    });
+    const result = await proClient.classify(fourQuestionCall());
+    assert.equal(calls.length, 2, `四道题按上限 3 应拆成两发，实际 ${calls.length}`);
+    assert.deepEqual(
+      calls.map((call) => Object.keys(call.body.questions)),
+      [["risk", "irreversible", "matches_task"], ["injection_suspect"]],
+    );
+    assert.equal(result?.degraded, undefined, `不该降级：${JSON.stringify(result)}`);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("未声明上限的 provider 仍是一次请求发完（行为不变）", async () => {
   const { client, calls, dir } = await makeClient((url, init) => {
     const ids = Object.keys(JSON.parse(init.body).questions);

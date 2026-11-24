@@ -60,6 +60,10 @@ mode: shadow
 #                     https://api.decisionmodels.io/v1，System One 协议
 #                     POST /v1/systemone；模型 s1-fast / s1-pro / s1-vision /
 #                     reax-1，默认 s1-fast；粘一个 API key 即可跑
+#                     各模型的题目上限不同（s1-fast 每次 1 道、s1-pro /
+#                     s1-vision / reax-1 每次 3 道），写在 models 数组每个
+#                     对象的 capabilities.maxQuestions 里，插件按当前模型拆分；
+#                     s1-vision 另声明 capabilities.vision: true（支持图片）
 #   google-decisions  内置。Google AI Studio Decisions API
 #                     https://generativelanguage.googleapis.com/v1beta/decisions，
 #                     模型 gemini-decision-1，x-goog-api-key 鉴权
@@ -77,7 +81,9 @@ mode: shadow
 # perplexity / openrouter 也已预置，但**端点风格与默认模型尚未实测**（接入时
 # 按各家公开 API 地址写的）：首次使用若 404，插件会自动换另一条路径重试；
 # 跑通后建议把实测结论写回 lib/providers.json 的对应条目
-# （每个 provider 一个对象；该服务支持多个模型就写进它的 models 数组。
+# （每个 provider 一个对象；该服务支持多个模型就写进它的 models 数组，
+#  数组里每项可以是模型名字符串，也可以是 { id, capabilities } 对象——
+#  模型级 capabilities 覆盖 provider 级的同名键。
 #  新增一家服务 = 往数组里加一个对象，不需要改代码）。
 provider: systemone
 

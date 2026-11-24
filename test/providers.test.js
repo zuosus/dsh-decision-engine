@@ -75,8 +75,11 @@ test("provider 预设由 JSON 数组提供，models 映射为可选模型清单"
   assert.deepEqual(definitions.map(({ id }) => id), [...PROVIDER_IDS]);
   for (const definition of definitions) {
     assert.ok(Array.isArray(definition.models), `${definition.id} 缺少 models 数组`);
-    assert.deepEqual(PROVIDER_PRESETS[definition.id].models, definition.models);
-    assert.deepEqual(PROVIDER_PRESETS[definition.id].knownModels, definition.models);
+    // models 既可以是字符串，也可以是 { id, capabilities } 对象；归一后
+    // preset.models 始终是 id 清单。这里从两种写法里取出 id 再比对。
+    const ids = definition.models.map((item) => (typeof item === "string" ? item : item.id));
+    assert.deepEqual(PROVIDER_PRESETS[definition.id].models, ids);
+    assert.deepEqual(PROVIDER_PRESETS[definition.id].knownModels, ids);
   }
 });
 

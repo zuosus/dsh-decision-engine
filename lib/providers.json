@@ -129,10 +129,22 @@
     "modelField": "decisionModelsModel",
     "keyEnvField": "decisionModelsApiKeyEnv",
     "models": [
-      "s1-fast",
-      "s1-pro",
-      "s1-vision",
-      "reax-1"
+      {
+        "id": "s1-fast",
+        "capabilities": { "maxQuestions": 1 }
+      },
+      {
+        "id": "s1-pro",
+        "capabilities": { "maxQuestions": 3 }
+      },
+      {
+        "id": "s1-vision",
+        "capabilities": { "vision": true, "maxQuestions": 3 }
+      },
+      {
+        "id": "reax-1",
+        "capabilities": { "maxQuestions": 3 }
+      }
     ],
     "hint": "Decision Models（decisionmodels.io）的 System One 端点（POST /v1/systemone）；可用模型 s1-fast / s1-pro / s1-vision / reax-1，默认 s1-fast（每次只收 1 道题，插件会自动拆分），只填一个 API key 即可使用",
     "hintEn": "Decision Models (decisionmodels.io) System One endpoint (POST /v1/systemone); models s1-fast / s1-pro / s1-vision / reax-1, default s1-fast (one question per request; the plugin splits automatically) — just add an API key",

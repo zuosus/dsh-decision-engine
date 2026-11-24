@@ -3292,3 +3292,69 @@ test("界面读的是能力表而不是专用字段：capabilities.thinkMode=fal
   const select = findNode(rowByField(tree, "thinkMode"), (n) => n.type === "select");
   assert.equal(select.props.disabled, true, "能力表说 false 就必须禁用，与字段名无关");
 });
+
+test("能力按选中模型取值：provider 不支持但选中的模型支持时下拉可用", async () => {
+  // 能力写在模型上（DEC-081）：选中哪款模型就按哪张表显示。前端不能只看
+  // provider 级 capabilities，否则「模型重开了 think_mode」永远显示不出来。
+  const catalog = providerCatalog().map((item) =>
+    item.id === "decisionmodels"
+      ? {
+          ...item,
+          capabilities: { ...item.capabilities, thinkMode: false },
+          modelCapabilities: {
+            ...item.modelCapabilities,
+            "think-pro": { ...item.capabilities, thinkMode: true },
+          },
+        }
+      : item,
+  );
+  const state = stateWith({
+    provider: "decisionmodels",
+    providerCatalog: catalog,
+    rawModels: { decisionModelsModel: "think-pro" },
+  });
+  const { tree } = await render(state);
+  const select = findNode(rowByField(tree, "thinkMode"), (n) => n.type === "select");
+  assert.notEqual(select.props.disabled, true, "选中的模型声明 thinkMode:true 就该可用");
+});
+
+test("能力按选中模型取值：同一 provider 换到不支持的模型后下拉即禁用", async () => {
+  const catalog = providerCatalog().map((item) =>
+    item.id === "decisionmodels"
+      ? {
+          ...item,
+          capabilities: { ...item.capabilities, thinkMode: true },
+          modelCapabilities: {
+            ...item.modelCapabilities,
+            "no-think": { ...item.capabilities, thinkMode: false },
+          },
+        }
+      : item,
+  );
+  const { tree } = await render(
+    stateWith({
+      provider: "decisionmodels",
+      providerCatalog: catalog,
+      rawModels: { decisionModelsModel: "no-think" },
+    }),
+  );
+  const select = findNode(rowByField(tree, "thinkMode"), (n) => n.type === "select");
+  assert.equal(select.props.disabled, true, "选中的模型声明 thinkMode:false 就该禁用");
+});
+
+test("老服务端不下发 modelCapabilities 时，回落到 provider 级能力（行为不变）", async () => {
+  const catalog = providerCatalog().map((item) => {
+    if (item.id !== "decisionmodels") return item;
+    const { modelCapabilities, ...rest } = item;
+    return { ...rest, capabilities: { ...rest.capabilities, thinkMode: false } };
+  });
+  const { tree } = await render(
+    stateWith({
+      provider: "decisionmodels",
+      providerCatalog: catalog,
+      rawModels: { decisionModelsModel: "s1-fast" },
+    }),
+  );
+  const select = findNode(rowByField(tree, "thinkMode"), (n) => n.type === "select");
+  assert.equal(select.props.disabled, true, "没有模型级表时按 provider 级能力禁用");
+});

@@ -2,6 +2,47 @@
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
 
+## DEC-081 模型级 capabilities 覆盖 provider 级：同一家不同模型可以有不同脾气（2026-11-25）
+
+**背景**：用户给出 decisionmodels.io 的模型说明：s1-fast 是快速文本模型，s1-pro 处理较难判断且每次最多收三道题，s1-vision 接受图片。此前 DEC-079 的 `maxQuestions` 写在 provider 层（decisionmodels 填 1，取默认模型 s1-fast 的保守值），DEC-078 的 `capabilities` 也只写在 provider 层。这与事实冲突：上限与能力都是**模型**属性——把 1 套到 s1-pro 上会让它被无谓拆成四发，把 `thinkMode:false` 写死在 provider 层则挡住「某款模型重开该字段」的可能。用户要求：把 capabilities 加进 `models` 数组每个对象的配置里，模型的配置 override provider 的配置。
+
+**决定**：
+
+- **`providers.json` 的 `models` 数组每项从「字符串」扩展为「字符串或 `{ id, capabilities }` 对象」**：字符串写法原样兼容（归一成空能力对象），对象写法给该模型声明自己的 `capabilities`。`preset.models` / `knownModels` / `catalog.models` 仍是 id 清单，既有消费者逐字不变；新增 `preset.modelCapabilities`（模型名 → 自己的能力表）承载对象里的声明。
+- **新增 `effectiveCapabilities(preset, modelId)`（数据层纯函数）**：provider 表打底、模型表逐键覆盖（未知键同样覆盖、原样透传）、协议事实兜底（`thinkMode` 只有 systemone 协议才可能 true）。合并产生新对象，绝不写回 preset 自己的表，因此按不同模型反复合并不互相污染。
+- **`resolveProvider` 按生效模型解析**：custom / preset 两个分支的 `capabilities`、`supportsThinkMode`、`maxQuestions` 都改读 `effectiveCapabilities(preset, model)`。`maxQuestions` 优先取模型能力里的值，没声明时回落 provider 级 `maxQuestions`（老 JSON 不写模型能力也照常工作）。server 下发分支不变（下发值不声明能力）。
+- **传输层读生效值**：`buildRequestBody` 的 `think_mode` 判断从 `preset.supportsThinkMode === false` 改为 `provider.supportsThinkMode === false`——后者是 resolveProvider 合并后的结果，模型重开字段时请求体里才真的会出现它。
+- **`providerCatalog()` 下发 `modelCapabilities`（每个模型合并后的表）**：provider 级 `capabilities` 保持「默认模型视角」给老界面，行为逐字不变；新界面按当前选中的模型改读 `modelCapabilities[modelValue]`。
+- **界面按选中模型取能力**：`capabilityOf(key)` 优先读 `activeProvider.modelCapabilities[modelValue]`，没有该表或该模型时回落 provider 级表，再没有才按 true。于是同一 provider 换模型时「思考模式」下拉的可用状态跟着变。
+- **`decisionmodels` 预设改造**：四个模型改成对象写法，`s1-fast` 声明 `maxQuestions: 1`，`s1-pro` / `s1-vision` / `reax-1` 声明 `maxQuestions: 3`，`s1-vision` 另声明 `vision: true`（未知能力键，验证透传）。provider 级 `capabilities: { thinkMode: false }` 保留，作为所有模型的共同默认值。
+
+**为什么**：
+
+- **能力必须跟着模型走**。DEC-079 已经确认上限是模型属性，但当时把它压在 provider 层是权宜之计（默认模型 s1-fast 的保守值）。现在用户明确要求模型级覆盖，保守值继续套在所有模型上就成了谎报：s1-pro 白拆四发，既多花请求又多等延迟。
+- **模型只覆盖自己声明的键**。逐键合并而不是整表替换，是因为 `thinkMode:false` 这类「全模型共同事实」写在 provider 层一次就够；模型只说「我和别人不一样的那几项」。这也让未知能力键天然可扩展——数据层不认识就不吞。
+- **协议事实仍优先**。非 systemone 协议的请求体里根本没有 `think_mode`，即使模型声明 `thinkMode:true` 也不能让能力表说谎（DEC-078 的同一条约束）。
+- **三层都读同一张合并表**。界面与传输层若各实现一遍合并规则，就会回到「界面说支持、请求体里没有」的静默失效（docs/lessons/provider-capabilities.md 的教训）。把合并收在数据层一个函数里，两侧只消费结果。
+- **字符串写法必须兼容**。老 JSON、外部脚本、`test/provider-json-catalog.test.js` 都按字符串数组读写 `models`；改成只收对象会让升级变成一次破坏性变更。
+
+**被否决的方案**：
+
+- **只把 `maxQuestions` 挪到模型上，其它能力仍在 provider 层**：否决。用户要求的是整个 capabilities 都能被模型覆盖；只挪一个字段等于把「模型级能力」做成特例，下次加能力还要再改一遍。
+- **模型整表替换 provider 表**：否决。那样每款模型都要重复声明所有共同能力，漏一个就丢一个（DEC-078 已经吃过「界面一份、传输层一份」的亏）。
+- **在界面里按模型 id 判断能力**：否决。那是把服务商的脾气抄进前端，新增一家就要改前端，漏改就是静默失效。
+- **让模型声明盖过协议事实**：否决。请求体形状由协议决定，声明盖不过事实，否则能力表可以说谎。
+
+**验证**：
+
+- `test/model-capabilities.test.js`（新增，7 项）：对象/字符串两种写法归一、模型覆盖 provider（含未知键、provider 表不被改脏）、协议优先、decisionmodels 各模型能力、传输层读生效表、catalog 按模型下发合并表。
+- `test/question-batching-route.test.js`（+1 项）：真实 `StartluxClient` + 桩 fetch，四问授权集在 s1-pro（上限 3）下拆成**两发**（s1-fast 是四发），答案合并后仍能解析出裁决。
+- `test/client-ui.test.js`（+3 项）：选中模型声明 `thinkMode:true` 时下拉可用、换到不支持的模型即禁用、老服务端不下发 `modelCapabilities` 时回落 provider 级表。
+- `test/providers.test.js`（修订 1 项）：JSON 里的 models 可能是对象，比对时先取 id 再与归一的 `preset.models` 比对。
+- 红→绿证据：实现前新增的 `test/model-capabilities.test.js` 因缺少 `effectiveCapabilities` 导出而整文件加载失败；数据层实现后 4/7 通过、3 项仍红在 resolve/catalog/请求体；三层接线完成后 7/7 通过。
+- `node --test test/`：**910 项 / 910 通过 / 0 失败**（基线 899 + 新增 11）。`node scripts/verify-wiring.mjs`：全部接线检查通过。
+
+**改动文件**：`lib/providers.json`（decisionmodels 模型改成对象写法 + 各模型能力）、`lib/provider-presets.js`（`modelDefsOf` + `effectiveCapabilities` + `modelCapabilities`）、`lib/providers.js`（三个 resolve 分支按模型合并、catalog 下发 `modelCapabilities`）、`lib/wire-protocol.js`（读生效 `supportsThinkMode`）、`lib/client.js`（`capabilityOf` 按选中模型取值）、`test/model-capabilities.test.js`（新增）、`test/question-batching-route.test.js`、`test/client-ui.test.js`、`test/providers.test.js`、`README.md`、`README.zh.md`、`config.example.yml`、`DECISIONS.md`。
+
+
 ## DEC-080 配置页「删除配置」按钮：只删该 provider 的 API Key，两处存储按当前位置清（2026-11-25）
 
 **背景**：用户多处配置过 key 后，没有界面入口把某一家已经配好的 key 撤销——只能去 `~/.dsh/.credentials.yaml` 手删 refs 项，或手改 `config.yml`，而 key 存在哪一处还取决于 `keyStorage`，用户根本不知道该改哪个文件。用户明确要求：在配置页「连接方式」分组、连接方式下方显示一个删除配置按钮，删除该配置；并在确认范围时选择「只删除 API Key」（模型 / 地址 / 变量名等其它设置保留）。

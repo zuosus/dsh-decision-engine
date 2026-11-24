@@ -16,9 +16,9 @@
 
 插件自带免费决策模型，全新安装默认已开启；也可以换成任何提供决策端点的服务——内置多家预设，或填自定义 base URL。
 
-provider 定义都在 [`lib/providers.json`](./lib/providers.json)：一个 provider 一个对象，写明地址、端点风格、密钥字段，以及 `models` 数组（该服务可用的模型；空数组表示交给服务端决定）。想要增加预设 provider，修改这个文件后发 PR 即可。
+provider 定义都在 [`lib/providers.json`](./lib/providers.json)：一个 provider 一个对象，写明地址、端点风格、密钥字段，以及 `models` 数组（该服务可用的模型；空数组表示交给服务端决定）。`models` 里的每一项既可以是模型名字符串，也可以是 `{ "id": "...", "capabilities": { ... } }` 对象。想要增加预设 provider，修改这个文件后发 PR 即可。
 
-不同端点接受的请求字段不同，因此每个预设带一张 `capabilities` 能力表（例如 `decisionmodels.io` 写 `{ "thinkMode": false }`——它会对 `think_mode` 回 400）。配置界面按这张表把对应的控件禁用并说明原因，而不是给出一个「选了也不生效」的选项。新增一种能力只需要改 JSON，界面不用动。
+不同端点、**甚至同一家端点下的不同模型**接受的请求字段不同，因此能力可以在两层声明：provider 带一张 `capabilities` 表（例如 `decisionmodels.io` 写 `{ "thinkMode": false }`——它会对 `think_mode` 回 400），单个模型可以覆盖其中任意键：`{ "id": "s1-pro", "capabilities": { "maxQuestions": 3 } }` 覆盖 provider 的 `maxQuestions: 1`。模型值盖过 provider 值，协议事实又盖过两者（协议里没有 `think_mode` 字段就不能声称支持）。配置界面与请求构造读的都是**当前选中模型**合并后的能力表，因此控件会在该模型会忽略它时被禁用——不会再有「选了也不生效」的选项。新增一种能力只需要改 JSON，界面不用动。
 
 内置预设覆盖三类服务：System One 兼容端点（TypeSafe、硅基流动、书生·端砚、Decision Models，以及自建 llama.cpp / vLLM）、Google AI Studio Decisions、OpenAI Decisions。三者的**线协议不同**，由 JSON 里的 `protocol` 选择：`systemone`（通用的 `state` + `questions` 形状）、`google-decisions`、`openai-decisions`（`POST /v1/decisions`，请求用 `input` / `questions` 数组，答案以带 `name` 的数组返回）。每种协议的请求体、鉴权头与答案形状都在 [`lib/wire-protocol.js`](./lib/wire-protocol.js) 里——新增一种协议 = 一个模块 + 一条 JSON。
 
