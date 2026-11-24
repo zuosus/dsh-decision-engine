@@ -42,10 +42,19 @@ import {
 
 // ---------------------------------------------------------------- 1. 内置预设
 
-test("内置预设齐备：systemone / bamboonode / siliconflow / siliconflow-intl / perplexity / openrouter / custom", () => {
+test("内置预设齐备：systemone / bamboonode / siliconflow / siliconflow-intl / duanyan / perplexity / openrouter / custom", () => {
   assert.deepEqual(
     [...PROVIDER_IDS],
-    ["systemone", "bamboonode", "siliconflow", "siliconflow-intl", "perplexity", "openrouter", "custom"],
+    [
+      "systemone",
+      "bamboonode",
+      "siliconflow",
+      "siliconflow-intl",
+      "duanyan",
+      "perplexity",
+      "openrouter",
+      "custom",
+    ],
   );
   for (const id of PROVIDER_IDS) {
     assert.ok(PROVIDER_PRESETS[id] !== undefined, `缺少预设 ${id}`);
@@ -140,6 +149,7 @@ test("providerCatalog 覆盖全部 provider 且带展示信息", () => {
     "bamboonodeApiKey",
     "siliconflowApiKey",
     "siliconflowIntlApiKey",
+    "duanyanApiKey",
     "perplexityApiKey",
     "openrouterApiKey",
     "customApiKey",
@@ -153,6 +163,7 @@ test("providerCatalog 覆盖全部 provider 且带展示信息", () => {
     "model",
     "siliconflowModel",
     "siliconflowIntlModel",
+    "duanyanModel",
     "perplexityModel",
     "openrouterModel",
     "customModel",
@@ -660,12 +671,13 @@ test("perplexity / openrouter 预设：地址、key 名与默认模型各自独�
   assert.equal(o.preset.keyField, "openrouterApiKey");
 });
 
-test("五个 provider 各读各的 key，同时配好也互不串用", () => {
+test("六个 provider 各读各的 key，同时配好也互不串用", () => {
   const credentials = {
     TYPESAFE_API_KEY: "key-typesafe",
     BAMBOO_API_KEY: "key-bamboo",
     SILICONFLOW_API_KEY: "key-sf-cn",
     SILICONFLOW_INTL_API_KEY: "key-sf-intl",
+    TOKENPLAN_API_KEY: "key-duanyan",
     DECISION_ENGINE_CUSTOM_KEY: "key-custom",
   };
   const reader = (ref) => credentials[ref];
@@ -674,9 +686,129 @@ test("五个 provider 各读各的 key，同时配好也互不串用", () => {
     ["bamboonode", "key-bamboo"],
     ["siliconflow", "key-sf-cn"],
     ["siliconflow-intl", "key-sf-intl"],
+    ["duanyan", "key-duanyan"],
     ["custom", "key-custom"],
   ]) {
     const cfg = { provider: id, customBaseUrl: "https://gw.example.com/v1" };
     assert.equal(resolveKeyFor(resolveProvider(cfg), { credentialReader: reader, env: {} }), expected, id);
   }
+});
+
+// --------------------------------------------- 9. 书生·端砚（Intern InkStone）
+
+test("书生·端砚预设：端点 /v1/systemone、默认模型 intern-decision-4b、key 名独立", () => {
+  const preset = PROVIDER_PRESETS.duanyan;
+  assert.equal(preset.baseUrl, "https://discovery-api.intern-ai.org.cn/v1");
+  // 实测（2026-11-23，真实 key）：该站只认 /v1/systemone，/v1/decisions 回 404。
+  assert.equal(preset.endpointStyle, "systemone");
+  assert.equal(preset.defaultModel, "intern-decision-4b");
+  // 变量名用平台自己的叫法（端砚控制台的 key 属于 token plan 套餐）。
+  assert.equal(preset.apiKeyEnv, "TOKENPLAN_API_KEY");
+  // 该端点把 model 列为必填（实测），因此预设必须带默认模型——否则
+  //「只填一个 API key 就能用」这条承诺落空。
+  assert.equal(preset.requiresModel, true);
+  // /v1/models 会一并返回普通对话模型（与 SiliconFlow 同款问题），
+  // 只认这份清单里的决策模型，别让下拉里出现「选了就 400」的项。
+  assert.deepEqual(preset.knownModels, ["intern-decision-4b"]);
+});
+
+test("书生·端砚解析出的端点与模型", () => {
+  const provider = resolveProvider({ provider: "duanyan" });
+  assert.equal(provider.id, "duanyan");
+  assert.equal(provider.valid, true);
+  assert.equal(provider.endpoint, "https://discovery-api.intern-ai.org.cn/v1/systemone");
+  // 留空 = 用预设默认：绝不能发「省略 model」的请求（那是一次必 400）。
+  assert.equal(provider.model, "intern-decision-4b");
+  assert.equal(provider.apiKeyEnv, "TOKENPLAN_API_KEY");
+  // 字段名与其它 provider 都不共用：共用一格就是「切过去拿错 key → 401」。
+  assert.equal(provider.preset.keyField, "duanyanApiKey");
+  assert.equal(provider.preset.modelField, "duanyanModel");
+});
+
+test("书生·端砚显式填模型时以填的为准", () => {
+  const provider = resolveProvider({ provider: "duanyan", duanyanModel: "intern-decision-8b" });
+  assert.equal(provider.model, "intern-decision-8b");
+  assert.equal(buildRequestBody(provider, { state: {}, questions: {} }).model, "intern-decision-8b");
+});
+
+test("noul 题在书生·端砚预设下自动补 criteria（该端点缺了就回 400）", () => {
+  // 实测原文：question "irreversible" field `criteria` must be an object
+  // with `true`/`false` keys
+  const provider = resolveProvider({ provider: "duanyan" });
+  const body = buildRequestBody(provider, {
+    state: {},
+    questions: { irreversible: { type: "noul", instructions: "Is it irreversible?" } },
+  });
+  assert.deepEqual(body.questions.irreversible.criteria, {
+    true: "The stated condition is true.",
+    false: "The stated condition is false.",
+  });
+  // 只补 criteria，题目本身不能被改写。
+  assert.equal(body.questions.irreversible.instructions, "Is it irreversible?");
+  assert.equal(body.questions.irreversible.type, "noul");
+});
+
+test("已经写了 criteria 的 noul 题原样保留", () => {
+  const provider = resolveProvider({ provider: "duanyan" });
+  const criteria = { true: "yes", false: "no" };
+  const body = buildRequestBody(provider, {
+    state: {},
+    questions: { irreversible: { type: "noul", instructions: "x", criteria } },
+  });
+  assert.deepEqual(body.questions.irreversible.criteria, criteria);
+});
+
+test("noul 题在所有 provider 下都带 criteria（线协议的标准形状）", () => {
+  // 这不是某一家服务商的偏好：System One 线协议里 noul 题就该带
+  // `criteria: { true, false }`（兄弟插件 dsh-jev-decision-model 一直这么发）。
+  // 端砚缺了就回 400，所以请求体形状必须与 provider 无关——custom 与
+  // 服务端下发的 provider 走同一条补齐路径。
+  const questions = { irreversible: { type: "noul", instructions: "x" } };
+  for (const id of ["duanyan", "siliconflow", "systemone", "bamboonode"]) {
+    const body = buildRequestBody(resolveProvider({ provider: id }), { state: {}, questions });
+    assert.deepEqual(
+      body.questions.irreversible.criteria,
+      { true: "The stated condition is true.", false: "The stated condition is false." },
+      `${id} 的 noul 题应带 criteria`,
+    );
+  }
+  // 输入不被就地改写。
+  assert.equal(questions.irreversible.criteria, undefined);
+});
+
+test("custom 与服务端下发的 provider 也带 criteria（换接法不会又撞上 400）", () => {
+  // 这两条路径的 provider 没有预设表条目（preset 为 undefined），但请求体形状
+  // 必须一样：指向端砚时，custom 与「使用免费模型」同样要求 noul 带 criteria。
+  const custom = resolveProvider({
+    provider: "custom",
+    customBaseUrl: "https://discovery-api.intern-ai.org.cn/v1",
+  });
+  const body = buildRequestBody(custom, {
+    state: {},
+    questions: { irreversible: { type: "noul", instructions: "x" } },
+  });
+  assert.deepEqual(Object.keys(body.questions.irreversible.criteria ?? {}).sort(), ["false", "true"]);
+
+  const server = resolveProvider(
+    {},
+    { server: { baseUrl: "https://discovery-api.intern-ai.org.cn/v1", endpointStyle: "systemone" } },
+  );
+  const serverBody = buildRequestBody(server, {
+    state: {},
+    questions: { irreversible: { type: "noul", instructions: "x" } },
+  });
+  assert.deepEqual(Object.keys(serverBody.questions.irreversible.criteria ?? {}).sort(), ["false", "true"]);
+});
+
+test("非 noul 题型不受 criteria 兼容影响", () => {
+  const provider = resolveProvider({ provider: "duanyan" });
+  const body = buildRequestBody(provider, {
+    state: {},
+    questions: {
+      pick: { type: "choice", options: ["a", "b"] },
+      rate: { type: "score", legend: { low: "x", high: "y" } },
+    },
+  });
+  assert.equal(body.questions.pick.criteria, undefined);
+  assert.equal(body.questions.rate.criteria, undefined);
 });

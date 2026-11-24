@@ -18,6 +18,10 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
+// providers.js 是零依赖纯模块（请求体构造就住在它里面），直接导入即可：
+// lib/index.js 没有再导出 buildRequestBody，而这里要验的正是它。
+import { buildRequestBody } from "../lib/providers.js";
+
 const profileDir = join(homedir(), ".dsh", "profiles", "desktop");
 const requireFromProfile = createRequire(join(profileDir, "package.json"));
 
@@ -318,10 +322,17 @@ check("导出 PROVIDER_IDS", Array.isArray(plugin.PROVIDER_IDS), `实际 ${typeo
 // 整轮字段检查静默跳过——检查脚本自己静默失败比没有检查更危险。
 check("导出 PROVIDER_PRESETS", typeof plugin.PROVIDER_PRESETS === "object", `实际 ${typeof plugin.PROVIDER_PRESETS}`);
 check(
-  "provider 预设覆盖五家（systemone / bamboonode / siliconflow / siliconflow-intl / custom）",
-  ["systemone", "bamboonode", "siliconflow", "siliconflow-intl", "custom"].every((id) =>
-    (plugin.PROVIDER_IDS ?? []).includes(id),
-  ),
+  "provider 预设齐备（8 家：systemone / bamboonode / siliconflow / siliconflow-intl / duanyan / perplexity / openrouter / custom）",
+  [
+    "systemone",
+    "bamboonode",
+    "siliconflow",
+    "siliconflow-intl",
+    "duanyan",
+    "perplexity",
+    "openrouter",
+    "custom",
+  ].every((id) => (plugin.PROVIDER_IDS ?? []).includes(id)),
   `实际 ${JSON.stringify(plugin.PROVIDER_IDS)}`,
 );
 check("默认 provider 保持 bamboonode（升级不改变行为）", defaults.provider === "bamboonode", `实际 ${defaults.provider}`);
@@ -357,6 +368,26 @@ for (const id of ["siliconflow", "siliconflow-intl"]) {
     `实际 ${JSON.stringify(provider.candidates)}`,
   );
 }
+
+// 书生·端砚（Intern InkStone）：只认 /systemone、model 必填（实测省略回 400
+// `field `model` must be a string`），且 noul 题必须带 criteria（实测缺了回 400）。
+// 三条都是实测结论，因此这里逐条钉住：任一条退化，用户看到的都是「静默失效」。
+const duanyanProvider = plugin.resolveProvider({ ...defaults, provider: "duanyan" });
+check(
+  "duanyan 解析出 /v1/systemone 且留空时带默认模型",
+  duanyanProvider.endpoint.endsWith("/v1/systemone") && duanyanProvider.model === "intern-decision-4b",
+  `实际 ${duanyanProvider.endpoint} / model=${JSON.stringify(duanyanProvider.model)}`,
+);
+const duanyanBody = buildRequestBody(duanyanProvider, {
+  state: {},
+  questions: { irreversible: { type: "noul", instructions: "x" } },
+});
+check(
+  "noul 题带 criteria（端砚缺了就 400）",
+  typeof duanyanBody.questions?.irreversible?.criteria?.true === "string"
+    && typeof duanyanBody.questions?.irreversible?.criteria?.false === "string",
+  `实际 ${JSON.stringify(duanyanBody.questions?.irreversible?.criteria)}`,
+);
 
 // custom 缺地址时必须判为不可用，而不是给出一个猜出来的地址。
 const brokenCustom = plugin.resolveProvider({ ...defaults, provider: "custom", customBaseUrl: "" });

@@ -160,7 +160,7 @@ test("keyStorage=credentials 时 key 写进凭据文件、且不落配置文件"
   }
 });
 
-test("五个 provider 分别写各自命名的凭据键，互不覆盖", async () => {
+test("六个 provider 分别写各自命名的凭据键，互不覆盖", async () => {
   const { home, routes, credPath } = setup();
   try {
     // 每个 provider 存一次自己的 key（模拟用户逐个配置）。
@@ -171,7 +171,8 @@ test("五个 provider 分别写各自命名的凭据键，互不覆盖", async (
       ["bamboonode", "bamboonodeApiKey", "sk-BAMBOONODE-B"],
       ["siliconflow", "siliconflowApiKey", "sk-SILICONFLOW-C"],
       ["siliconflow-intl", "siliconflowIntlApiKey", "sk-SILICONFLOW-INTL-D"],
-      ["custom", "customApiKey", "sk-CUSTOM-E"],
+      ["duanyan", "duanyanApiKey", "sk-DUANYAN-E"],
+      ["custom", "customApiKey", "sk-CUSTOM-F"],
     ]) {
       const body = { keyStorage: "credentials", provider, [field]: value };
       if (provider === "custom") body.customBaseUrl = "https://gw.example.com/v1";
@@ -184,7 +185,9 @@ test("五个 provider 分别写各自命名的凭据键，互不覆盖", async (
     assert.equal(pickRefValue(raw, "BAMBOO_API_KEY"), "sk-BAMBOONODE-B");
     assert.equal(pickRefValue(raw, "SILICONFLOW_API_KEY"), "sk-SILICONFLOW-C");
     assert.equal(pickRefValue(raw, "SILICONFLOW_INTL_API_KEY"), "sk-SILICONFLOW-INTL-D");
-    assert.equal(pickRefValue(raw, "DECISION_ENGINE_CUSTOM_KEY"), "sk-CUSTOM-E");
+    // 端砚的 key 存在它自己的变量名下（token plan 套餐），不与别家共用。
+    assert.equal(pickRefValue(raw, "TOKENPLAN_API_KEY"), "sk-DUANYAN-E");
+    assert.equal(pickRefValue(raw, "DECISION_ENGINE_CUSTOM_KEY"), "sk-CUSTOM-F");
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

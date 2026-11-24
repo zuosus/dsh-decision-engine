@@ -2,6 +2,56 @@
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
 
+## DEC-071 新增「书生·端砚」预设 + custom 模型框可手填（2026-11-24）
+
+**背景**：上游 issue #2（`[Feature] 可自定义手动填写 authorization / content-type / model 字段`）提出：选 custom 时模型只能从下拉里选，而有些决策服务的 `/v1/models` 里**根本没有**它的决策模型——书生·端砚（Intern InkStone，上海人工智能实验室）的 `intern-decision-4b` 就是这样，用户只能手填，但界面没有地方可填。
+
+实测（2026-11-23，真实 key）还暴露第二层问题：该端的 System One 端点（`POST https://discovery-api.intern-ai.org.cn/v1/systemone`）要求**每个 noul 问题都带 `criteria: { true, false }`**，缺了就回 HTTP 400：
+
+```
+question "irreversible" field `criteria` must be an object with `true`/`false` keys
+```
+
+本插件的决策点构造 noul 时都不写 criteria，于是「模型名填对了却每次 400」——不是模型不支持，是线协议差一层。守卫是 fail-open 的，这个 400 表现为**静默失效**（守卫不再拦人，也不再报错）。
+
+**决定**：
+
+- **新增「书生·端砚」预设**（`PROVIDER_IDS` 里 id = `duanyan`，插在 siliconflow-intl 之后、custom 之前）：地址 `https://discovery-api.intern-ai.org.cn/v1`、端点风格 `systemone`（实测 `/v1/decisions` 回 404）、默认模型 `intern-decision-4b`、`requiresModel`（该端点 model 必填，留空回落到预设默认）、`knownModels` 只列 `intern-decision-4b`（该站 `/v1/models` 会一并返回普通对话模型，与 SiliconFlow 同款问题）。它有自己的 key 格 `duanyanApiKey`、模型格 `duanyanModel`、变量名格 `duanyanApiKeyEnv`，与其它 provider 互不共用。
+- **密钥变量名用平台自己的叫法** `TOKENPLAN_API_KEY`（端砚控制台的 key 属于「token plan」套餐，官方示例里就是这个变量名）。不另设回退名：这是**新预设**，没有需要兼容的历史变量名，凭空留一个「回退」只会让配置模板承诺一个代码里不存在的键。
+- **noul 题统一补 `criteria: { true, false }`**：`buildRequestBody()` 在发请求前把缺 criteria 的 noul 补成 `{ true: "The stated condition is true.", false: "The stated condition is false." }`（语义与 `dsh-jev-decision-model` 的 `jev.mjs` 一致）。这是**协议层**的形状而不是某家服务商的偏好：`criteria` 是 System One 线协议里 noul 题的标准字段，端砚缺了就回 400，而允许省略它的端点（TypeSafe / Jev / SiliconFlow）收到显式的这两个键同样合法（实测 SiliconFlow 补与不补都回 200）。因此请求体形状与 provider 无关——内置预设、custom、服务端下发三条路径走同一条补齐逻辑，不会出现「换个接法就又撞上那条 400」。
+- **custom 的模型框改成组合框**（原生 `<input list>` + `<datalist>`）：既能下拉选检测到的模型，也能直接手填模型名。空串的语义不变 = 「不发送 model 字段」，由 placeholder 与说明文字表达。**内置预设的模型框仍是下拉**——它们有预设默认模型与已知清单，不需要手填，也不必为它们改测试。
+
+**为什么**：
+
+- **为什么做成预设而不是扩展 custom**：custom 是「用户自己填地址」的那一格，把某家的地址、模型、变量名塞进去，等于让通用分支长出一家一家的特例；而预设表本来就是这个插件收拢 provider 差异的地方（`lib/providers.js` 顶部的说明：provider 只决定「往哪发、用谁的 key、默认哪个模型」）。做成预设还顺带得到「只填一个 API key 就能用」——地址、路径、默认模型都已预置，用户不用知道 `/v1/systemone` 这条路径该填什么。
+- **为什么补 criteria 放在传输层**：它是**线协议对所有 noul 题的一视同仁的要求**，与「这道题问什么」无关。放在传输层，将来新增决策点不必记得再补一次；写进各决策点的题型定义，就得逐个写一遍，漏一个就是一次静默的 400。
+- **为什么组合框只给 custom**：内置预设都有预设默认模型与已知清单，下拉就够用；把它们也换成文本框会改掉所有用户已经习惯的交互，还要连带改它们的测试。而 custom 面向的是「用户自己的服务」——那里的模型常常不在 `/v1/models` 里（书生·端砚实测就是如此），下拉会把人卡死。
+- **为什么不顺手改掉「新增 provider 要改 8+ 处」这件事**：provider 的展示名与说明目前同时存在于 `lib/providers.js`（服务端下发）与 `lib/client.js` 的英文词表里，两处必须逐字相同——这是既有 i18n 路径的结构性债务（`lib/client.js` 的注释自己就写着「漏了就是那一句保持中文」，而且这份镜像表**已经漂移**：perplexity 与 openrouter 的 hint 从来没登记过）。把它改成「英文界面直接用 catalog 下发的 `labelEn` / `hintEn`」能一次消掉这份重复，但那会动到**所有** provider 的渲染路径与对应测试，属于独立的重构，不该混进这个 PR。
+
+**被否决的方案**：
+
+- **把「补 criteria」做成某个预设专属的标记**（`requiresNoulCriteria`，只对声明它的预先生效，其它 provider 的请求体一个字节都不变）：**否决**。初审时它是首选（影响半径最小），但实测发现这条路径只盖住三条接法里的一条——`custom` 与「服务端下发」的 provider 都没有预设表条目（`preset === undefined`），拿不到这个标记，于是「custom + 端砚地址」与「免费通道哪天换成端砚地址」会静默退回那条 400。要补齐就得在三处各打一个补丁（预设 + custom + 服务端下发分支），反而更复杂、更容易漏；而协议层的形状本来就该与 provider 无关（见本模块顶部的不变式），统一补齐只需一处。
+- **把端砚做成 custom 的特例**（在 custom 分支里按域名判断）：那等于把「这家服务商的需求」写进通用分支，预设表也就失去意义。
+- **保留下拉再加一个输入框**：两个输入点必然漂移（「下拉选了 A、输入框还显示 B」），保存时还要定义优先级。
+- **顺手把 issue #2 的 `authorization` / `content-type` 也做成可自定义**：本 PR 不做。鉴权方式与响应结构绑定是既有设计（`buildHeaders` 固定 Bearer，`parseCustomHeaders` 保护性忽略这两个头），改动它是一次协议层决策，应单开一个 issue/PR 讨论。issue #2 的 **model 手动输入**部分由本 PR 的组合框实现；关联写法因此是 `Refs #2` 而不是 `Closes #2`——issue 标题里的另两项仍未覆盖。
+- **给端砚的 custom 路径也补 criteria**（让「custom + 手填端砚地址」的老用法继续能用）：不做专门分支——统一补齐已经覆盖了这条路径（custom 与服务端下发都走同一处逻辑）。
+
+**验证**：
+
+- `test/providers.test.js` 新增 8 项（先红后绿）：预设齐备（地址 / 端点风格 / 默认模型 / 变量名 / 已知模型清单）、解析出的端点与模型、显式填模型以填的为准、noul 自动补 criteria、已写 criteria 原样保留、**所有 provider（含 custom 与服务端下发）的 noul 都带 criteria**、非 noul 题型不受影响。另有 1 项是既有用例（「各 provider 各读各的 key」）改名并补上端砚，不是新增。
+- `test/client-ui.test.js` 更新 custom 模型行用例（断言组合框 + placeholder + datalist 候选 + 不出现「服务端默认」），新增 1 项「手填模型名会写进 `customModel`，且不写别的 provider 的模型格」。
+- `test/save-path.test.js` 的凭据落盘用例补上端砚（六个 provider 各自的 refs 键互不覆盖）。
+- `node --test test/*.test.js`：791 项 / 773~774 通过 / 17~18 失败。其中 **17 项与上游基线逐项相同**（上游 `ea2cd1b` 的干净副本在同一跑法下是 782 项 / 765 通过 / 同样这 17 项失败），全是 Windows 环境性失败：POSIX 权限位断言、用 `dirname` 切路径的 POSIX 分隔符、`DSH_HOME` 环境变量跨测试文件串味、测试机 `navigator.language=zh-CN` 而用例假设 `en-US`。第 18 项是**偶发**的 `telemetry.test.js` 临时目录清理竞态（`ENOTEMPTY`：删临时目录时还有异步写没落完；单独跑必过，重负载下更易撞上），与本次改动无关。结论：本次改动**新增 9 项全绿、零新增失败**。（上游 DEC-070 记录的「782/782 全绿」是上游 Linux/macOS 上的结果，两边差异只来自平台。）
+- `node scripts/verify-wiring.mjs`：全部接线检查通过（新增两条：端砚解析出的端点与默认模型、noul 题带 criteria）。
+- **真实端到端复验**（本机已有 key，密钥只在进程内使用、不落盘、不打印）：用仓库里新写的预设代码打 `https://discovery-api.intern-ai.org.cn/v1/systemone` → **HTTP 200**，`model=intern-decision-4b`。
+  - 守卫四问（risk / irreversible / matches_task / injection_suspect）：全部返回，且答案**有判别力**（`irreversible=0.075`、`matches_task=0.638`、`injection_suspect=0.089`，不是同一个常数）。
+  - **真实决策点题目**（直接调 `lib/points/spec.js` 的 `build()`，不手编）：`route`（score + 2×noul）→ HTTP 200，`capability=0.967`、`mechanical=0.693`、`risky=0.182`；`delegate`（choice + 2×noul）→ HTTP 200，`scope=inline conf=0.603`、`parallel=0.362`、`blocking=0.608`。**三种题型全部实测通过**，所以「只填一个 API key 即可使用」这句提示有据。
+  - 同一份题**不补 criteria** → **HTTP 400**（正是上面那条 `criteria` 报错），证明这条兼容是必需的而不是多余的。
+  - 另外两条实测事实（决定了预设的两个标记）：`GET /v1/models` 返回 11 个模型但**不含** `intern-decision-4b`（全是普通对话模型，与 issue #2 描述一致，因此 `knownModels` 白名单是必需的，否则下拉里会出现「选了就 400」的对话模型）；**省略 model 会回 400**（`field `model` must be a string`），因此 `requiresModel: true` 有据。
+  - **三条接法终版复验**（统一补齐后）：端砚预设、`custom` + 手填端砚地址 + 手填模型、服务端下发 provider —— **三条都是 HTTP 200**，`model=intern-decision-4b`。后两条在改成「预设专属标记」的版本里会退回 400（`preset === undefined` 拿不到标记），这正是最终方案改成协议层统一补齐的原因。
+
+**改动文件**：`lib/providers.js`（`PROVIDER_IDS` 新增 `duanyan`、`PROVIDER_PRESETS` 新增端砚条目、`buildRequestBody()` 统一补 noul 的 criteria、新增 `normalizeNoulCriteria()`、模块顶部不变式说明）、`lib/index.js`（`DEFAULTS` 与配置 schema 新增 `duanyanModel` / `duanyanApiKey` / `duanyanApiKeyEnv`）、`lib/client.js`（`EN_LABELS` 登记端砚的展示名 / 说明 / 密钥来源文案；custom 的模型框改为 `<input list>` + `<datalist>`，custom 的模型说明文案同步改写；「留空 = 用预设默认」的提示去掉只属于硅基流动的模型名）、`config.example.yml`（provider 清单、模型格、密钥变量名与 refs 示例、custom 模型格的说明）、`test/providers.test.js`、`test/client-ui.test.js`、`test/save-path.test.js`、`scripts/verify-wiring.mjs`、`scripts/verify-endpoint.mjs`、`DECISIONS.md`。
+
 ## DEC-070 配置页视觉重构：独立 CSS 源文件 + 语义变量 + 字体主导层级，不引入新框架（2026-11-24）
 
 **背景**：配置页沿用早期仿 rewind 插件的行布局：分组标题带彩色色块图标与同色竖线、每行一条底边线、开关用绿/灰填充、多选按钮用靛蓝高亮。信息层级靠颜色和盒子表达，字符间距与留白不成系统，窄屏下左文右控件会互相挤压。用户要求「更高级优雅克制」，技术栈仍是原生 JS + CSS。

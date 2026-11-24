@@ -43,13 +43,16 @@ mode: shadow
 # ============================================================================
 # 服务提供方（provider）
 # ============================================================================
-# 七选一：
+# 八选一：
 #   bamboonode        内置。StartLux 官方端点 POST /v1/decisions，本插件的原有默认值。
 #   systemone         内置。任意 System One 协议服务 POST /v1/systemone，
 #                     默认指向 TypeSafe（https://api.typesafe.ai/v1）。
 #   siliconflow       内置。硅基流动（国内站）https://api.siliconflow.cn/v1/systemone
 #   siliconflow-intl  内置。Silicon Flow 国际站 https://api.siliconflow.com/v1/systemone
 #                     （与国内站是两套账号，key 互不通用）
+#   duanyan           内置。书生·端砚（Intern InkStone，上海人工智能实验室）
+#                     https://discovery-api.intern-ai.org.cn/v1/systemone，
+#                     默认模型 intern-decision-4b
 #   perplexity        内置。Perplexity Decider（api.perplexity.ai）；
 #                     地址与默认模型待实测，端点风格 auto（404 自动换路径重试）
 #   openrouter        内置。OpenRouter（https://openrouter.ai/api/v1），
@@ -59,8 +62,8 @@ mode: shadow
 #
 # 不写这一项 = bamboonode，老配置行为完全不变。
 #
-# siliconflow / siliconflow-intl 是「开箱即用」的：地址、路径、默认模型都已
-# 预置，只要粘一个 API key 就能跑（详见下方「密钥」一节）。
+# siliconflow / siliconflow-intl / duanyan 是「开箱即用」的：地址、路径、默认
+# 模型都已预置，只要粘一个 API key 就能跑（详见下方「密钥」一节）。
 #
 # perplexity / openrouter 也已预置，但**端点风格与默认模型尚未实测**（接入时
 # 按各家公开 API 地址写的）：首次使用若 404，插件会自动换另一条路径重试；
@@ -97,6 +100,16 @@ systemoneModel: ""
 siliconflowModel: ""
 siliconflowIntlModel: ""
 
+# 书生·端砚的模型。**留空 = 用预设默认 intern-decision-4b**——
+# 该端点同样把 model 列为必填（实测省略就回 400），所以「留空」是用预设默认，
+# 不是「让服务端挑」。
+#
+# 想换别的决策模型就改这一格。设置界面的下拉**多半是空的**：端砚的
+# /v1/models 返回的全是普通对话模型，根本不列决策模型（实测 11 个，无
+# intern-decision-4b），而插件只把预设清单里的模型放进下拉——不筛的话，
+# 下拉里会出现「选了就 400」的对话模型。
+duanyanModel: ""
+
 # ---- custom 预设（provider=custom 时才生效）--------------------------------
 # base URL 必填，且必须是 http/https 地址；不带 scheme 会被拒绝（内置预设
 # 允许省略 scheme，custom 不允许——自定义地址必须显式，避免猜错协议）。
@@ -115,8 +128,12 @@ siliconflowIntlModel: ""
 # 只有 404 会触发换路径：400（模型/内容不合法）与 401（key 不对）都跟路径无关。
 customEndpointStyle: auto
 #
-# custom 自己的模型（留空 = 服务端默认）。与内置预设的 model 分开存，
-# 这样在两者之间来回切换不会互相覆盖。
+# custom 自己的模型。**留空 = 不发送 model 字段**（省略语义：请求里没有这一项，
+# 由服务端决定用哪个模型；若该服务要求必填 model，就填一个）。
+# 与内置预设的 model 分开存，这样在两者之间来回切换不会互相覆盖。
+#
+# 设置界面里这一格是**组合框**：既能下拉选检测到的模型，也能直接手填模型名
+# （有些服务的 /v1/models 里根本没有它的决策模型，下拉会把人卡死）。
 customModel: ""
 # custom 的 key；留空则读 customApiKeyEnv（环境变量或 .credentials.yaml 的 refs）
 customApiKey: ""
@@ -134,6 +151,7 @@ customHeaders: ""
 #   bamboonode          -> BAMBOO_API_KEY
 #   硅基流动（国内站）   -> SILICONFLOW_API_KEY
 #   Silicon Flow 国际站 -> SILICONFLOW_INTL_API_KEY
+#   书生·端砚           -> TOKENPLAN_API_KEY
 #   Perplexity Decider -> PERPLEXITY_API_KEY
 #   OpenRouter         -> OPENROUTER_API_KEY
 #   custom              -> customApiKeyEnv（没填时用 DECISION_ENGINE_CUSTOM_KEY）
@@ -155,6 +173,7 @@ keyStorage: credentials
 # bamboonodeApiKeyEnv: ""
 # siliconflowApiKeyEnv: ""
 # siliconflowIntlApiKeyEnv: ""
+# duanyanApiKeyEnv: ""
 # perplexityApiKeyEnv: ""
 # openrouterApiKeyEnv: ""
 # customApiKeyEnv: ""
@@ -166,6 +185,7 @@ keyStorage: credentials
 # bamboonodeApiKey: ""
 # siliconflowApiKey: ""
 # siliconflowIntlApiKey: ""
+# duanyanApiKey: ""
 # perplexityApiKey: ""
 # openrouterApiKey: ""
 # customApiKey: ""
@@ -176,6 +196,7 @@ keyStorage: credentials
 #     TYPESAFE_API_KEY: sk-另一个key
 #     SILICONFLOW_API_KEY: sk-国内站的key
 #     SILICONFLOW_INTL_API_KEY: sk-国际站的key
+#     TOKENPLAN_API_KEY: sk-端砚的key（预设默认读这个变量名；想换名字改 duanyanApiKeyEnv）
 #     PERPLEXITY_API_KEY: sk-perplexity的key
 #     OPENROUTER_API_KEY: sk-openrouter的key
 

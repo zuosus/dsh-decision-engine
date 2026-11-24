@@ -1372,8 +1372,8 @@ test("决策历史关闭时仍然只有一行，且提示说明「不写文件�
 });
 
 
-test("custom 时模型行移入「自定义 provider」区，自动项改为「不发送 model 字段」", async () => {
-  const { text, tree } = await render(
+test("custom 时模型行移入「自定义 provider」区，模型框可下拉也可手填", async () => {
+  const { text, tree, controls } = await render(
     stateWith({
       provider: "custom",
       providerLabel: "custom",
@@ -1384,11 +1384,22 @@ test("custom 时模型行移入「自定义 provider」区，自动项改为「�
   // 位置：模型行必须出现在「自定义 provider」小节里（小节标题之后），
   // 而不是通用区域——清单来自用户自己的服务，与 Base URL 是一组的。
   const sectionAt = text.indexOf("自定义 provider");
-  const modelAt = text.indexOf("自动（不发送 model 字段）");
   assert.ok(sectionAt >= 0, "缺少「自定义 provider」小节");
-  assert.ok(modelAt > sectionAt, "模型选择器应位于自定义 provider 区内");
-  // 文案：custom 没有「服务端默认」可言，自动项必须说清真实语义。
-  // 只看下拉选项本身（页面别处——如底部状态行——会回显状态里的模型字样，不算）。
+
+  // 控件是**组合框**而不是下拉：有些服务的 /v1/models 里根本没有它的决策模型
+  // （书生·端砚的 intern-decision-4b 就是），下拉会把用户卡死（issue #2）。
+  const modelInput = controls.find(
+    (node) => node.type === "input" && typeof node.props.list === "string",
+  );
+  assert.ok(modelInput !== undefined, "custom 的模型框应是可输入的组合框，而不是下拉");
+  // 空串的语义不变 = 「不发送 model 字段」，由 placeholder 表达。
+  assert.equal(modelInput.props.placeholder, "自动（不发送 model 字段）");
+  assert.ok(
+    text.indexOf(modelInput.props.placeholder) > sectionAt,
+    "模型框应位于自定义 provider 区内",
+  );
+  // 文案：custom 没有「服务端默认」可言，不能出现那句误导的话。
+  // 只看下拉候选本身（页面别处——如底部状态行——会回显状态里的模型字样，不算）。
   const optionTexts = [];
   (function collect(node) {
     if (node === null || node === undefined || typeof node !== "object") return;
@@ -1397,12 +1408,51 @@ test("custom 时模型行移入「自定义 provider」区，自动项改为「�
     }
     for (const child of node.children ?? []) collect(child);
   })(tree);
-  assert.ok(optionTexts.includes("自动（不发送 model 字段）"), "custom 的自动项应说明是省略 model 字段");
   assert.equal(
     optionTexts.includes("自动（服务端默认）"),
     false,
     "custom 不应出现「服务端默认」的误导文案",
   );
+  // 候选来自 datalist（点开输入框即见候选，仍可自由输入）。
+  const datalist = findNode(tree, (node) => node.type === "datalist");
+  assert.ok(datalist !== undefined, "组合框缺少候选列表（datalist）");
+});
+
+test("custom 手填模型名会写进 customModel（模型不在 /v1/models 列表里也能用）", async () => {
+  const { controls } = await render(
+    stateWith({
+      provider: "custom",
+      providerLabel: "custom",
+      baseUrl: "",
+      customBaseUrl: "https://gw.example.com/v1",
+    }),
+  );
+  const modelInput = controls.find(
+    (node) => node.type === "input" && typeof node.props.list === "string",
+  );
+  assert.ok(modelInput !== undefined, "custom 的模型框应是可输入的组合框");
+
+  const stub = stubFetch();
+  try {
+    // 打字：先防抖落盘（文本框节奏），失焦再立即存一次。
+    modelInput.props.onChange({ target: { value: "intern-decision-4b" } });
+    modelInput.props.onBlur();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  } finally {
+    stub.restore();
+  }
+
+  const configCall = stub.calls.find((item) => item.url.endsWith("/api/decision-engine/config"));
+  assert.ok(configCall !== undefined, "手填模型名应自动落盘");
+  const body = JSON.parse(configCall.init.body);
+  assert.equal(
+    body.customModel,
+    "intern-decision-4b",
+    `模型应写进 customModel，实际：${configCall.init.body}`,
+  );
+  // 只写 custom 那一格：A 的模型名不能被写进 B 的格子。
+  assert.equal(Object.hasOwn(body, "model"), false, "不该写遗留的模型字段");
+  assert.equal(Object.hasOwn(body, "siliconflowModel"), false, "不该写其它 provider 的模型字段");
 });
 
 test("内置预设的模型行留在通用区域，自动项仍是「服务端默认」", async () => {
