@@ -8,9 +8,9 @@ const cssPath = new URL("../lib/client.config.css", import.meta.url);
 const css = existsSync(cssPath) ? readFileSync(cssPath, "utf8") : "";
 let loadSeq = 0;
 const status = {
-  enabled: true, mode: "shadow", provider: "bamboonode", providerValid: true,
-  providerLabel: "bamboonode", providerError: "", providerCatalog: providerCatalog(),
-  baseUrl: "https://api.bamboonode.dev/v1/decisions", rawBaseUrl: "https://api.bamboonode.dev/v1",
+  enabled: true, mode: "shadow", provider: "systemone", providerValid: true,
+  providerLabel: "systemone", providerError: "", providerCatalog: providerCatalog(),
+  baseUrl: "https://api.typesafe.ai/v1/decisions", rawBaseUrl: "https://api.typesafe.ai/v1",
   customBaseUrl: "", customEndpointStyle: "auto", customModel: "", customHeaders: "",
   customApiKeyEnv: "", customKeyConfigured: false, model: "自动（服务端默认）",
   rawModel: "", rawModels: {}, thinkMode: "never", timeoutMs: 8000,
@@ -128,7 +128,7 @@ test("provider row owns its original select through a labelled control wrapper",
   assert.ok(control, "provider row missing de-cfg__control wrapper");
   const select = nodes(control, (node) => node.type === "select")[0];
   assert.ok(select, "control wrapper must contain the existing provider select");
-  assert.equal(select.props.value, "bamboonode");
+  assert.equal(select.props.value, "systemone");
   assert.ok(nodes(select, (node) => node.type === "option" && node.props.value === "custom").length,
     "provider select must preserve custom provider option");
   const labels = associatedLabel(root, select);

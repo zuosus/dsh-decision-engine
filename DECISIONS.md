@@ -12,7 +12,7 @@
 - **数据层单独一个文件 `lib/provider-presets.js`**（零依赖，只读同目录 JSON 一次）：`parseProviderPresets()` 把数组归一成运行时清单，`PROVIDER_LIST` 是加载即用的结果。`providers.js` 只保留「请求怎么构造、端点怎么拼」，并把 `ENDPOINT_STYLES` / `parseProviderPresets` 原样再导出，对外 API 不变。
 - **只有 `id` 必填，其余可推导**：`keyField`/`modelField`/`keyEnvField` 缺省按 id 推导（`my-gateway` → `myGatewayApiKey` / `myGatewayModel` / `myGatewayApiKeyEnv`），`apiKeyEnv` 缺省为 `MY_GATEWAY_API_KEY`，`label`/`labelEn` 缺省为 id，`defaultModel` 缺省取 `models[0]`，`endpointStyle` 缺省 `auto`。所以新增一家服务的最小写法是三行：`{ "id", "baseUrl", "models" }`。
 - **坏数据在加载时抛错**：重复 id、两个 provider 共用同一个配置字段、id 不合 `[a-z0-9-]`、空数组、`default: true` 多于一条，一律直接抛。写坏的 JSON 会让插件起不来——这比「切过去没地址 / 没 key」的静默失效好。
-- **代码里不再按 id 特判**：`if (id === "custom")` 改为预设的 `customizable` 标记；`id === "bamboonode"` 的三处历史字段兼容改为数据里的 `legacyBaseUrlField` / `legacyKeyField` / `legacyKeyEnvOverride`；`typedModelsOnly`、`legacyModelDefault` 同理。`DEFAULT_PROVIDER` 取 `"default": true` 的那一条。
+- **代码里不再按 id 特判**：`if (id === "custom")` 改为预设的 `customizable` 标记；历史字段兼容改为数据里的 `legacyBaseUrlField` / `legacyKeyField` / `legacyKeyEnvOverride`；`typedModelsOnly`、`legacyModelDefault` 同理。`DEFAULT_PROVIDER` 取 `"default": true` 的那一条。
 - **`lib/index.js` 的字段清单改为从数据推导**：`DEFAULTS`、`Config` schema、保存白名单、`persistKeys` 槽位、`rawModels`、`buildKeyStatus` 全部由 `PROVIDER_PRESETS` 生成，新增 provider 三格自动出现。
 - **`models` 成为 canonical 字段**，`knownModels` 保留为同一份数据的兼容别名（外部脚本/旧测试在用）。
 - **英文文案也走数据**：`providerCatalog()` 一直下发 `labelEn`/`hintEn`，客户端新增 `providerText()` 按语言取；`/status` 补 `providerLabelEn`。于是新增 provider 只写 JSON 的中英两栏，不必再到 `lib/client.js` 的 `EN_LABELS` 里补两行——那份镜像表已经漂移过一次（perplexity / openrouter 的 hint 从没登记）。
@@ -27,7 +27,7 @@
 
 **被否决的方案**：
 
-- **把 `default: true` 也留给代码（`DEFAULT_PROVIDER = "bamboonode"` 常量）**：否决。这样「换默认 provider」仍要改代码，与「只改 JSON」的承诺不一致；且新增 `default` 标记后测试可以断言「恰好一条」。
+- **把 `default: true` 也留给代码（硬编码默认 provider）**：否决。这样「换默认 provider」仍要改代码，与「只改 JSON」的承诺不一致；且新增 `default` 标记后测试可以断言「恰好一条」。
 - **允许 `label`/`hint` 缺省为空串，让界面回落到 id**：否决。缺省文案会让下拉出现空白项，用户以为是加载失败；统一回落到 id 至少可读。
 - **两个字段名撞车时只警告不抛错**：否决。撞车的后果是「切到 A 再切回 B，B 的值被 A 覆盖」——最典型也最难自查的一类静默失效，必须在加载时就拒绝。
 - **支持用户自己的 `providers.json` 覆盖（`~/.dsh/plugins/<dir>/providers.json` 合并内置）**：本次不做。用户当前要的是「改内置数据」，而运行时合并要定义「覆盖 / 追加 / 删除」三种语义与冲突优先级，还会让「你的配置为什么和文档不符」变成常态。`custom` provider 已经覆盖了「接任意服务」的场景；真要多家自定义，值得单独设计一次。
@@ -428,7 +428,7 @@ provider 点『测试』大约 2/3 会报错」。同一个端点、同一把 ke
 一边三分之二失败——这个反差必须解释清楚，否则任何「再点几次试试」的回应都只是
 把用户推回随机。
 
-实测（bamboonode `https://api.bamboonode.dev/v1/decisions`，模型
+实测（当时的默认预设，模型
 `startlux-decision-v1.1-27b-autothink`，生产遥测 2573 次请求 / 358 次降级）：
 
 | 场景 | 实测延迟 |

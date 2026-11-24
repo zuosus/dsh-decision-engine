@@ -202,14 +202,14 @@ test("遥测带 provider：它是回填历史统计时唯一可靠的归因来�
     classify: () => ({
       answers: { covered: { type: "noul", noul: 0.95 }, would_add: { type: "noul", noul: 0.05 } },
       model: "startlux-decision-v1.1-27b-autothink",
-      provider: "bamboonode",
+      provider: "systemone",
       latencyMs: 12,
       cached: false,
     }),
   });
   await runner.ask("retrieval", { tool: "web_search", query: "x" });
   assert.equal(entries.length, 1);
-  assert.equal(entries[0].provider, "bamboonode", "遥测必须自带 provider");
+  assert.equal(entries[0].provider, "systemone", "遥测必须自带 provider");
 });
 
 test("遥测带 provider：答案形状不符的降级记录也带", async () => {
@@ -218,7 +218,7 @@ test("遥测带 provider：答案形状不符的降级记录也带", async () =>
     classify: () => ({
       answers: { covered: { type: "noul", noul: 0.9 } },
       model: "startlux-decision-v1.1-27b-autothink",
-      provider: "bamboonode",
+      provider: "systemone",
       latencyMs: 3,
       cached: false,
     }),
@@ -226,7 +226,7 @@ test("遥测带 provider：答案形状不符的降级记录也带", async () =>
   await runner.ask("retrieval", { tool: "web_search", query: "x" });
   assert.equal(entries.length, 1);
   assert.equal(entries[0].detail, "answer-shape-mismatch");
-  assert.equal(entries[0].provider, "bamboonode", "降级遥测也要带 provider");
+  assert.equal(entries[0].provider, "systemone", "降级遥测也要带 provider");
 });
 
 test("缺少规格实现时按不介入处理，不抛", async () => {
@@ -942,8 +942,8 @@ async function loadIndexModule(t) {
 /** 韧性用例的配置基线：缓存关掉，避免第二次调用直接命中缓存而绕过网络。 */
 function resilienceCfg(over = {}) {
   return {
-    provider: "bamboonode",
-    bamboonodeApiKey: "test-key",
+    provider: "systemone",
+    systemoneApiKey: "test-key",
     cacheSize: 0,
     cacheTtlMs: 0,
     timeoutMs: 5000,
@@ -1186,10 +1186,10 @@ test("测试按钮：走注入的 fetchFn、网络错误重试一次，并给出
   if (mod === undefined) return;
   const home = mkdtempSync(join(tmpdir(), "de-probe-"));
   const originalHome = process.env.DSH_HOME;
-  const originalKey = process.env.BAMBOO_API_KEY;
+  const originalKey = process.env.TYPESAFE_API_KEY;
   const originalFetch = globalThis.fetch;
   process.env.DSH_HOME = home;
-  process.env.BAMBOO_API_KEY = "probe-test-key";
+  process.env.TYPESAFE_API_KEY = "probe-test-key";
   let pinned = 0;
   let bare = 0;
   // 决策端点的桩：一律抛网络错误（模拟本机链路不通）。
@@ -1237,8 +1237,8 @@ test("测试按钮：走注入的 fetchFn、网络错误重试一次，并给出
     globalThis.fetch = originalFetch;
     if (originalHome === undefined) delete process.env.DSH_HOME;
     else process.env.DSH_HOME = originalHome;
-    if (originalKey === undefined) delete process.env.BAMBOO_API_KEY;
-    else process.env.BAMBOO_API_KEY = originalKey;
+    if (originalKey === undefined) delete process.env.TYPESAFE_API_KEY;
+    else process.env.TYPESAFE_API_KEY = originalKey;
     rmSync(home, { recursive: true, force: true });
   }
 });
@@ -1252,10 +1252,10 @@ test("测试按钮：走注入的 fetchFn、网络错误重试一次，并给出
 async function probeSetup(mod, { decisionFetch, before } = {}) {
   const home = mkdtempSync(join(tmpdir(), "de-probe-"));
   const originalHome = process.env.DSH_HOME;
-  const originalKey = process.env.BAMBOO_API_KEY;
+  const originalKey = process.env.TYPESAFE_API_KEY;
   const originalFetch = globalThis.fetch;
   process.env.DSH_HOME = home;
-  process.env.BAMBOO_API_KEY = "probe-test-key";
+  process.env.TYPESAFE_API_KEY = "probe-test-key";
   const calls = [];
   // 桩必须在 apply 之前装好：客户端在构造时就固化了 fetchFn。
   globalThis.fetch = async (url, init) => {
@@ -1302,8 +1302,8 @@ async function probeSetup(mod, { decisionFetch, before } = {}) {
       globalThis.fetch = originalFetch;
       if (originalHome === undefined) delete process.env.DSH_HOME;
       else process.env.DSH_HOME = originalHome;
-      if (originalKey === undefined) delete process.env.BAMBOO_API_KEY;
-      else process.env.BAMBOO_API_KEY = originalKey;
+      if (originalKey === undefined) delete process.env.TYPESAFE_API_KEY;
+      else process.env.TYPESAFE_API_KEY = originalKey;
       rmSync(home, { recursive: true, force: true });
     },
   };
@@ -1353,8 +1353,8 @@ test("测试按钮：冷却中仍然照常发请求，但明确写出「本次�
           "enabled: true",
           "mode: enforce",
           "pointAuthorize: enforce",
-          "provider: bamboonode",
-          "bamboonodeApiKey: sk-test-key-000000",
+          "provider: systemone",
+          "systemoneApiKey: sk-test-key-000000",
           "timeoutMs: 5000",
           "retryAttempts: 0",
           "failureThreshold: 1",

@@ -71,10 +71,10 @@ test("全新安装（数据目录不存在）首次保存能成功，并自动�
     assert.equal(existsSync(join(home, "plugins", "dsh-decision-engine")), false, "前置：目录应不存在");
 
     const { status, data } = await putConfig(routes, {
-      provider: "bamboonode",
+      provider: "systemone",
       keyStorage: "config",
       enabled: true,
-      bamboonodeApiKey: "sk-FRESH-INSTALL-123456",
+      systemoneApiKey: "sk-FRESH-INSTALL-123456",
     });
 
     assert.equal(status, 200, `首次保存应成功，实际：${JSON.stringify(data)}`);
@@ -82,7 +82,7 @@ test("全新安装（数据目录不存在）首次保存能成功，并自动�
     assert.ok(existsSync(configPath), "应写出 config.yml");
 
     const raw = readFileSync(configPath, "utf8");
-    assert.ok(raw.includes("bamboonodeApiKey: sk-FRESH-INSTALL-123456"), "key 应写入配置");
+    assert.ok(raw.includes("systemoneApiKey: sk-FRESH-INSTALL-123456"), "key 应写入配置");
     assert.ok(raw.includes("enabled: true"), "其它字段也应写入");
   } finally {
     rmSync(home, { recursive: true, force: true });
@@ -91,7 +91,7 @@ test("全新安装（数据目录不存在）首次保存能成功，并自动�
 
 test("配置写入失败时，已写入的凭据回滚为原值（不留半套改动）", async () => {
   const { home, routes, credPath, configPath } = setup({
-    seedCredentials: "version: 1\nrefs:\n  BAMBOO_API_KEY: sk-ORIGINAL-KEY\n",
+    seedCredentials: "version: 1\nrefs:\n  TYPESAFE_API_KEY: sk-ORIGINAL-KEY\n",
   });
   try {
     // 制造写入失败：把数据目录占成一个普通文件，mkdir 必然失败。
@@ -102,16 +102,16 @@ test("配置写入失败时，已写入的凭据回滚为原值（不留半套�
     assert.equal(existsSync(configPath), false);
 
     const { status, data } = await putConfig(routes, {
-      provider: "bamboonode",
+      provider: "systemone",
       keyStorage: "credentials",
-      bamboonodeApiKey: "sk-NEW-KEY-SHOULD-ROLL-BACK",
+      systemoneApiKey: "sk-NEW-KEY-SHOULD-ROLL-BACK",
     });
 
     assert.equal(status, 500, "配置写不进去时必须整体报错，而不是假装成功");
     assert.ok(typeof data.error === "string" && data.error.length > 0, "应返回可展示的原因");
 
     // 核心断言：凭据必须还是原值，不能留下「凭据改了、配置没改」。
-    const after = pickRefValue(readFileSync(credPath, "utf8"), "BAMBOO_API_KEY");
+    const after = pickRefValue(readFileSync(credPath, "utf8"), "TYPESAFE_API_KEY");
     assert.equal(after, "sk-ORIGINAL-KEY", "凭据必须回滚为写入前的值");
   } finally {
     rmSync(home, { recursive: true, force: true });
@@ -124,14 +124,14 @@ test("keyStorage=config 时凭据文件不被写入（明文不落两处）", as
   });
   try {
     const { status } = await putConfig(routes, {
-      provider: "bamboonode",
+      provider: "systemone",
       keyStorage: "config",
-      bamboonodeApiKey: "sk-ONLY-IN-CONFIG",
+      systemoneApiKey: "sk-ONLY-IN-CONFIG",
     });
     assert.equal(status, 200);
 
     const raw = readFileSync(credPath, "utf8");
-    assert.equal(pickRefValue(raw, "BAMBOO_API_KEY"), undefined, "凭据文件里不应出现这个 key");
+    assert.equal(pickRefValue(raw, "TYPESAFE_API_KEY"), undefined, "凭据文件里不应出现这个 key");
     assert.equal(pickRefValue(raw, "DEEPSEEK_API_KEY"), "sk-KEEP", "其它凭据不应被改动");
   } finally {
     rmSync(home, { recursive: true, force: true });
@@ -142,14 +142,14 @@ test("keyStorage=credentials 时 key 写进凭据文件、且不落配置文件"
   const { home, routes, credPath, configPath } = setup();
   try {
     const { status } = await putConfig(routes, {
-      provider: "bamboonode",
+      provider: "systemone",
       keyStorage: "credentials",
-      bamboonodeApiKey: "sk-TO-CREDENTIALS-777",
+      systemoneApiKey: "sk-TO-CREDENTIALS-777",
     });
     assert.equal(status, 200);
 
     assert.equal(
-      pickRefValue(readFileSync(credPath, "utf8"), "BAMBOO_API_KEY"),
+      pickRefValue(readFileSync(credPath, "utf8"), "TYPESAFE_API_KEY"),
       "sk-TO-CREDENTIALS-777",
       "应写进凭据文件",
     );
@@ -160,18 +160,20 @@ test("keyStorage=credentials 时 key 写进凭据文件、且不落配置文件"
   }
 });
 
-test("六个 provider 分别写各自命名的凭据键，互不覆盖", async () => {
+test("所有 provider 分别写各自命名的凭据键，互不覆盖", async () => {
   const { home, routes, credPath } = setup();
   try {
     // 每个 provider 存一次自己的 key（模拟用户逐个配置）。
     // 覆盖全部预设：persistKeys 的槽位是**按预设表生成**的，漏掉一个 provider
     // 时它的 key 会绕过凭据文件、直接以明文写进 config.yml。
     for (const [provider, field, value] of [
-      ["systemone", "systemoneApiKey", "sk-SYSTEMONE-A"],
-      ["bamboonode", "bamboonodeApiKey", "sk-BAMBOONODE-B"],
+      ["systemone", "systemoneApiKey", "sk-TYPESAFE-A"],
+      ["decisionmodels", "decisionModelsApiKey", "sk-DECISIONMODELS-B"],
       ["siliconflow", "siliconflowApiKey", "sk-SILICONFLOW-C"],
       ["siliconflow-intl", "siliconflowIntlApiKey", "sk-SILICONFLOW-INTL-D"],
       ["duanyan", "duanyanApiKey", "sk-DUANYAN-E"],
+      ["perplexity", "perplexityApiKey", "sk-PERPLEXITY-F"],
+      ["openrouter", "openrouterApiKey", "sk-OPENROUTER-G"],
       ["custom", "customApiKey", "sk-CUSTOM-F"],
     ]) {
       const body = { keyStorage: "credentials", provider, [field]: value };
@@ -181,12 +183,14 @@ test("六个 provider 分别写各自命名的凭据键，互不覆盖", async (
     }
 
     const raw = readFileSync(credPath, "utf8");
-    assert.equal(pickRefValue(raw, "TYPESAFE_API_KEY"), "sk-SYSTEMONE-A");
-    assert.equal(pickRefValue(raw, "BAMBOO_API_KEY"), "sk-BAMBOONODE-B");
+    assert.equal(pickRefValue(raw, "TYPESAFE_API_KEY"), "sk-TYPESAFE-A");
+    assert.equal(pickRefValue(raw, "DECISIONMODELS_API_KEY"), "sk-DECISIONMODELS-B");
     assert.equal(pickRefValue(raw, "SILICONFLOW_API_KEY"), "sk-SILICONFLOW-C");
     assert.equal(pickRefValue(raw, "SILICONFLOW_INTL_API_KEY"), "sk-SILICONFLOW-INTL-D");
     // 端砚的 key 存在它自己的变量名下（token plan 套餐），不与别家共用。
     assert.equal(pickRefValue(raw, "TOKENPLAN_API_KEY"), "sk-DUANYAN-E");
+    assert.equal(pickRefValue(raw, "PERPLEXITY_API_KEY"), "sk-PERPLEXITY-F");
+    assert.equal(pickRefValue(raw, "OPENROUTER_API_KEY"), "sk-OPENROUTER-G");
     assert.equal(pickRefValue(raw, "DECISION_ENGINE_CUSTOM_KEY"), "sk-CUSTOM-F");
   } finally {
     rmSync(home, { recursive: true, force: true });
@@ -204,7 +208,7 @@ test("/models：custom 不按 StartLux 类型过滤（用户自己的网关声�
       [
         "provider: custom",
         "customBaseUrl: https://relay.example.com/v1",
-        "customModel: m-bamboo",
+        "customModel: m-custom",
         "keyStorage: config",
         "customApiKey: sk-MODELS-12345678",
         "",
@@ -217,7 +221,7 @@ test("/models：custom 不按 StartLux 类型过滤（用户自己的网关声�
     // 网关的 /v1/models：模型声明的类型不是 StartLux 系（很多网关只声明 chat）。
     const modelsPayload = {
       data: [
-        { id: "m-bamboo", supported_endpoint_types: ["chat"] },
+        { id: "m-custom", supported_endpoint_types: ["chat"] },
         { id: "m-other", supported_endpoint_types: ["openai"] },
       ],
     };
@@ -231,8 +235,8 @@ test("/models：custom 不按 StartLux 类型过滤（用户自己的网关声�
     const data = await res.json();
     // custom 全收：类型声明不可信，过滤会把列表清空（下拉里只剩「自动」）。
     // 请求路径本身仍有 404/400 回退兜底。
-    assert.deepEqual(data.models.map((m) => m.id), ["m-bamboo", "m-other"]);
-    assert.equal(data.current, "m-bamboo", "当前模型应回显 customModel");
+    assert.deepEqual(data.models.map((m) => m.id), ["m-custom", "m-other"]);
+    assert.equal(data.current, "m-custom", "当前模型应回显 customModel");
     assert.equal(fetches.length, 1, "应向用户自己的服务拉取 /v1/models");
     assert.ok(fetches[0].url.startsWith("https://relay.example.com/v1/models"), `实际 ${fetches[0].url}`);
   } finally {

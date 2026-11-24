@@ -440,7 +440,7 @@ test("全新安装默认开免费模型：一次状态请求会去下发端点�
 test("已有配置（升级用户）默认仍关闭，一次状态请求不发下发端点", async () => {
   // 升级绝不能悄悄替老用户改开关、更不能因此开始向授权服务端发请求。
   // 只要本机曾有过配置（这里以 config.yml 存在为代表），默认就保持原来的关。
-  const env = setup({ seedConfig: "enabled: false\nprovider: bamboonode\n" });
+  const env = setup({ seedConfig: "enabled: false\nprovider: systemone\n" });
   try {
     const { data } = await getStatus(env.routes);
     assert.equal(data.serverProvider.enabled, false, "已有配置时默认必须仍关");

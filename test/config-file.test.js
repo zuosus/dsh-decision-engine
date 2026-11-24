@@ -54,7 +54,7 @@ test("URL 里的 # 不会被当成行尾注释", () => {
 // ------------------------------------------------------- 保存→重读 回显
 
 test("provider 与 custom 字段保存后能原样回显", () => {
-  const { parsed } = roundTrip("# 我的配置\nprovider: bamboonode\n", {
+  const { parsed } = roundTrip("# 我的配置\nprovider: systemone\n", {
     provider: "custom",
     customBaseUrl: "https://gw.example.com/v1",
     customEndpointStyle: "systemone",
@@ -104,7 +104,7 @@ test("注释与顺序在保存后保留", () => {
 });
 
 test("同一个键重复保存不会追加出第二行", () => {
-  const initial = "provider: bamboonode\n";
+  const initial = "provider: systemone\n";
   let { written } = roundTrip(initial, { provider: "custom" });
   ({ written } = roundTrip(written, { provider: "systemone" }));
   const occurrences = written.split("\n").filter((line) => line.startsWith("provider:")).length;
@@ -119,8 +119,8 @@ test("缺失的键追加在末尾", () => {
 });
 
 test("undefined 表示不修改（不会写出一行 undefined）", () => {
-  const { written, parsed } = roundTrip("provider: bamboonode\n", { provider: undefined, model: "m1" });
-  assert.equal(parsed.provider, "bamboonode");
+  const { written, parsed } = roundTrip("provider: systemone\n", { provider: undefined, model: "m1" });
+  assert.equal(parsed.provider, "systemone");
   assert.equal(parsed.model, "m1");
   assert.equal(written.includes("undefined"), false);
 });

@@ -6,12 +6,12 @@
  *   服务商            模型                          /v1/decisions      /v1/systemone
  *   ──────────────── ──────────────────────────── ────────────────── ──────────────────
  *   SiliconFlow      Kev-4B                        404 Not Found      200 ✅
- *   bamboonode       startlux-decision-v1.1-27b-autothink 200 ✅          200 ✅
- *   bamboonode       typesafe/jev-1.14             400 not served     400 not served
+ *     former default  startlux-decision-v1.1-27b-autothink 200 ✅          200 ✅
+ *     former default  typesafe/jev-1.14             400 not served     400 not served
  *
  * 结论：
  *
- *   1. **路径由服务商决定，不由模型决定**。bamboonode 的决策模型在两条路径上
+ *   1. **路径由服务商决定，不由模型决定**。当时默认预设的决策模型在两条路径上
  *      都能用；SiliconFlow 的 Kev-4B 只认 /systemone。
  *   2. **404 = 路径不存在**，400 = 请求内容/模型不合法。这是能安全用来
  *      「换一条路径重试」的信号（实测两类网关都如此）。

@@ -92,7 +92,7 @@ function entry(over = {}) {
     ts: "2026-11-03T08:30:00.000Z",
     sessionId: "session-abcdef0123456789",
     point: "authorize",
-    provider: "bamboonode",
+    provider: "systemone",
     model: "startlux-decision-v1.1-27b-autothink",
     action: "delegate",
     detail: "decision-engine: 风险低，放行",
@@ -755,7 +755,7 @@ test("列出本会话的决策：时间、决策点、提供方、模型、裁�
     },
   });
   assert.match(text, /工具授权/, "应显示决策点的中文名");
-  assert.match(text, /bamboonode/, "应显示提供方");
+  assert.match(text, /systemone/, "应显示提供方");
   assert.match(text, /startlux-decision-v1.1-27b-autothink/, "应显示模型");
   assert.match(text, /交给主模型/, "应显示裁决（中文名）");
   assert.match(text, /1689ms/, "应显示耗时");
@@ -1845,7 +1845,7 @@ function tolerancePage(over = {}) {
       { id: "cautious", label: "谨慎", labelEn: "Cautious", summary: "谨慎：在默认判断之外，再把严重度靠前的 25% 也拿来询问", summaryEn: "x", percentile: 0.75 },
     ],
     calibration: {
-      provider: "bamboonode",
+      provider: "systemone",
       model: "test-model",
       samples: 0,
       ready: false,

@@ -52,7 +52,7 @@ const at = (y, m, d, h = 0, min = 0) => new Date(y, m - 1, d, h, min, 0, 0);
 const rec = (over = {}) =>
   buildRecord({
     ts: "2026-10-20T10:00:00.000Z",
-    provider: "bamboonode",
+    provider: "systemone",
     model: "startlux-decision-v1.1-27b-autothink",
     point: "authorize",
     mode: "observe",
@@ -199,20 +199,20 @@ test("聚合：按 provider × model 分组，各自独立统计", () => {
   const range = resolveRange({ preset: "custom", start: "2026-10-20T00:00", end: "2026-10-20T23:59" });
   const result = aggregate(
     [
-      rec({ provider: "bamboonode", model: "m1", inputTokens: 100, outputTokens: 10, durationMs: 100 }),
-      rec({ provider: "bamboonode", model: "m1", inputTokens: 200, outputTokens: 20, durationMs: 200 }),
+      rec({ provider: "systemone", model: "m1", inputTokens: 100, outputTokens: 10, durationMs: 100 }),
+      rec({ provider: "systemone", model: "m1", inputTokens: 200, outputTokens: 20, durationMs: 200 }),
       rec({ provider: "siliconflow", model: "m1", inputTokens: 50, outputTokens: 5, durationMs: 50 }),
-      rec({ provider: "bamboonode", model: "m2", inputTokens: 7, outputTokens: 1, durationMs: 7 }),
+      rec({ provider: "systemone", model: "m2", inputTokens: 7, outputTokens: 1, durationMs: 7 }),
     ],
     range,
   );
   assert.equal(result.recordCount, 4);
   assert.equal(result.rows.length, 3);
-  const bambooM1 = result.rows.find((row) => row.provider === "bamboonode" && row.model === "m1");
-  assert.equal(bambooM1.inputTokens, 300);
-  assert.equal(bambooM1.outputTokens, 30);
-  assert.equal(bambooM1.durationMs, 300);
-  assert.equal(bambooM1.avgDurationMs, 150);
+  const systemOneM1 = result.rows.find((row) => row.provider === "systemone" && row.model === "m1");
+  assert.equal(systemOneM1.inputTokens, 300);
+  assert.equal(systemOneM1.outputTokens, 30);
+  assert.equal(systemOneM1.durationMs, 300);
+  assert.equal(systemOneM1.avgDurationMs, 150);
   assert.equal(result.totals.inputTokens, 357);
 });
 
@@ -587,7 +587,7 @@ test("回填：从旧遥测推算历史统计，并标明是推算值", async ()
     // 统计里消失了——用户看到「这段时间零降级」，而当时端点连着超时。
     assert.equal(records.length, 2, "降级记录也要回填（否则历史降级凭空消失）");
     assert.equal(records[0].estimated, true);
-    assert.equal(records[0].provider, "bamboonode", "老遥测的 startlux 模型按模型名反推为 bamboonode");
+    assert.equal(records[0].provider, "unknown", "已移除预设的模型不再反推出 provider");
     assert.equal(records[0].model, "startlux-decision-v1.1-27b-autothink");
     assert.equal(records[0].inputTokens, 2000);
     assert.equal(records[0].durationMs, 640);
@@ -680,8 +680,8 @@ test("遥测只记 API 报的数字，估算值只进统计", async () => {
     // 服务方**不返回 usage**：只有估算值可用。
     const client = new StartluxClient({
       getConfig: () => ({
-        provider: "bamboonode",
-        bamboonodeApiKey: "test-key",
+        provider: "systemone",
+        systemoneApiKey: "test-key",
         cacheSize: 256,
         cacheTtlMs: 600000,
         timeoutMs: 5000,
@@ -720,7 +720,7 @@ test("遥测只记 API 报的数字，估算值只进统计", async () => {
       `遥测不应含估算的 inputTokens，实际：${JSON.stringify(written[0])}`,
     );
     // 但**必须**带 provider：回填历史统计时它是唯一可靠的归因来源。
-    assert.equal(written[0].provider, "bamboonode", "遥测必须自带 provider");
+    assert.equal(written[0].provider, "systemone", "遥测必须自带 provider");
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -735,8 +735,8 @@ test("降级时遥测也带 provider 与 model：失败也要归因到发起失�
   try {
     const client = new StartluxClient({
       getConfig: () => ({
-        provider: "bamboonode",
-        bamboonodeApiKey: "test-key",
+        provider: "systemone",
+        systemoneApiKey: "test-key",
         cacheSize: 256,
         cacheTtlMs: 600000,
         timeoutMs: 5000,
@@ -756,7 +756,7 @@ test("降级时遥测也带 provider 与 model：失败也要归因到发起失�
     const telemetry = await readFile(join(dir, "telemetry.jsonl"), "utf8");
     const entry = JSON.parse(telemetry.split("\n").find((l) => l.trim().length > 0));
     assert.equal(entry.action, "degraded");
-    assert.equal(entry.provider, "bamboonode", "降级遥测必须带 provider");
+    assert.equal(entry.provider, "systemone", "降级遥测必须带 provider");
     assert.equal(
       typeof entry.model === "string" && entry.model.length > 0,
       true,
@@ -1087,9 +1087,9 @@ test("迁移：已经有 mode 的记录不被覆盖", async () => {
 
 // ------------------------------------------- 老遥测按模型名反推 provider
 
-test("inferLegacyProvider：startlux→bamboonode、Kev/SemIf→硅基流动，其余 unknown", () => {
-  assert.equal(inferLegacyProvider("startlux-decision-v1.1-27b-autothink"), "bamboonode");
-  assert.equal(inferLegacyProvider("STARTLUX-XYZ"), "bamboonode", "大小写不敏感");
+test("inferLegacyProvider：Kev/SemIf→硅基流动，其余 unknown", () => {
+  assert.equal(inferLegacyProvider("startlux-decision-v1.1-27b-autothink"), "unknown");
+  assert.equal(inferLegacyProvider("STARTLUX-XYZ"), "unknown");
   assert.equal(inferLegacyProvider("Kev-4B"), "siliconflow");
   assert.equal(inferLegacyProvider("kev-4b"), "siliconflow", "大小写不敏感");
   assert.equal(inferLegacyProvider("SemIf"), "siliconflow");
@@ -1098,7 +1098,7 @@ test("inferLegacyProvider：startlux→bamboonode、Kev/SemIf→硅基流动，�
   assert.equal(inferLegacyProvider("gpt-4o"), "unknown", "匹配不上退回 unknown，绝不瞎猜");
 });
 
-test("回填：startlux 模型的记录反推为 bamboonode，不再 unknown", async () => {
+test("回填：未知模型保持 unknown，已知模型可反推 provider", async () => {
   const dir = await mkdtemp(join(tmpdir(), "de-stats-"));
   try {
     await writeFile(
@@ -1111,7 +1111,7 @@ test("回填：startlux 模型的记录反推为 bamboonode，不再 unknown", a
       "utf8",
     );
     const records = await backfillFromTelemetry({ dir });
-    assert.equal(records[0].provider, "bamboonode", "startlux 系 → bamboonode");
+    assert.equal(records[0].provider, "unknown", "移除预设模型不再反推出 provider");
     assert.equal(records[1].provider, "siliconflow", "Kev 系 → 硅基流动");
     assert.equal(records[2].provider, "unknown", "匹配不上仍是 unknown");
   } finally {
@@ -1125,7 +1125,7 @@ test("迁移：把已落盘的 estimated 记录按模型名补回 provider（只
     await writeFile(
       join(dir, "stats.jsonl"),
       [
-        // 历史回填记录：startlux → bamboonode。
+        // 历史回填记录：未知模型保持 unknown。
         JSON.stringify({ ts: "2026-10-23T06:30:46.613Z", provider: "unknown", model: "startlux-decision-v1.1-27b-autothink", point: "authorize", action: "delegate", inputTokens: 2565, outputTokens: 0, durationMs: 640, baseInputTokens: 2565, baseOutputTokens: 0, baseDurationMs: 640, inputSource: "api", outputSource: "unknown", estimated: true }),
         // 历史回填记录：Kev → siliconflow。
         JSON.stringify({ ts: "2026-10-23T06:30:47.166Z", provider: "unknown", model: "Kev-4B", point: "authorize", action: "delegate", inputTokens: 2201, outputTokens: 0, durationMs: 471, baseInputTokens: 2201, baseOutputTokens: 0, baseDurationMs: 471, inputSource: "api", outputSource: "unknown", estimated: true }),
@@ -1138,9 +1138,9 @@ test("迁移：把已落盘的 estimated 记录按模型名补回 provider（只
     );
     const store = new StatsStore({ dir });
     const repaired = await store.repairLegacyProviderOnce();
-    assert.equal(repaired, 2, "两条能反推的历史记录应被补回");
+    assert.equal(repaired, 1, "只有能映射到现有预设的历史记录应被补回");
     const records = await store.read();
-    assert.equal(records[0].provider, "bamboonode");
+    assert.equal(records[0].provider, "unknown");
     assert.equal(records[1].provider, "siliconflow");
     assert.equal(records[2].provider, "unknown", "匹配不上的保持 unknown");
     assert.equal(records[3].provider, "unknown", "真实的非 estimated 记录不能被误改");
@@ -1157,14 +1157,14 @@ test("迁移：降级记录的 unknown model 回落到 provider 默认模型（�
     await writeFile(
       join(dir, "stats.jsonl"),
       [
-        // 降级记录：bamboonode 且 model 空 → 回落 startlux-decision-v1.1-27b-autothink。
-        JSON.stringify({ ts: "2026-10-27T08:00:00.000Z", provider: "bamboonode", model: "unknown", point: "authorize", action: "degraded", inputTokens: 0, outputTokens: 0, durationMs: 8000, degraded: true, inputSource: "unknown", outputSource: "unknown" }),
+        // 降级记录：systemone 且 model 空 → 回落到预设默认模型。
+        JSON.stringify({ ts: "2026-10-27T08:00:00.000Z", provider: "systemone", model: "unknown", point: "authorize", action: "degraded", inputTokens: 0, outputTokens: 0, durationMs: 8000, degraded: true, inputSource: "unknown", outputSource: "unknown" }),
         // 降级记录：siliconflow 且 model 空 → 回落 Kev-4B。
         JSON.stringify({ ts: "2026-10-27T08:01:00.000Z", provider: "siliconflow", model: "unknown", point: "authorize", action: "degraded", inputTokens: 0, outputTokens: 0, durationMs: 8000, degraded: true, inputSource: "unknown", outputSource: "unknown" }),
         // 降级记录：model 已正常，不该被覆盖。
         JSON.stringify({ ts: "2026-10-27T08:02:00.000Z", provider: "siliconflow", model: "Kev-4B", point: "authorize", action: "degraded", inputTokens: 0, outputTokens: 0, durationMs: 8000, degraded: true, inputSource: "unknown", outputSource: "unknown" }),
         // 非降级的 model=unknown 记录：不在本迁移范围（交给反推或其它逻辑）。
-        JSON.stringify({ ts: "2026-10-27T08:03:00.000Z", provider: "bamboonode", model: "unknown", point: "authorize", action: "delegate", inputTokens: 10, outputTokens: 0, durationMs: 100, degraded: false }),
+        JSON.stringify({ ts: "2026-10-27T08:03:00.000Z", provider: "systemone", model: "unknown", point: "authorize", action: "delegate", inputTokens: 10, outputTokens: 0, durationMs: 100, degraded: false }),
       ].join("\n"),
       "utf8",
     );
@@ -1172,7 +1172,7 @@ test("迁移：降级记录的 unknown model 回落到 provider 默认模型（�
     const repaired = await store.repairLegacyProviderOnce();
     assert.equal(repaired, 2, "两条降级空 model 应被补回默认模型");
     const records = await store.read();
-    assert.equal(records[0].model, "startlux-decision-v1.1-27b-autothink", "bamboonode 降级回落到默认模型");
+    assert.equal(records[0].model, "jev-latest", "降级记录回落到预设默认模型");
     assert.equal(records[1].model, "Kev-4B", "siliconflow 降级回落到默认模型");
     assert.equal(records[2].model, "Kev-4B", "已正常的 model 不被覆盖");
     assert.equal(records[3].model, "unknown", "非降级的空 model 不动");
@@ -1185,20 +1185,21 @@ test("迁移：降级记录的 unknown model 回落到 provider 默认模型（�
 
 test("providerOfTelemetryEntry：按可靠度取 provider（字段→extra→endpoint→模型名）", () => {
   // 1. 遥测直接带 provider —— 最高可靠度。
-  assert.equal(providerOfTelemetryEntry({ provider: "bamboonode" }, "unknown"), "bamboonode");
+  assert.equal(providerOfTelemetryEntry({ provider: "systemone" }, "unknown"), "systemone");
   // 2. 降级记录的 extra.provider。
   assert.equal(providerOfTelemetryEntry({ extra: { provider: "siliconflow" } }, "unknown"), "siliconflow");
   // 3. 降级记录的 extra.endpoint 主机名。
   assert.equal(
-    providerOfTelemetryEntry({ extra: { endpoint: "https://api.bamboonode.dev/v1/decisions" } }, "unknown"),
-    "bamboonode",
+    providerOfTelemetryEntry({ extra: { endpoint: "https://api.typesafe.ai/v1/decisions" } }, "unknown"),
+    "systemone",
   );
   assert.equal(
     providerOfTelemetryEntry({ extra: { endpoint: "https://api.siliconflow.cn/v1/systemone" } }, "unknown"),
     "siliconflow",
   );
-  // 4. 老遥测最后的手段：按模型名反推。
-  assert.equal(providerOfTelemetryEntry({}, "startlux-decision-v1.1-27b-autothink"), "bamboonode");
+  // 4. 老遥测最后的手段：按仍受支持的模型名反推。
+  assert.equal(providerOfTelemetryEntry({}, "startlux-decision-v1.1-27b-autothink"), "unknown");
+  assert.equal(providerOfTelemetryEntry({ provider: "removed-provider" }, "unknown"), "unknown");
   // 全无线索 → unknown（绝不猜）。
   assert.equal(providerOfTelemetryEntry({}, "unknown"), "unknown");
   assert.equal(providerOfTelemetryEntry({ extra: { endpoint: "https://my-own.box/v1" } }, "unknown"), "unknown");
@@ -1206,7 +1207,6 @@ test("providerOfTelemetryEntry：按可靠度取 provider（字段→extra→end
 
 test("providerByEndpoint：只认内置预设的主机名，自建地址不猜", () => {
   assert.equal(providerByEndpoint("https://api.typesafe.ai/v1"), "systemone");
-  assert.equal(providerByEndpoint("https://api.bamboonode.dev/v1"), "bamboonode");
   assert.equal(providerByEndpoint("https://api.siliconflow.cn/v1"), "siliconflow");
   assert.equal(providerByEndpoint("https://api.siliconflow.com/v1"), "siliconflow-intl");
   assert.equal(providerByEndpoint("https://10.255.255.1/v1"), "unknown", "内网自建地址不猜");
@@ -1215,7 +1215,7 @@ test("providerByEndpoint：只认内置预设的主机名，自建地址不猜",
 });
 
 test("defaultModelOf：取 provider 的默认模型，没有则 unknown", () => {
-  assert.equal(defaultModelOf("bamboonode"), "startlux-decision-v1.1-27b-autothink");
+  assert.equal(defaultModelOf("systemone"), "jev-latest");
   assert.equal(defaultModelOf("siliconflow"), "Kev-4B");
   assert.equal(defaultModelOf("custom"), "unknown", "custom 没有默认模型");
   assert.equal(defaultModelOf("unknown"), "unknown");
@@ -1228,7 +1228,7 @@ test("回填：遥测自带 provider 时直接采用，不再靠模型名猜", a
       join(dir, "telemetry.jsonl"),
       [
         // 遥测直接带 provider：即便模型名不认识，也能归因。
-        JSON.stringify({ ts: "2026-10-27T10:00:00.000Z", point: "authorize", model: "some-vendor-model", provider: "bamboonode", action: "delegate", latencyMs: 500, inputTokens: 100 }),
+        JSON.stringify({ ts: "2026-10-27T10:00:00.000Z", point: "authorize", model: "some-vendor-model", provider: "systemone", action: "delegate", latencyMs: 500, inputTokens: 100 }),
         // 遥测没带，但 extra.endpoint 能定位：降级记录（没拿到答案，没有 model）。
         JSON.stringify({ ts: "2026-10-27T10:01:00.000Z", point: "authorize", action: "degraded", detail: "timeout", extra: { endpoint: "https://api.siliconflow.cn/v1/systemone" }, latencyMs: 8000 }),
         // 三条线索全无：只能是 unknown。
@@ -1237,7 +1237,7 @@ test("回填：遥测自带 provider 时直接采用，不再靠模型名猜", a
       "utf8",
     );
     const rows = await backfillFromTelemetry({ dir });
-    assert.equal(rows[0].provider, "bamboonode", "遥测带 provider 时直接采用");
+    assert.equal(rows[0].provider, "systemone", "遥测带有效 provider 时直接采用");
     assert.equal(rows[0].model, "some-vendor-model");
     assert.equal(rows[1].provider, "siliconflow", "extra.endpoint 能定位服务商");
     assert.equal(rows[1].model, "Kev-4B", "降级记录回落到该服务商的默认模型");
@@ -1253,14 +1253,14 @@ test("回填：降级记录落到服务商的默认模型，不自成「provider
     await writeFile(
       join(dir, "telemetry.jsonl"),
       [
-        JSON.stringify({ ts: "2026-10-27T10:00:00.000Z", point: "authorize", provider: "bamboonode", model: "startlux-decision-v1.1-27b-autothink", action: "delegate", latencyMs: 500, inputTokens: 100 }),
-        JSON.stringify({ ts: "2026-10-27T10:01:00.000Z", point: "authorize", provider: "bamboonode", action: "degraded", detail: "timeout", latencyMs: 8000 }),
+        JSON.stringify({ ts: "2026-10-27T10:00:00.000Z", point: "authorize", provider: "systemone", model: "jev-latest", action: "delegate", latencyMs: 500, inputTokens: 100 }),
+        JSON.stringify({ ts: "2026-10-27T10:01:00.000Z", point: "authorize", provider: "systemone", action: "degraded", detail: "timeout", latencyMs: 8000 }),
       ].join("\n"),
       "utf8",
     );
     const rows = await backfillFromTelemetry({ dir });
-    assert.equal(rows[0].model, "startlux-decision-v1.1-27b-autothink");
-    assert.equal(rows[1].model, "startlux-decision-v1.1-27b-autothink", "降级记录用同一个模型名");
+    assert.equal(rows[0].model, "jev-latest");
+    assert.equal(rows[1].model, "jev-latest", "降级记录用同一个模型名");
     assert.equal(rows[0].model, rows[1].model, "同一服务商的两条记录并到同一行");
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -1273,7 +1273,7 @@ test("迁移：按时间戳与遥测对上，补回真实记录里 unknown 的 p
     await writeFile(
       join(dir, "telemetry.jsonl"),
       [
-        JSON.stringify({ ts: "2026-10-27T08:00:00.000Z", point: "authorize", action: "degraded", detail: "timeout", extra: { endpoint: "https://api.bamboonode.dev/v1/decisions" }, latencyMs: 8000 }),
+        JSON.stringify({ ts: "2026-10-27T08:00:00.000Z", point: "authorize", action: "degraded", detail: "timeout", extra: { endpoint: "https://api.typesafe.ai/v1/decisions" }, latencyMs: 8000 }),
       ].join("\n"),
       "utf8",
     );
@@ -1288,8 +1288,8 @@ test("迁移：按时间戳与遥测对上，补回真实记录里 unknown 的 p
     const repaired = await store.repairLegacyProviderOnce();
     assert.equal(repaired, 2, "补回 provider 与 model 各算一次改动");
     const records = await store.read();
-    assert.equal(records[0].provider, "bamboonode");
-    assert.equal(records[0].model, "startlux-decision-v1.1-27b-autothink", "补回 provider 后落到默认模型");
+    assert.equal(records[0].provider, "systemone");
+    assert.equal(records[0].model, "jev-latest", "补回 provider 后落到默认模型");
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -1348,7 +1348,7 @@ test("迁移：老回填行的 point=unknown 按时间戳与遥测对上后补�
     await writeFile(
       join(dir, "stats.jsonl"),
       [
-        JSON.stringify({ ts: "2026-10-23T06:30:46.613Z", provider: "bamboonode", model: "startlux-decision-v1.1-27b-autothink", point: "unknown", action: "delegate", detail: "delegate", inputTokens: 2000, outputTokens: 0, durationMs: 640, baseInputTokens: 2000, baseOutputTokens: 0, baseDurationMs: 640, inputSource: "api", outputSource: "unknown", estimated: true }),
+        JSON.stringify({ ts: "2026-10-23T06:30:46.613Z", provider: "systemone", model: "startlux-decision-v1.1-27b-autothink", point: "unknown", action: "delegate", detail: "delegate", inputTokens: 2000, outputTokens: 0, durationMs: 640, baseInputTokens: 2000, baseOutputTokens: 0, baseDurationMs: 640, inputSource: "api", outputSource: "unknown", estimated: true }),
       ].join("\n"),
       "utf8",
     );

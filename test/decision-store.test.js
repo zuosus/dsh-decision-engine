@@ -57,7 +57,7 @@ function record(over = {}) {
     point: "authorize",
     tag: "guard",
     mode: "enforce",
-    provider: "bamboonode",
+    provider: "systemone",
     model: "startlux-decision-v1.1-27b-autothink",
     action: "delegate",
     detail: "delegate",
@@ -77,7 +77,7 @@ test("记录体带上会话归属与全部关键字段", () => {
     tag: "guard",
     mode: "observe",
     topMode: "shadow",
-    provider: "bamboonode",
+    provider: "systemone",
     model: "m1",
     action: "delegate",
     detail: "delegate",
@@ -94,7 +94,7 @@ test("记录体带上会话归属与全部关键字段", () => {
   assert.equal(entry.point, "authorize");
   assert.equal(entry.mode, "observe");
   assert.equal(entry.topMode, "shadow");
-  assert.equal(entry.provider, "bamboonode");
+  assert.equal(entry.provider, "systemone");
   assert.equal(entry.model, "m1");
   assert.equal(entry.action, "delegate");
   assert.equal(entry.latencyMs, 1689);

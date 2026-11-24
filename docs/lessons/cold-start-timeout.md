@@ -7,7 +7,7 @@
  *   「官方文档页点『发送请求』永远返回 200，在插件里配好同一 provider 点
  *     『测试』大约 2/3 会报错。」
  *
- * 2026-11 实测（bamboonode `https://api.bamboonode.dev/v1/decisions`，
+ * 2026-11 实测（当时的默认预设，
  * 模型 startlux-decision-v1.1-27b-autothink，生产遥测 2573 次请求 / 358 次降级）：
  *
  *   场景                              实测延迟

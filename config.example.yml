@@ -5,7 +5,7 @@
 #   cp config.example.yml ~/.dsh/plugins/dsh-decision-engine/config.yml
 #
 # 文件名是 config.yml：本插件早已不是「只服务 startlux 一家」的插件，
-# 而是任意决策服务（system one / bamboonode / 硅基流动 / custom）的决策层，
+# 而是任意决策服务（system one / systemone / 硅基流动 / custom）的决策层，
 # 名字里再挂某个服务商只会误导。旧名 startlux.yml 仍会被自动读取并迁移，
 # 升级不需要重新填 key。
 #
@@ -44,8 +44,7 @@ mode: shadow
 # 服务提供方（provider）
 # ============================================================================
 # 八选一（这份清单来自 lib/providers.json；加一家服务就改那个文件）：
-#   bamboonode        内置。StartLux 官方端点 POST /v1/decisions，本插件的原有默认值。
-#   systemone         内置。任意 System One 协议服务 POST /v1/systemone，
+#   systemone         内置。System One 协议服务 POST /v1/systemone，
 #                     默认指向 TypeSafe（https://api.typesafe.ai/v1）。
 #   siliconflow       内置。硅基流动（国内站）https://api.siliconflow.cn/v1/systemone
 #   siliconflow-intl  内置。Silicon Flow 国际站 https://api.siliconflow.com/v1/systemone
@@ -57,10 +56,14 @@ mode: shadow
 #                     地址与默认模型待实测，端点风格 auto（404 自动换路径重试）
 #   openrouter        内置。OpenRouter（https://openrouter.ai/api/v1），
 #                     模型填 OpenRouter 的 slug（如 openai/gpt-4o-mini）；同样待实测
+#   decisionmodels    内置。Decision Models（decisionmodels.io）
+#                     https://api.decisionmodels.io/v1，System One 协议
+#                     POST /v1/systemone；模型 s1-fast / s1-pro / s1-vision /
+#                     reax-1，默认 s1-fast；粘一个 API key 即可跑
 #   custom            自己填 base URL，接任何提供决策端点的服务
 #                     （自建 llama.cpp / vLLM、企业网关、第三方中转）。
 #
-# 不写这一项 = bamboonode，老配置行为完全不变。
+# 不写这一项 = systemone。
 #
 # siliconflow / siliconflow-intl / duanyan 是「开箱即用」的：地址、路径、默认
 # 模型都已预置，只要粘一个 API key 就能跑（详见下方「密钥」一节）。
@@ -70,26 +73,20 @@ mode: shadow
 # 跑通后建议把实测结论写回 lib/providers.json 的对应条目
 # （每个 provider 一个对象；该服务支持多个模型就写进它的 models 数组。
 #  新增一家服务 = 往数组里加一个对象，不需要改代码）。
-provider: bamboonode
+provider: systemone
 
-# ---- bamboonode 预设的地址覆盖 ----------------------------------------------
-# 只在 provider=bamboonode 时生效。老版本唯一的地址字段，继续支持，因此
-# 已有的自建 bamboonode 兼容地址不会因为升级被改回官方。
+# ---- systemone 预设的地址覆盖 ----------------------------------------------
+# 只在 provider=systemone 时生效。老版本唯一的地址字段，继续支持，因此
+# 已有的自建 systemone 兼容地址不会因为升级被改回官方。
 # 接受多种写法（等价）：
-#   https://api.bamboonode.dev/v1
-#   https://api.bamboonode.dev/v1/decisions
-#   api.bamboonode.dev/v1          （会补 https://）
+#   https://api.typesafe.ai/v1
+#   https://api.typesafe.ai/v1/decisions
+#   api.typesafe.ai/v1          （会补 https://）
 # 末尾斜杠会被规范化，不会拼出 //decisions 或 /v1/v1/decisions。
-baseUrl: https://api.bamboonode.dev/v1
+baseUrl: https://api.typesafe.ai/v1
 
 # ---- 模型（按 provider 分开存，切换时互不覆盖）------------------------------
-# bamboonode 的模型。留空 = 自动（由服务端选当前默认决策模型），
-# 这样服务商将来换模型名时，本配置不会失效。
-model:
-
-# system one 的模型。留空 = 服务端默认（jev-latest）。
-# 与上面的 model 分开：否则切到 system one 会把 bamboonode 的模型名发过去，
-# 得到 400 model not served。
+# systemone 的模型。留空 = 自动（由服务端选当前默认决策模型）。
 systemoneModel: ""
 
 # 硅基流动 / Silicon Flow 的模型。**留空 = 用预设默认 Kev-4B**——
@@ -112,6 +109,9 @@ siliconflowIntlModel: ""
 # 下拉里会出现「选了就 400」的对话模型。
 duanyanModel: ""
 
+# Decision Models 的模型。留空时使用预设默认 s1-fast。
+decisionModelsModel: ""
+
 # ---- custom 预设（provider=custom 时才生效）--------------------------------
 # base URL 必填，且必须是 http/https 地址；不带 scheme 会被拒绝（内置预设
 # 允许省略 scheme，custom 不允许——自定义地址必须显式，避免猜错协议）。
@@ -124,7 +124,7 @@ duanyanModel: ""
 #
 # 路径后缀由**服务商**决定，不由模型决定。实测（2026-10-25，真实端点）：
 #   SiliconFlow 的 Kev-4B   /v1/decisions → 404，/v1/systemone → 200
-#   bamboonode 的决策模型     两条路径都 200
+#   systemone 的决策模型     两条路径都 200
 #
 # 所以首选路径返回 404 时，插件会自动改用另一条再试一次，并记住试通的那条。
 # 只有 404 会触发换路径：400（模型/内容不合法）与 401（key 不对）都跟路径无关。
@@ -150,12 +150,12 @@ customHeaders: ""
 # 每个 provider 有**自己的** key 名，各自保存各自的 key：
 #
 #   system one          -> TYPESAFE_API_KEY
-#   bamboonode          -> BAMBOO_API_KEY
 #   硅基流动（国内站）   -> SILICONFLOW_API_KEY
 #   Silicon Flow 国际站 -> SILICONFLOW_INTL_API_KEY
 #   书生·端砚           -> TOKENPLAN_API_KEY
 #   Perplexity Decider -> PERPLEXITY_API_KEY
 #   OpenRouter         -> OPENROUTER_API_KEY
+#   Decision Models    -> DECISIONMODELS_API_KEY
 #   custom              -> customApiKeyEnv（没填时用 DECISION_ENGINE_CUSTOM_KEY）
 #
 # 各格互不覆盖，可以同时配好；切换 provider 不会串用别人的 key。
@@ -172,35 +172,35 @@ keyStorage: credentials
 
 # 变量名可以覆盖（留空即用上面的默认名）：
 # systemoneApiKeyEnv: ""
-# bamboonodeApiKeyEnv: ""
 # siliconflowApiKeyEnv: ""
 # siliconflowIntlApiKeyEnv: ""
 # duanyanApiKeyEnv: ""
 # perplexityApiKeyEnv: ""
 # openrouterApiKeyEnv: ""
+# decisionModelsApiKeyEnv: ""
 # customApiKeyEnv: ""
 
 # 直接写明文 key 也可以（各 provider 一格，互不影响）。
 # 若 keyStorage=credentials，在设置界面粘贴的 key 会写进 .credentials.yaml，
 # 不会落到这里；只有 keyStorage=config 时下面这些字段才会被写入。
 # systemoneApiKey: ""
-# bamboonodeApiKey: ""
 # siliconflowApiKey: ""
 # siliconflowIntlApiKey: ""
 # duanyanApiKey: ""
 # perplexityApiKey: ""
 # openrouterApiKey: ""
+# decisionModelsApiKey: ""
 # customApiKey: ""
 
 # .credentials.yaml 里的形态就是 refs 段：
 #   refs:
-#     BAMBOO_API_KEY: sk-你的key
-#     TYPESAFE_API_KEY: sk-另一个key
+#     TYPESAFE_API_KEY: sk-你的key
 #     SILICONFLOW_API_KEY: sk-国内站的key
 #     SILICONFLOW_INTL_API_KEY: sk-国际站的key
 #     TOKENPLAN_API_KEY: sk-端砚的key（预设默认读这个变量名；想换名字改 duanyanApiKeyEnv）
 #     PERPLEXITY_API_KEY: sk-perplexity的key
 #     OPENROUTER_API_KEY: sk-openrouter的key
+#     DECISIONMODELS_API_KEY: sk-decision-models的key
 
 # ============================================================================
 # 服务端下发（DEC-030）——配置页上叫「使用免费模型」

@@ -120,7 +120,7 @@ test("新增 provider 只改 JSON：schema、解析、catalog 三处自动接上
 
   // 追加在末尾：下拉顺序 = 数组顺序，默认 provider 不受影响。
   assert.ok(result.ids.includes("my-gateway"));
-  assert.equal(result.defaultProvider, "bamboonode");
+  assert.equal(result.defaultProvider, "systemone");
 });
 
 test("改 JSON 的 default 标记就能换默认 provider（不必改代码）", () => {

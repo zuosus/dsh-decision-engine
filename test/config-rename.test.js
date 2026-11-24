@@ -53,7 +53,7 @@ test("旧名 startlux.yml 会被改名迁移为 config.yml，内容原样保留"
   const dir = join(home, "plugins", "dsh-decision-engine");
   mkdirSync(dir, { recursive: true });
   const legacy = join(dir, "startlux.yml");
-  const original = "# 用户注释要保留\nenabled: true\nbamboonodeApiKey: sk-KEEP-ME-123\n";
+  const original = "# 用户注释要保留\nenabled: true\nsystemoneApiKey: sk-KEEP-ME-123\n";
   writeFileSync(legacy, original, { encoding: "utf8", mode: 0o600 });
 
   const prev = process.env.DSH_HOME;
@@ -79,9 +79,9 @@ test("已经存在 config.yml 时绝不被旧文件覆盖", () => {
   const dir = join(home, "plugins", "dsh-decision-engine");
   mkdirSync(dir, { recursive: true });
   const current = join(dir, "config.yml");
-  const keep = "enabled: true\nbamboonodeApiKey: sk-NEW-WINS\n";
+  const keep = "enabled: true\nsystemoneApiKey: sk-NEW-WINS\n";
   writeFileSync(current, keep, { encoding: "utf8", mode: 0o600 });
-  writeFileSync(join(dir, "startlux.yml"), "enabled: false\nbamboonodeApiKey: sk-OLD\n", { encoding: "utf8" });
+  writeFileSync(join(dir, "startlux.yml"), "enabled: false\nsystemoneApiKey: sk-OLD\n", { encoding: "utf8" });
 
   const prev = process.env.DSH_HOME;
   process.env.DSH_HOME = home;
@@ -99,7 +99,7 @@ test("历史数据目录（上一代位置）里的配置会被搬到新目录�
   const home = makeHome();
   const legacyDir = join(home, "dsh-startlux-decision");
   mkdirSync(legacyDir, { recursive: true });
-  const payload = "enabled: true\nbamboonodeApiKey: sk-FROM-LEGACY-DIR\n";
+  const payload = "enabled: true\nsystemoneApiKey: sk-FROM-LEGACY-DIR\n";
   writeFileSync(join(legacyDir, "startlux.yml"), payload, { encoding: "utf8", mode: 0o600 });
 
   const prev = process.env.DSH_HOME;

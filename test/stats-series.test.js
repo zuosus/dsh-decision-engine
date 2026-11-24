@@ -36,7 +36,7 @@ const DAY = 24 * HOUR;
 function record(ts, over = {}) {
   return {
     ts: new Date(ts).toISOString(),
-    provider: "bamboonode",
+    provider: "systemone",
     model: "m1",
     point: "authorize",
     action: "allow",

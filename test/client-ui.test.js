@@ -10,7 +10,7 @@
  *
  * 覆盖：
  *   - 状态未加载时的兜底渲染（不空白，且不自带服务商地址）
- *   - provider 下拉包含全部预设，默认 bamboonode
+ *   - provider 下拉包含全部预设，默认 systemone
  *   - 选 custom 时出现必填字段与本地校验提示
  *   - 服务端拒绝的原因会显示在界面上
  */
@@ -86,7 +86,7 @@ const toleranceFixture = (over = {}) => ({
     { id: "cautious", label: "谨慎", labelEn: "Cautious", summary: "谨慎：在默认判断之外，再把严重度靠前的 25% 也拿来询问", summaryEn: "x", percentile: 0.75 },
   ],
   calibration: {
-    provider: "bamboonode",
+    provider: "systemone",
     model: "test-model",
     samples: 0,
     ready: false,
@@ -265,15 +265,15 @@ function stateWith(over) {
   return {
     enabled: true,
     mode: "shadow",
-    provider: "bamboonode",
-    providerLabel: "bamboonode",
+    provider: "systemone",
+    providerLabel: "systemone",
     providerValid: true,
     providerError: "",
     // provider 清单直接用服务端那张表（providers.js 的 providerCatalog()）：
     // 界面按它渲染，测试若另抄一份就测不出「清单漏了新预设」。
     providerCatalog: providerCatalog(),
-    baseUrl: "https://api.bamboonode.dev/v1/decisions",
-    rawBaseUrl: "https://api.bamboonode.dev/v1",
+    baseUrl: "https://api.typesafe.ai/v1/decisions",
+    rawBaseUrl: "https://api.typesafe.ai/v1",
     customBaseUrl: "",
     customEndpointStyle: "auto",
     customModel: "",
@@ -295,16 +295,16 @@ function stateWith(over) {
     timeoutMs: 8000,
     keyConfigured: true,
     keyHint: "…abcd",
-    keyEnvName: "BAMBOO_API_KEY",
+    keyEnvName: "TYPESAFE_API_KEY",
     keyStorage: "credentials",
     keyStatus: {
       systemone: {
         configured: false, hint: "", refName: "TYPESAFE_API_KEY", keyField: "systemoneApiKey",
         source: "none", sourceLabel: "未配置",
       },
-      bamboonode: {
-        configured: true, hint: "…abcd", refName: "BAMBOO_API_KEY", keyField: "bamboonodeApiKey",
-        source: "credentials", sourceLabel: "~/.dsh/.credentials.yaml 的 BAMBOO_API_KEY",
+      systemone: {
+        configured: true, hint: "…abcd", refName: "TYPESAFE_API_KEY", keyField: "systemoneApiKey",
+        source: "credentials", sourceLabel: "~/.dsh/.credentials.yaml 的 TYPESAFE_API_KEY",
       },
       siliconflow: {
         configured: false, hint: "", refName: "SILICONFLOW_API_KEY", keyField: "siliconflowApiKey",
@@ -350,7 +350,7 @@ test("状态未加载时也渲染出完整表单（不空白）", async () => {
     assert.ok(text.includes(label), `缺少「${label}」：\n${text.slice(0, 400)}`);
   }
   // 兜底状态不得自带服务商地址：地址只能来自服务端下发的预设
-  assert.equal(text.includes("bamboonode.dev"), false, "兜底状态硬编码了服务商地址");
+  assert.equal(text.includes("systemone.dev"), false, "兜底状态硬编码了服务商地址");
   // 自动保存：没有「保存」按钮，只有状态提示。
   assert.ok(text.includes("改动即保存"), "缺少自动保存的状态提示");
   assert.equal(hasButtonLabeled(tree, "保存"), false, "不该再有独立的「保存」按钮");
@@ -637,10 +637,10 @@ test("服务端没给 provider 字段映射时绝不猜格子：宁可延后也�
   assert.equal(configCall, undefined, "字段映射缺失时不该发 /config（宁可延后也不猜着写）");
 });
 
-test("provider 下拉包含全部预设，默认 bamboonode", async () => {
+test("provider 下拉包含全部预设，默认 systemone", async () => {
   const { controls } = await render(stateWith({}));
-  const providerSelect = controls.find((node) => node.type === "select" && node.props.value === "bamboonode");
-  assert.ok(providerSelect !== undefined, "没有找到 provider 下拉（或当前值不是 bamboonode）");
+  const providerSelect = controls.find((node) => node.type === "select" && node.props.value === "systemone");
+  assert.ok(providerSelect !== undefined, "没有找到 provider 下拉（或当前值不是 systemone）");
   const options = providerSelect.children
     .filter((child) => child !== null && typeof child === "object" && child.type === "option")
     .map((child) => child.props.value);
@@ -804,7 +804,7 @@ test("状态未加载时思考模式下拉仍有兜底选项", async () => {
 // ------------------------------------------- 密钥来源必须显示「真实来源」
 
 test("keyStorage=config 时显示配置文件的字段名，不显示凭据变量名", async () => {
-  // 这是本用例要防的核心误解：页面曾显示 `BAMBOO_API_KEY`，
+  // 这是本用例要防的核心误解：页面曾显示 `TYPESAFE_API_KEY`，
   // 而该变量在 keyStorage=config 下根本没被读取——用户会以为 key
   // 存在 .credentials.yaml 里，甚至误判它过期。
   const { text } = await render(
@@ -815,9 +815,9 @@ test("keyStorage=config 时显示配置文件的字段名，不显示凭据变�
           configured: false, hint: "", refName: "TYPESAFE_API_KEY", keyField: "systemoneApiKey",
           source: "none", sourceLabel: "未配置",
         },
-        bamboonode: {
-          configured: true, hint: "…abcd", refName: "BAMBOO_API_KEY", keyField: "bamboonodeApiKey",
-          source: "config", sourceLabel: "配置文件 config.yml 的 bamboonodeApiKey",
+        systemone: {
+          configured: true, hint: "…abcd", refName: "TYPESAFE_API_KEY", keyField: "systemoneApiKey",
+          source: "config", sourceLabel: "配置文件 config.yml 的 systemoneApiKey",
         },
         siliconflow: {
           configured: false, hint: "", refName: "SILICONFLOW_API_KEY", keyField: "siliconflowApiKey",
@@ -831,12 +831,12 @@ test("keyStorage=config 时显示配置文件的字段名，不显示凭据变�
     }),
   );
   assert.ok(
-    text.includes("密钥来源 配置文件 config.yml 的 bamboonodeApiKey"),
+    text.includes("密钥来源 配置文件 config.yml 的 systemoneApiKey"),
     `应显示真实来源（配置字段），实际文案：\n${text.slice(0, 1200)}`,
   );
   // 关键断言：不能把未被读取的凭据变量名当成「密钥来源」展示。
   assert.equal(
-    text.includes("密钥来源 BAMBOO_API_KEY"),
+    text.includes("密钥来源 TYPESAFE_API_KEY"),
     false,
     "不得把未被读取的凭据变量名显示为密钥来源",
   );
@@ -845,7 +845,7 @@ test("keyStorage=config 时显示配置文件的字段名，不显示凭据变�
 test("凭据文件来源时显示 .credentials.yaml 与变量名", async () => {
   const { text } = await render(stateWith({ keyStorage: "credentials" }));
   assert.ok(
-    text.includes("密钥来源 ~/.dsh/.credentials.yaml 的 BAMBOO_API_KEY"),
+    text.includes("密钥来源 ~/.dsh/.credentials.yaml 的 TYPESAFE_API_KEY"),
     `应显示凭据文件来源，实际：\n${text.slice(0, 1200)}`,
   );
 });
@@ -858,9 +858,9 @@ test("环境变量来源时明确标注是环境变量", async () => {
           configured: false, hint: "", refName: "TYPESAFE_API_KEY", keyField: "systemoneApiKey",
           source: "none", sourceLabel: "未配置",
         },
-        bamboonode: {
-          configured: true, hint: "…abcd", refName: "BAMBOO_API_KEY", keyField: "bamboonodeApiKey",
-          source: "env", sourceLabel: "环境变量 BAMBOO_API_KEY",
+        systemone: {
+          configured: true, hint: "…abcd", refName: "TYPESAFE_API_KEY", keyField: "systemoneApiKey",
+          source: "env", sourceLabel: "环境变量 TYPESAFE_API_KEY",
         },
         siliconflow: {
           configured: false, hint: "", refName: "SILICONFLOW_API_KEY", keyField: "siliconflowApiKey",
@@ -873,7 +873,7 @@ test("环境变量来源时明确标注是环境变量", async () => {
       },
     }),
   );
-  assert.ok(text.includes("密钥来源 环境变量 BAMBOO_API_KEY"), `实际：\n${text.slice(0, 1200)}`);
+  assert.ok(text.includes("密钥来源 环境变量 TYPESAFE_API_KEY"), `实际：\n${text.slice(0, 1200)}`);
 });
 
 test("未配置时来源显示「未配置」并标注未读到", async () => {
@@ -884,8 +884,8 @@ test("未配置时来源显示「未配置」并标注未读到", async () => {
           configured: false, hint: "", refName: "TYPESAFE_API_KEY", keyField: "systemoneApiKey",
           source: "none", sourceLabel: "未配置",
         },
-        bamboonode: {
-          configured: false, hint: "", refName: "BAMBOO_API_KEY", keyField: "bamboonodeApiKey",
+        systemone: {
+          configured: false, hint: "", refName: "TYPESAFE_API_KEY", keyField: "systemoneApiKey",
           source: "none", sourceLabel: "未配置",
         },
         siliconflow: {
@@ -911,9 +911,9 @@ test("存到插件配置时提示的是字段名，而不是凭据变量名", as
           configured: false, hint: "", refName: "TYPESAFE_API_KEY", keyField: "systemoneApiKey",
           source: "none", sourceLabel: "未配置",
         },
-        bamboonode: {
-          configured: true, hint: "…abcd", refName: "BAMBOO_API_KEY", keyField: "bamboonodeApiKey",
-          source: "config", sourceLabel: "配置文件 config.yml 的 bamboonodeApiKey",
+        systemone: {
+          configured: true, hint: "…abcd", refName: "TYPESAFE_API_KEY", keyField: "systemoneApiKey",
+          source: "config", sourceLabel: "配置文件 config.yml 的 systemoneApiKey",
         },
         siliconflow: {
           configured: false, hint: "", refName: "SILICONFLOW_API_KEY", keyField: "siliconflowApiKey",
@@ -927,13 +927,13 @@ test("存到插件配置时提示的是字段名，而不是凭据变量名", as
     }),
   );
   assert.ok(
-    text.includes("存到插件配置 config.yml 的 bamboonodeApiKey"),
+    text.includes("存到插件配置 config.yml 的 systemoneApiKey"),
     `保存目标应说明字段名，实际：\n${text.slice(0, 1200)}`,
   );
   assert.equal(
-    text.includes("存到「插件配置」的 BAMBOO_API_KEY"),
+    text.includes("存到「插件配置」的 TYPESAFE_API_KEY"),
     false,
-    "不应再出现「存到插件配置的 BAMBOO_API_KEY」这种自相矛盾的文案",
+    "不应再出现「存到插件配置的 TYPESAFE_API_KEY」这种自相矛盾的文案",
   );
 });
 
@@ -999,7 +999,7 @@ function statsWith(over) {
     },
     rows: [
       {
-        provider: "bamboonode",
+        provider: "systemone",
         model: "startlux-decision-v1.1-27b-autothink",
         requests: 8,
         cached: 4,
@@ -1131,7 +1131,7 @@ test("统计：横向对比表按 provider × model 列出，节省量另有对�
   const { text } = await render(stateWith({}), {
     slots: { [SLOTS.tab]: "stats", [SLOTS.stats]: statsWith({}) },
   });
-  assert.ok(text.includes("bamboonode"), "对比表应列出 provider");
+  assert.ok(text.includes("system one"), "对比表应列出 provider");
   assert.ok(text.includes("Kev-4B"), "对比表应列出 model");
   assert.ok(text.includes("provider / model"), "应有一列说明这是 provider/model 组合");
   assert.ok(text.includes("横向对比"), "应有「横向对比」一节");
@@ -2035,7 +2035,7 @@ test("服务端生效时，手动输入 key 与 provider 下拉都还在（手�
   const { tree } = await render(stateWith({ serverProvider: serverProviderWith({}) }));
   const keyInput = findNode(tree, (node) => node.type === "input" && node.props.type === "password");
   assert.ok(keyInput !== null && keyInput !== undefined, "服务端生效时 API Key 输入框被隐藏了");
-  // 不按具体 provider 名匹配：默认值历史上在 bamboonode / systemone 之间来回
+  // 不按具体 provider 名匹配：默认值历史上在 systemone / systemone 之间来回
   // 换过（DEC-031 与其撤销），钉死名字会让这条 DEC-030 验收随默认值翻车。
   const select = findNode(
     tree,

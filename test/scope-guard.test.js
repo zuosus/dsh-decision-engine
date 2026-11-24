@@ -124,11 +124,11 @@ function writeConfig(configPath, over = {}) {
     enabled: true,
     mode: "enforce",
     pointAuthorize: "enforce",
-    provider: "bamboonode",
-    baseUrl: "https://api.bamboonode.dev/v1",
+    provider: "systemone",
+    baseUrl: "https://api.typesafe.ai/v1",
     model: "test-model",
     keyStorage: "config",
-    bamboonodeApiKey: "sk-test-key-000000",
+    systemoneApiKey: "sk-test-key-000000",
     // 这组测的是作用域边界，不测服务端下发。全新安装默认会开「使用免费模型」，
     // 后台刷新下发端点会多打一次 fetch，把下面按「问模型次数」计的断言搞脏。
     // 显式关掉，让夹具只做一件事：照常走本地决策端点。

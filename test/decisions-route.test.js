@@ -123,7 +123,7 @@ function entry(over = {}) {
     ts: "2026-11-03T00:00:00.000Z",
     sessionId: "session-a",
     point: "authorize",
-    provider: "bamboonode",
+    provider: "systemone",
     model: "m1",
     action: "delegate",
     detail: "delegate",

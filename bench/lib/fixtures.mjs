@@ -149,7 +149,7 @@ export function makeCommandCorpus(count = 5000, seed = 777) {
  */
 export function makeStatsRecords(count = 20000, seed = 4242) {
   const rng = makeRng(seed);
-  const providers = ["bamboonode", "systemone", "siliconflow", "custom"];
+  const providers = ["systemone", "decisionmodels", "siliconflow", "custom"];
   const models = ["kev-4b", "system-one", "Qwen3-32B", "gpt-ish-mini"];
   const points = ["tool_authorize", "model_routing", "delegation", "compaction", "turn_continue", "retrieval", "skill_pick", "cot_translate"];
   const actions = ["allow", "ask", "reject", ""];
@@ -241,7 +241,7 @@ export async function writeJsonl(dirPath, fileName, lines) {
 /** 一个真实的自定义 provider 配置样本（resolveProvider 的输入）。 */
 export function makeProviderConfigs() {
   return [
-    { id: "bamboonode", cfg: { provider: "bamboonode", thinkMode: "never", apiKeyEnv: "" } },
+    { id: "decisionmodels", cfg: { provider: "decisionmodels", thinkMode: "never", apiKeyEnv: "" } },
     { id: "systemone", cfg: { provider: "systemone", systemoneModel: "" } },
     { id: "bogus", cfg: { provider: "nope-not-a-provider", model: "x" } },
     {
@@ -262,7 +262,7 @@ export function makeProviderConfigs() {
     },
     { id: "custom-bad", cfg: { provider: "custom", customBaseUrl: "not a url", customEndpointStyle: "decisions" } },
     { id: "custom-origin", cfg: { provider: "custom", customBaseUrl: "http://localhost:8080", customEndpointStyle: "systemone" } },
-    { id: "legacy", cfg: { provider: "bamboonode", baseUrl: "api.old.example.com/v1", apiKeyEnv: "BAMBOO_OLD_KEY" } },
+    { id: "legacy", cfg: { provider: "systemone", baseUrl: "api.old.example.com/v1", apiKeyEnv: "TYPESAFE_OLD_KEY" } },
     { id: "empty", cfg: {} },
   ];
 }

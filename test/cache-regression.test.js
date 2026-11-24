@@ -36,8 +36,8 @@ const LOW_RISK_ANSWERS = {
 function makeClient({ answers = LOW_RISK_ANSWERS, cfg: cfgOver = {} } = {}) {
   const fetches = [];
   const cfg = {
-    provider: "bamboonode",
-    bamboonodeApiKey: "test-key",
+    provider: "systemone",
+    systemoneApiKey: "test-key",
     cacheSize: 256,
     cacheTtlMs: 600000,
     timeoutMs: 5000,

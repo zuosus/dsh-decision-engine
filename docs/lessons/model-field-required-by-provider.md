@@ -8,12 +8,12 @@
  *   SiliconFlow    省略 model                    400 Model field is required.
  *   SiliconFlow    model: ""                     400 Model field is required.
  *   SiliconFlow    model: Kev-4B                 200 ✅
- *   bamboonode     省略 model                    200 ✅（服务端回填默认模型）
+ *     former default 省略 model                   200 ✅（服务端回填默认模型）
  *
  * 结论：
  *
  *   1. **model 是否必填由服务商决定**。SiliconFlow 的 /systemone 把 model 列为
- *      required（官方文档也这么写），而 bamboonode 省略字段会由服务端回填。
+ *      required（官方文档也这么写），而当时的默认预设省略字段会由服务端回填。
  *   2. 因此「留空 = 不发 model 字段」这条规则只在**服务端接受省略**时成立。
  *      套到必填端点上就是一次注定的 400，而守卫是 fail-open 的——表现为
  *      **静默失效**：用户只看到「守卫没反应」，日志里是 http-400 降级。

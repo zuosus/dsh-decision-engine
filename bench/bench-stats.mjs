@@ -48,7 +48,7 @@ rows.push(bench("isInRange(rotate 20k)", (i) => sink.n += st.isInRange(records[i
   iterations: 200000, rounds: 5, warmup: 3,
 }));
 rows.push(bench("buildRecord(fresh)", () => sink.o = st.buildRecord({
-  provider: "bamboonode", model: "kev-4b", point: "tool_authorize", mode: "observe",
+  provider: "systemone", model: "kev-4b", point: "tool_authorize", mode: "observe",
   inputTokens: 1200, outputTokens: 60, durationMs: 240, inputSource: "api", outputSource: "api",
 }), { iterations: 100000, rounds: 5, warmup: 3 }));
 rows.push(bench("normalizeMode(rotate)", (i) => sink.s += st.normalizeMode(["observe", "enforce", "off", null, 7][i % 5]), {

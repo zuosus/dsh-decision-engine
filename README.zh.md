@@ -16,7 +16,7 @@
 
 插件自带免费决策模型，全新安装默认已开启；也可以换成任何提供决策端点的服务——内置多家预设，或填自定义 base URL。
 
-provider 定义都在 [`lib/providers.json`](./lib/providers.json)：一个 provider 一个对象，写明地址、端点风格、密钥字段，以及 `models` 数组（该服务可用的模型；空数组表示交给服务端决定）。新增或修改 provider 只改这份 JSON，不用改代码。
+provider 定义都在 [`lib/providers.json`](./lib/providers.json)：一个 provider 一个对象，写明地址、端点风格、密钥字段，以及 `models` 数组（该服务可用的模型；空数组表示交给服务端决定）。想要增加预设 provider，修改这个文件后发 PR 即可。
 
 ## 2. 子代理用哪个模型、多强的推理，由决策模型决定
 

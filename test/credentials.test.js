@@ -27,14 +27,14 @@ const SAMPLE = [
   "refs:",
   "  DEEPSEEK_API_KEY: sk-deepseek",
   "  MODELSCOPE_API_KEY: ms-modelscope",
-  "  BAMBOO_API_KEY: sk-bamboo",
+  "  SAMPLE_API_KEY: sk-sample",
   "",
 ].join("\n");
 
 // ---------------------------------------------------------------- 读取
 
 test("能从 refs 段读出指定 key", () => {
-  assert.equal(pickRefValue(SAMPLE, "BAMBOO_API_KEY"), "sk-bamboo");
+  assert.equal(pickRefValue(SAMPLE, "SAMPLE_API_KEY"), "sk-sample");
   assert.equal(pickRefValue(SAMPLE, "DEEPSEEK_API_KEY"), "sk-deepseek");
   assert.equal(pickRefValue(SAMPLE, "NOT_EXIST"), undefined);
 });
@@ -49,7 +49,7 @@ test("能列出 refs 里的键名（不含值）", () => {
   assert.deepEqual(listRefNames(SAMPLE), [
     "DEEPSEEK_API_KEY",
     "MODELSCOPE_API_KEY",
-    "BAMBOO_API_KEY",
+    "SAMPLE_API_KEY",
   ]);
 });
 
@@ -62,38 +62,38 @@ test("新增 key 追加到 refs 段末尾，records 段不动", () => {
   // 已有 key 一个都不能丢
   assert.equal(pickRefValue(next, "DEEPSEEK_API_KEY"), "sk-deepseek");
   assert.equal(pickRefValue(next, "MODELSCOPE_API_KEY"), "ms-modelscope");
-  assert.equal(pickRefValue(next, "BAMBOO_API_KEY"), "sk-bamboo");
+  assert.equal(pickRefValue(next, "SAMPLE_API_KEY"), "sk-sample");
   // records 段的嵌套内容必须逐字保留
   assert.ok(next.includes("  client-connection/browser-session:"));
   assert.ok(next.includes("      secret: abc123"));
 });
 
 test("覆盖已有 key 不产生重复行", () => {
-  const next = applyRefUpdates(SAMPLE, { BAMBOO_API_KEY: "sk-bamboo-new" });
-  assert.equal(pickRefValue(next, "BAMBOO_API_KEY"), "sk-bamboo-new");
-  const occurrences = next.split("\n").filter((line) => line.trim().startsWith("BAMBOO_API_KEY:")).length;
-  assert.equal(occurrences, 1, `BAMBOO_API_KEY 出现 ${occurrences} 次`);
+  const next = applyRefUpdates(SAMPLE, { SAMPLE_API_KEY: "sk-sample-new" });
+  assert.equal(pickRefValue(next, "SAMPLE_API_KEY"), "sk-sample-new");
+  const occurrences = next.split("\n").filter((line) => line.trim().startsWith("SAMPLE_API_KEY:")).length;
+  assert.equal(occurrences, 1, `SAMPLE_API_KEY 出现 ${occurrences} 次`);
   // 位置保持原样（仍排在 MODELSCOPE 之后）
-  assert.ok(next.indexOf("MODELSCOPE_API_KEY") < next.indexOf("BAMBOO_API_KEY"));
+  assert.ok(next.indexOf("MODELSCOPE_API_KEY") < next.indexOf("SAMPLE_API_KEY"));
 });
 
 test("三个 provider 的 key 可以同时存在，互不覆盖", () => {
   let text = applyRefUpdates(SAMPLE, {
     TYPESAFE_API_KEY: "key-typesafe",
-    BAMBOO_API_KEY: "key-bamboo",
+    SILICONFLOW_API_KEY: "key-siliconflow",
     DECISION_ENGINE_CUSTOM_KEY: "key-custom",
   });
   assert.equal(pickRefValue(text, "TYPESAFE_API_KEY"), "key-typesafe");
-  assert.equal(pickRefValue(text, "BAMBOO_API_KEY"), "key-bamboo");
+  assert.equal(pickRefValue(text, "SILICONFLOW_API_KEY"), "key-siliconflow");
   assert.equal(pickRefValue(text, "DECISION_ENGINE_CUSTOM_KEY"), "key-custom");
   // 其它服务的 key 仍在
   assert.equal(pickRefValue(text, "DEEPSEEK_API_KEY"), "sk-deepseek");
 });
 
 test("传空字符串表示删除该键", () => {
-  const next = applyRefUpdates(SAMPLE, { BAMBOO_API_KEY: "" });
-  assert.equal(pickRefValue(next, "BAMBOO_API_KEY"), undefined);
-  assert.equal(listRefNames(next).includes("BAMBOO_API_KEY"), false);
+  const next = applyRefUpdates(SAMPLE, { SAMPLE_API_KEY: "" });
+  assert.equal(pickRefValue(next, "SAMPLE_API_KEY"), undefined);
+  assert.equal(listRefNames(next).includes("SAMPLE_API_KEY"), false);
   // 其它键不受影响
   assert.equal(pickRefValue(next, "DEEPSEEK_API_KEY"), "sk-deepseek");
 });
@@ -101,13 +101,13 @@ test("传空字符串表示删除该键", () => {
 test("删除不存在的键不会报错也不改动文件", () => {
   const next = applyRefUpdates(SAMPLE, { NEVER_EXISTED: "" });
   assert.equal(pickRefValue(next, "NEVER_EXISTED"), undefined);
-  assert.equal(pickRefValue(next, "BAMBOO_API_KEY"), "sk-bamboo");
+  assert.equal(pickRefValue(next, "SAMPLE_API_KEY"), "sk-sample");
 });
 
 test("没有 refs 段时新建一个", () => {
   const bare = "version: 1\nrecords:\n  foo:\n    kind: grant\n";
-  const next = applyRefUpdates(bare, { BAMBOO_API_KEY: "sk-new" });
-  assert.equal(pickRefValue(next, "BAMBOO_API_KEY"), "sk-new");
+  const next = applyRefUpdates(bare, { TYPESAFE_API_KEY: "sk-new" });
+  assert.equal(pickRefValue(next, "TYPESAFE_API_KEY"), "sk-new");
   // 原有内容保留
   assert.ok(next.includes("version: 1"));
   assert.ok(next.includes("  foo:"));

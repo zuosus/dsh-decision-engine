@@ -46,8 +46,8 @@ const NEW_REL = join("plugins", "dsh-decision-engine");
 const OLD_CONFIG = [
   "# 用户注释必须原样保留",
   "enabled: true",
-  "provider: bamboonode",
-  "bamboonodeApiKey: sk-MOVED-KEY-1234",
+  "provider: systemone",
+  "systemoneApiKey: sk-MOVED-KEY-1234",
   "",
 ].join("\n");
 
@@ -146,7 +146,7 @@ test("边界：新地址已存在时绝不覆盖、绝不合并，旧地址原�
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => ({ ok: false, status: 404, json: async () => ({}), text: async () => "" });
   try {
-    const keep = "enabled: false\nbamboonodeApiKey: sk-NEW-WINS\n";
+    const keep = "enabled: false\nsystemoneApiKey: sk-NEW-WINS\n";
     seed(home, NEW_REL, { "config.yml": keep });
     seed(home, OLD_REL, { "config.yml": OLD_CONFIG, "telemetry.jsonl": '{"point":"old"}\n' });
 

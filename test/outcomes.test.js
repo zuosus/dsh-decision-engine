@@ -29,7 +29,7 @@ import { StatsStore } from "../lib/stats-store.js";
 const rec = (over = {}) =>
   buildRecord({
     ts: "2026-10-20T10:00:00.000Z",
-    provider: "bamboonode",
+    provider: "systemone",
     model: "startlux-decision-v1.1-27b-autothink",
     point: "authorize",
     action: "delegate",
@@ -227,8 +227,8 @@ test("写入路径：裁决在拿到裁决之后才写进统计记录", async ()
     const store = new StatsStore({ dir });
     const client = new StartluxClient({
       getConfig: () => ({
-        provider: "bamboonode",
-        bamboonodeApiKey: "k",
+        provider: "systemone",
+        systemoneApiKey: "k",
         cacheSize: 256,
         cacheTtlMs: 600000,
         timeoutMs: 5000,
@@ -283,8 +283,8 @@ test("写入路径：答案形状不符时记「未裁决」，不记成放行",
     const store = new StatsStore({ dir });
     const client = new StartluxClient({
       getConfig: () => ({
-        provider: "bamboonode",
-        bamboonodeApiKey: "k",
+        provider: "systemone",
+        systemoneApiKey: "k",
         cacheSize: 256,
         cacheTtlMs: 600000,
         timeoutMs: 5000,
@@ -331,8 +331,8 @@ test("写入路径：降级也记统计（否则历史降级会凭空消失）",
     const store = new StatsStore({ dir });
     const client = new StartluxClient({
       getConfig: () => ({
-        provider: "bamboonode",
-        bamboonodeApiKey: "k",
+        provider: "systemone",
+        systemoneApiKey: "k",
         cacheSize: 256,
         cacheTtlMs: 600000,
         timeoutMs: 5000,
