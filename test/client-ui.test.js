@@ -1721,21 +1721,24 @@ test("每一项都归属正确的那一组（断言父子关系，不是「页�
   }
 });
 
-test("页脚（保存状态 / 测试端点 / 状态信息）在所有分组之下，不属于任何一组（DEC-051）", async () => {
+test("测试端点在连接方式分组的最后一项，页脚只保留保存状态与状态信息（DEC-051）", async () => {
   const { tree } = await render(stateWith({}), { slots: { [SLOTS.decisions]: decisionsFixture } });
   const sections = sectionsOf(tree);
-  const bodyText = sections.map((section) => textsOf(bodyOf(section)).join("\n"));
-  // 页脚回答的是「刚才存没存、端点通不通」，是四组的共同结论。
-  for (const label of ["改动即保存", "测试端点"]) {
-    assert.equal(
-      bodyText.some((text) => text.includes(label)),
-      false,
-      `「${label}」是页脚，应留在分组之外`,
-    );
-    assert.ok(textsOf(tree).join("\n").includes(label), `页面上应有「${label}」`);
-  }
-  // 页脚排在四个分组之后：它是 `.de-cfg` 里的最后一个子节点，自己包在
-  // `.de-cfg__footer` 里（不该被套上分组的竖线与顶边线）。
+  const byId = new Map(sections.map((section) => [section.props["data-section"], section]));
+  const connectionBody = bodyOf(byId.get("connection"));
+  const connectionRows = (connectionBody.children ?? []).filter(
+    (child) => child?.type === "div" && typeof child.props?.["data-field"] === "string",
+  );
+  assert.ok(connectionRows.length > 0, "连接方式分组里没有配置项");
+  assert.equal(
+    connectionRows.at(-1)?.props?.["data-field"],
+    "testEndpoint",
+    "测试端点应是连接方式分组最后一项",
+  );
+  assert.ok(textsOf(connectionBody).join("\n").includes("测试端点"), "连接方式分组应有测试端点");
+
+  // 页脚回答的是「刚才存没存、端点通不通」中的保存与状态信息；
+  // 测试端点已移入连接方式分组，不再出现在页脚容器里。
   const container = findNode(tree, (node) => node.type === "div" && node.props?.className === "de-cfg");
   assert.ok(container !== null, "没找到 .de-cfg 容器");
   const kids = (container.children ?? []).filter((child) => child !== null && child !== undefined);
@@ -1746,10 +1749,9 @@ test("页脚（保存状态 / 测试端点 / 状态信息）在所有分组之�
   assert.ok(lastSectionAt >= 0, "没找到分组");
   assert.ok(footerAt >= 0, "没找到页脚容器");
   assert.ok(footerAt > lastSectionAt, "页脚应排在所有分组之后");
-  // 页脚容器里必须装得下那两项。
   const footerText = textsOf(kids[footerAt]).join("\n");
   assert.ok(footerText.includes("改动即保存"), "页脚应有保存状态");
-  assert.ok(footerText.includes("测试端点"), "页脚应有测试端点按钮");
+  assert.equal(footerText.includes("测试端点"), false, "测试端点不应仍在页脚里");
 });
 
 test("分组展开状态记在 localStorage，刷新后不弹回（DEC-051）", async () => {
