@@ -1775,6 +1775,108 @@ test("测试端点、状态信息与诊断结果都在连接方式分组，页�
   assert.equal(footerText.includes("端点连通 ✅"), false, "测试结果不应留在页脚里");
 });
 
+/**
+ * 找到连接方式分组里某个 data-field 的行节点。
+ */
+function connectionRow(tree, field) {
+  const sections = sectionsOf(tree);
+  const byId = new Map(sections.map((section) => [section.props["data-section"], section]));
+  const body = bodyOf(byId.get("connection"));
+  return (body.children ?? []).find(
+    (child) => child?.type === "div" && child.props?.["data-field"] === field,
+  );
+}
+
+test("已配置 key 的 provider 在连接方式分组里显示删除配置按钮（DEC-080）", async () => {
+  // 服务端下发的 keyStatus 是界面判断「这个 provider 有没有 key」的唯一依据：
+  // 明文不回传，按钮不能靠 key 输入框的内容显示。
+  const { tree } = await render(stateWith({}), {
+    slots: { [SLOTS.decisions]: decisionsFixture },
+  });
+  const rowNode = connectionRow(tree, "deleteKey");
+  assert.ok(rowNode !== undefined, "已配置 key 时连接方式分组应有删除配置行");
+  const button = findNode(rowNode, (node) => node.type === "button");
+  assert.ok(button !== undefined, "删除配置行应有一个按钮");
+  assert.ok(
+    textsOf(button).join("").includes("删除配置"),
+    `按钮文案应为「删除配置」，实际：${textsOf(button).join("")}`,
+  );
+  // 删除的是密钥，不是整个 provider 配置：说明文字要说清。
+  assert.ok(
+    textsOf(rowNode).join("\n").includes("API Key"),
+    "删除行应说明删的是该 provider 的 API Key",
+  );
+});
+
+test("未配置 key 的 provider 不显示删除配置按钮（DEC-080）", async () => {
+  const { tree } = await render(
+    stateWith({
+      provider: "siliconflow",
+      keyStatus: {
+        systemone: {
+          configured: true, hint: "…abcd", refName: "TYPESAFE_API_KEY", keyField: "systemoneApiKey",
+          source: "credentials", sourceLabel: "~/.dsh/.credentials.yaml 的 TYPESAFE_API_KEY",
+        },
+        siliconflow: {
+          configured: false, hint: "", refName: "SILICONFLOW_API_KEY", keyField: "siliconflowApiKey",
+          source: "none", sourceLabel: "未配置",
+        },
+        "siliconflow-intl": {
+          configured: false, hint: "", refName: "SILICONFLOW_INTL_API_KEY", keyField: "siliconflowIntlApiKey",
+          source: "none", sourceLabel: "未配置",
+        },
+        custom: {
+          configured: false, hint: "", refName: "DECISION_ENGINE_CUSTOM_KEY", keyField: "customApiKey",
+          source: "none", sourceLabel: "未配置",
+        },
+      },
+    }),
+    { slots: { [SLOTS.decisions]: decisionsFixture } },
+  );
+  assert.equal(
+    connectionRow(tree, "deleteKey"),
+    undefined,
+    "未配置 key 时不应出现删除配置行——删一个不存在的东西只会让人困惑",
+  );
+});
+
+test("点删除配置先确认，确认后发 DELETE /config/key 并带回 provider（DEC-080）", async () => {
+  const { tree } = await render(stateWith({}), {
+    slots: { [SLOTS.decisions]: decisionsFixture },
+  });
+  const rowNode = connectionRow(tree, "deleteKey");
+  const button = findNode(rowNode, (node) => node.type === "button");
+  // 测试里的 window.confirm 默认不存在：先装一个记录调用的桩。
+  const confirms = [];
+  const originalConfirm = globalThis.confirm;
+  globalThis.confirm = (message) => {
+    confirms.push(message);
+    return false; // 第一次：取消，不应发请求。
+  };
+  const stub = stubFetch();
+  try {
+    button.props.onClick();
+    assert.equal(confirms.length, 1, "删除前必须弹一次确认，避免误删正在用的 key");
+    assert.ok(
+      confirms[0].includes("API Key"),
+      `确认文案要说清删的是什么，实际：${confirms[0]}`,
+    );
+    assert.equal(stub.calls.length, 0, "取消确认时不能发出任何删除请求");
+
+    globalThis.confirm = () => true;
+    button.props.onClick();
+    const deleteCalls = stub.calls.filter(
+      (call) => call.init?.method === "DELETE" && call.url.endsWith("/config/key"),
+    );
+    assert.equal(deleteCalls.length, 1, "确认后应恰好发一次 DELETE /config/key");
+    const body = JSON.parse(deleteCalls[0].init.body);
+    assert.equal(body.provider, "systemone", "必须告诉服务端删的是哪个 provider 的 key");
+  } finally {
+    stub.restore();
+    globalThis.confirm = originalConfirm;
+  }
+});
+
 test("分组展开状态记在 localStorage，刷新后不弹回（DEC-051）", async () => {
   // 用户把「守卫行为」展开、把「连接方式」收起，下次打开面板应当保持那次选择。
   // 这条防的是「状态只活在内存里」：刷新一次全部复位，等于每次都要重新折叠。

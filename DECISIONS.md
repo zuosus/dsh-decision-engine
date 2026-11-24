@@ -2,6 +2,43 @@
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
 
+## DEC-080 配置页「删除配置」按钮：只删该 provider 的 API Key，两处存储按当前位置清（2026-11-25）
+
+**背景**：用户多处配置过 key 后，没有界面入口把某一家已经配好的 key 撤销——只能去 `~/.dsh/.credentials.yaml` 手删 refs 项，或手改 `config.yml`，而 key 存在哪一处还取决于 `keyStorage`，用户根本不知道该改哪个文件。用户明确要求：在配置页「连接方式」分组、连接方式下方显示一个删除配置按钮，删除该配置；并在确认范围时选择「只删除 API Key」（模型 / 地址 / 变量名等其它设置保留）。
+
+**决定**：
+
+- **服务端新增 `DELETE /api/decision-engine/config/key`**：请求体 `{ provider }`，校验 provider 必须是预设之一，否则 400 且不碰任何凭据。按当前 `cfg.keyStorage` 决定删哪里：`credentials` → `writeCredentialToDsh(refName, "")` 清凭据文件 refs 项；`config` → `persistConfig({ [keyField]: "" })` 把 config.yml 里该 provider 的显式 key 字段清空。返回与 `/status` 相同的完整状态（`keyStatus` 随之刷新），前端一次对齐草稿与服务端状态。
+- **只删当前生效位置的那一把**：`keyStorage=config` 时不顺手删凭据文件里同名的 ref（沿用 persistKeys 的既有约定——换回 credentials 模式时旧值还能用）；`credentials` 模式下也不去清 config.yml 里的明文。删除范围只针对 key，不动 provider / 模型 / base URL / 密钥变量名。
+- **config.yml 里按键保留空行**（`systemoneApiKey:` 无值），不把整行删掉：`applyConfigUpdates` 的既有语义是「保留注释与顺序」，空值解析出来就是未配置；明文 key 字节不残留。
+- **界面：已配置 key 时才显示**（用服务端下发的 `keyStatus[id].configured`，明文不回传、来源服务端最清楚），放在 API Key 行正下方，属于「连接方式」分组。文案说明「删除当前 provider 的 API Key（保留模型、地址等其它设置）」，避免误以为整份配置被清空。
+- **先 `confirm()` 再发请求**：密钥正在被使用时误删会让守卫全部降级放行（fail-open），而界面上只少一把 key——是最难自查的故障形态。取消不发请求；确认后发 DELETE 并带当前 provider id，成功后清空该 provider 的 key 输入草稿（防止残留的明文在下次保存时被写回），删除结果走同一条 `msg` 诊断行展示。
+- **中英文案进 client.js 的 EN_CONFIG / T_CONFIG 词表**：沿用本插件的 i18n 覆盖测试，不新增硬编码中文。
+
+**为什么**：
+
+- **删除与保存走不同的路由**：保存走 PUT `/config`（防抖、合并、按 provider 分派字段、可能两处写入、失败整体回滚）；删除是一次明确、离散、只针对一把 key 的动作。塞进 `/config` 的空串 patch 会复用那套复杂语义，且按钮「删的是哪一把」无法表达清楚。
+- **凭据先写、配置后写**：与 PUT `/config` 同一条失败原则——凭据写失败整体报错，不让界面假装成功；配置写失败也如实返回错误，但删除本身已经落盘，不能伪造「没删成」。
+- **按钮条件用服务端状态而不是输入框**：key 可能来自凭据文件 / 环境变量 / 服务端下发，输入框里什么都没有；用输入框判断会让「已配置」的 provider 永远看不到删除入口。
+
+**被否决的方案**：
+
+- **删除该 provider 的全部配置**（provider / 模型 / 地址 / 变量名一起清）：用户明确选了「只删除 API Key」；整份清空代价大且不可逆。
+- **两处存储一起清**：否决。与 persistKeys 的既有约定（切换 keyStorage 不清另一处）冲突，还会把用户刻意保留的旧值删掉。
+- **把删除按钮放在页脚或独立分组**：否决。它操作的是 API Key，必须与 API Key 行同组、紧邻，否则与它删的对象脱节。
+- **把空值写成删除整行**：否决。破坏 `applyConfigUpdates` 的注释/顺序保持语义；空值本就等价未配置。
+
+**验证**：
+
+- `test/delete-key-route.test.js`（新增，7 项）：凭据模式删除（其它 provider 的 key 与 records 段保留）、config 模式删除（明文消失、空行保留、模型/开关不动）、删除不存在的 key 是空操作、未知 provider 被拒且不碰凭据、删除后再次 GET /status 仍是未配置、config 模式不动凭据里的旧 ref、凭据文件不存在时安全返回。
+- `test/client-ui.test.js`（+3 项）：已配置时连接方式分组出现 `data-field=deleteKey` 行与按钮、未配置时不出现、点按钮先确认（取消不发请求）且确认后发一次 `DELETE /config/key` 并带当前 provider id。
+- 红→绿证据：实现前 `delete-key-route.test.js` 7/7 失败在「应注册 DELETE 路由」、两条 UI 用例失败在「应有删除配置行」；实现后分别 7/7、3/3 通过。
+- `node --test --test-concurrency=1 test/`：**899 项 / 899 通过 / 0 失败**（基线 889 + 新增 10）。`node scripts/verify-wiring.mjs`：全部接线检查通过。
+
+**改动文件**：`lib/index.js`（新增 DELETE `/config/key` 路由）、`lib/client.js`（`deleteKey()` + 连接方式分组的删除行 + 中英文案）、`test/delete-key-route.test.js`（新增）、`test/client-ui.test.js`、`DECISIONS.md`。
+
+
+
 
 ## DEC-079 按「单次请求的题目上限」拆题：decisionmodels 的 s1-fast 只收 1 道（2026-11-25）
 
