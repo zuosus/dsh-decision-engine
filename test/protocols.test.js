@@ -224,3 +224,32 @@ test("未知协议回落 systemone（旧数据里没有 protocol 字段也不能
   assert.equal(body.think_mode, "never");
   assert.equal(body.input, undefined);
 });
+
+// ------------------------------------------------- System One 的字段能力差异
+
+test("decisionmodels：systemone 形状不变，但不发 think_mode（端点拒绝该字段）", () => {
+  const provider = resolveProvider({ provider: "decisionmodels" });
+  const body = buildRequestBody(provider, {
+    state: { tool: "bash", command: "ls" },
+    questions: { irreversible: { type: "noul", instructions: "Irreversible?" } },
+    thinkMode: "always",
+  });
+  // 线协议其余部分保持 systemone 形状。
+  assert.equal(provider.protocol, "systemone");
+  assert.deepEqual(body.state, { tool: "bash", command: "ls" });
+  assert.equal(body.model, "s1-fast");
+  assert.deepEqual(body.questions.irreversible.criteria, {
+    true: "The stated condition is true.",
+    false: "The stated condition is false.",
+  });
+  // 实测 400: {"loc":["think_mode"],"msg":"Extra inputs are not permitted"}。
+  assert.equal(body.think_mode, undefined);
+});
+
+test("其他 systemone provider 仍发送 think_mode（字段能力按 provider 数据层配置）", () => {
+  const body = buildRequestBody(resolveProvider({ provider: "systemone" }), {
+    state: {},
+    questions: {},
+  });
+  assert.equal(body.think_mode, "never");
+});

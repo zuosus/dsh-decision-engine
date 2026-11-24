@@ -128,6 +128,7 @@
     "defaultModel": "s1-fast",
     "modelField": "decisionModelsModel",
     "keyEnvField": "decisionModelsApiKeyEnv",
+    "supportsThinkMode": false,
     "models": [
       "s1-fast",
       "s1-pro",
