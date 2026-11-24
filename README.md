@@ -18,6 +18,8 @@ The free decision model is on by default for fresh installs; any other service e
 
 Provider definitions live in [`lib/providers.json`](./lib/providers.json): one object per provider, each with its base URL, endpoint style, key field and a `models` array listing the models that service can use (an empty array means "let the service decide"). To add a preset provider, edit this file and submit a PR.
 
+Presets ship for System One-compatible services (TypeSafe, SiliconFlow, Intern InkStone, Decision Models, or your own llama.cpp / vLLM), Google AI Studio Decisions, and OpenAI Decisions. Wire protocols differ — `protocol` in the JSON selects one: `systemone` (the generic `state` + `questions` shape), `google-decisions`, or `openai-decisions` (`POST /v1/decisions` with an `input` / `questions` array and `answers` returned as a named array). Request body, auth header and answer shape for a protocol all live in [`lib/wire-protocol.js`](./lib/wire-protocol.js), so a new protocol is one module plus one JSON entry.
+
 ## 2. Which model a subagent uses, and how hard it thinks, is decided by the decision model
 
 DeepSeek Harness gives a spawned subagent the exact same provider, model and reasoning effort as the lead. That default only holds when the lead is doing the same kind of work itself: sending a research subtask to the lead's strong model is pure waste, and pushing a high-fidelity refactor down to a cheap tier buys a rewrite.

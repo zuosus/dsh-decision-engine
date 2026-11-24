@@ -43,7 +43,7 @@ mode: shadow
 # ============================================================================
 # 服务提供方（provider）
 # ============================================================================
-# 八选一（这份清单来自 lib/providers.json；加一家服务就改那个文件）：
+# 十选一（这份清单来自 lib/providers.json；加一家服务就改那个文件）：
 #   systemone         内置。System One 协议服务 POST /v1/systemone，
 #                     默认指向 TypeSafe（https://api.typesafe.ai/v1）。
 #   siliconflow       内置。硅基流动（国内站）https://api.siliconflow.cn/v1/systemone
@@ -60,6 +60,12 @@ mode: shadow
 #                     https://api.decisionmodels.io/v1，System One 协议
 #                     POST /v1/systemone；模型 s1-fast / s1-pro / s1-vision /
 #                     reax-1，默认 s1-fast；粘一个 API key 即可跑
+#   google-decisions  内置。Google AI Studio Decisions API
+#                     https://generativelanguage.googleapis.com/v1beta/decisions，
+#                     模型 gemini-decision-1，x-goog-api-key 鉴权
+#   openai-decisions  内置。OpenAI Decisions API
+#                     https://api.openai.com/v1/decisions，模型 gpt-6-luna，
+#                     Bearer 鉴权（官方 REST 只支持这一个模型）
 #   custom            自己填 base URL，接任何提供决策端点的服务
 #                     （自建 llama.cpp / vLLM、企业网关、第三方中转）。
 #
@@ -112,6 +118,13 @@ duanyanModel: ""
 # Decision Models 的模型。留空时使用预设默认 s1-fast。
 decisionModelsModel: ""
 
+# Google AI Studio Decisions 的模型。留空时使用预设默认 gemini-decision-1。
+googleDecisionsModel: ""
+
+# OpenAI Decisions 的模型。留空时使用预设默认 gpt-6-luna——
+# 官方目前只支持这一个模型，且省略 model 字段会被拒，因此「留空」= 用预设默认。
+openaiDecisionsModel: ""
+
 # ---- custom 预设（provider=custom 时才生效）--------------------------------
 # base URL 必填，且必须是 http/https 地址；不带 scheme 会被拒绝（内置预设
 # 允许省略 scheme，custom 不允许——自定义地址必须显式，避免猜错协议）。
@@ -156,6 +169,8 @@ customHeaders: ""
 #   Perplexity Decider -> PERPLEXITY_API_KEY
 #   OpenRouter         -> OPENROUTER_API_KEY
 #   Decision Models    -> DECISIONMODELS_API_KEY
+#   Google AI Studio   -> GEMINI_API_KEY
+#   OpenAI             -> OPENAI_API_KEY
 #   custom              -> customApiKeyEnv（没填时用 DECISION_ENGINE_CUSTOM_KEY）
 #
 # 各格互不覆盖，可以同时配好；切换 provider 不会串用别人的 key。
@@ -178,6 +193,8 @@ keyStorage: credentials
 # perplexityApiKeyEnv: ""
 # openrouterApiKeyEnv: ""
 # decisionModelsApiKeyEnv: ""
+# googleDecisionsApiKeyEnv: ""
+# openaiDecisionsApiKeyEnv: ""
 # customApiKeyEnv: ""
 
 # 直接写明文 key 也可以（各 provider 一格，互不影响）。
@@ -190,6 +207,8 @@ keyStorage: credentials
 # perplexityApiKey: ""
 # openrouterApiKey: ""
 # decisionModelsApiKey: ""
+# googleDecisionsApiKey: ""
+# openaiDecisionsApiKey: ""
 # customApiKey: ""
 
 # .credentials.yaml 里的形态就是 refs 段：

@@ -18,6 +18,8 @@
 
 provider 定义都在 [`lib/providers.json`](./lib/providers.json)：一个 provider 一个对象，写明地址、端点风格、密钥字段，以及 `models` 数组（该服务可用的模型；空数组表示交给服务端决定）。想要增加预设 provider，修改这个文件后发 PR 即可。
 
+内置预设覆盖三类服务：System One 兼容端点（TypeSafe、硅基流动、书生·端砚、Decision Models，以及自建 llama.cpp / vLLM）、Google AI Studio Decisions、OpenAI Decisions。三者的**线协议不同**，由 JSON 里的 `protocol` 选择：`systemone`（通用的 `state` + `questions` 形状）、`google-decisions`、`openai-decisions`（`POST /v1/decisions`，请求用 `input` / `questions` 数组，答案以带 `name` 的数组返回）。每种协议的请求体、鉴权头与答案形状都在 [`lib/wire-protocol.js`](./lib/wire-protocol.js) 里——新增一种协议 = 一个模块 + 一条 JSON。
+
 ## 2. 子代理用哪个模型、多强的推理，由决策模型决定
 
 DSH 默认让派生出的 subagent 原样继承 lead 的 provider / model / 推理强度。这个默认值只在「lead 自己也在做同类工作」时成立：把调研类子任务交给 lead 的强模型是纯浪费，把要求高保真的重构下沉到便宜档换来的是返工。

@@ -325,7 +325,7 @@ check("导出 PROVIDER_IDS", Array.isArray(plugin.PROVIDER_IDS), `实际 ${typeo
 // 整轮字段检查静默跳过——检查脚本自己静默失败比没有检查更危险。
 check("导出 PROVIDER_PRESETS", typeof plugin.PROVIDER_PRESETS === "object", `实际 ${typeof plugin.PROVIDER_PRESETS}`);
 check(
-  "provider 预设齐备（8 家）",
+  "provider 预设齐备（10 家）",
   [
     "systemone",
     "siliconflow",
@@ -334,9 +334,16 @@ check(
     "perplexity",
     "openrouter",
     "decisionmodels",
+    "google-decisions",
+    "openai-decisions",
     "custom",
   ].every((id) => (plugin.PROVIDER_IDS ?? []).includes(id)),
   `实际 ${JSON.stringify(plugin.PROVIDER_IDS)}`,
+);
+check(
+  "custom 预设仍收尾（下拉顺序 = 数组顺序）",
+  (plugin.PROVIDER_IDS ?? []).at(-1) === "custom",
+  `实际 ${JSON.stringify((plugin.PROVIDER_IDS ?? []).at(-1))}`,
 );
 check("默认 provider 保持 systemone（升级不改变行为）", defaults.provider === "systemone", `实际 ${defaults.provider}`);
 

@@ -2,6 +2,42 @@
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
 
+## DEC-077 新增 OpenAI Decisions API 预设，并把线协议拆成独立模块（2026-11-25）
+
+**背景**：用户要求把 OpenAI 的 Decisions API（https://developers.openai.com/api/docs/guides/decisions）接成内置预设。它和现有的 System One 系端点**三样都不同**：请求体（`input` 而不是 `state`，`questions` 是带 `name` 的数组而不是对象）、题型名（`noul` 对应 `predicate`）、答案形状（`answers` 是数组，靠 `name` 认领，而不是按 id 索引的对象）。上一个提交（041a2c9，Google AI Studio）已经在 `providers.js` 里加了 `protocol` 字段与 `buildHeaders` / `buildRequestBody` 的分支，但当时没有答案归一这一半。
+
+**决定**：
+
+- **`lib/providers.json` 新增一条 `openai-decisions`**：`baseUrl: https://api.openai.com/v1`、`endpointStyle: decisions`、`protocol: openai-decisions`、`apiKeyEnv: OPENAI_API_KEY`、`requiresModel: true`、`defaultModel: gpt-6-luna`、`models: ["gpt-6-luna"]`。插在 `custom` 之前（`custom` 必须收尾）。三个配置格（`openaiDecisionsApiKey` / `openaiDecisionsModel` / `openaiDecisionsApiKeyEnv`）由预设表自动生成，`index.js` 的 schema / 保存白名单 / `persistKeys` / `rawModels` 一处都不用改——这是 DEC-074 那条抽象的直接收益。
+- **线协议拆成 `lib/wire-protocol.js`（251 行）+ `lib/protocols/openai-decisions.js`（192 行）**。`providers.js` 从 927 行降到 767 行，仍超 500 行预算，但本次只搬不重构（拆它是另一件事）。`providers.js` 把 `buildHeaders` / `buildRequestBody` / `readAnswers` / `normalizeThinkMode` / `THINK_MODES` / `DEFAULT_THINK_MODE` 原样再导出，对外 API 不变。
+- **答案归一放在传输层**：新增 `readAnswers(provider, body)`，`classify()` 用它取代原来的 `body.answers`。OpenAI 的数组在这里转成内部按 id 索引的对象；`predicate → noul`、`choice`/`score` 的 `probabilities` 数组转成按值索引的对象（`tolerance.js` 的连续严重度靠 `probabilities.high` / `.medium`）。**`refusal` 原样保留**，让各决策点的 `parse()` 判为形状不符 → 降级放行。
+- **未知协议回落 `systemone`**，不抛错：`protocol` 是后加字段，老配置、老下发值里都没有；抛错会把「字段写错」放大成整个插件不可用。
+
+**为什么**：
+
+- **答案归一必须和请求构造放在同一层**：协议差异是**成对**出现的（请求换了形状，答案一定也换了）。只做请求那一半，结果是 HTTP 200 + 每次 `answer-shape-mismatch` 降级——面板显示「已连接、模型正确」，守卫却静默不工作。这是本插件历史上反复出现的故障模式（见 `docs/lessons/endpoint-path-vs-model.md`、`model-field-required-by-provider.md`）。
+- **为什么不让九个决策点各自处理协议**：漏一个就是那个点静默失效，而决策点是逐个加出来的，后来加的人不会记得再写一遍。放传输层则天然覆盖将来新增的点。
+- **为什么 `refusal` 不翻译**：把「模型拒绝判断」映射成 `noul: 0`（= 条件不成立 = 不危险）等于让拒绝变成放行。形状不符即降级，是本插件既有的 fail-open 原则。
+- **为什么 `requiresModel: true`**：官方只支持 `gpt-6-luna`，且省略 `model` 会被拒。留空必须回落预设默认，否则「只填一个 API key 就能用」这条承诺落空，守卫还会静默失效。
+- **为什么单开 `lib/protocols/` 目录**：OpenAI 这一支是「整套形状都不同」（约 180 行：题型映射 + 答案归一 + 概率归一），不是几行分支。留在 `wire-protocol.js` 会让三种协议挤在一起，且该文件会超预算。
+
+**被否决的方案**：
+
+- **把 OpenAI 当成 `custom` 让用户自己填**：否决。`custom` 只能发 System One 线协议，填了官方地址只会 400/404；用户要的是「选中就能用」的预设。
+- **在 `providers.js` 里直接加分支、不拆文件**：否决。`providers.js` 改动前已 927 行，超「单文件 500 行」预算；再塞 200 行只会更难定位。
+- **让 `readAnswers` 也处理 `google-decisions` 的答案**：否决。Google 的答案本来就是按 id 索引的对象，与 System One 同形；给它加分支等于凭空造一个不存在的差异。
+- **把 `refusal` 当作 `noul: 0.5`（不确定）**：否决。0.5 会让阈值判断落在中间，既不是明确的放行也不是明确的拦截，比直接降级更难解释；而「形状不认识 → 降级」已有明确语义。
+
+**验证**：
+
+- `test/protocols.test.js`（新增，12 项）：预设本身（端点 / key 变量名 / 字段名 / 默认模型 / 协议名）、Bearer 鉴权且不带 `x-goog-api-key`、请求体（`input_json` + `questions` 数组 + `name` + `choices` / `levels`）、答案归一（三种题型各自能被 `readNoul` / `readChoice` / `readScore` 解析）、`refusal` 保留、畸形输入不抛、其它协议答案原样透传、未知协议回落 systemone。
+- `test/openai-protocol-route.test.js`（新增，4 项）：真实 `StartluxClient` + 桩 fetch 走 `classify()`。**关键一条**用真实的 `extractGuardAnswers` 解析真实回包——只断言请求体不够，请求对、答案没接上正是上面那个故障。变异验证：把 `readAnswers(provider, body)` 换回 `body.answers`，该用例立刻转红。
+- 既有回归：`test/providers.test.js`（provider 清单 / key 字段 / 模型字段三处枚举补 `openai-decisions`）、`scripts/verify-wiring.mjs`（「预设齐备」改 10 家 + 新增「custom 收尾」检查）。
+- `node --test test/`：**862 项 / 862 通过 / 0 失败**。`node scripts/verify-wiring.mjs`：全部接线检查通过（含自动生成的三格 `openaiDecisions*`）。
+
+**改动文件**：`lib/wire-protocol.js`（新增）、`lib/protocols/openai-decisions.js`（新增）、`lib/providers.js`（协议实现搬走，改为再导出）、`lib/providers.json`（新增预设）、`lib/index.js`（`classify()` 改用 `readAnswers`）、`test/protocols.test.js`（新增）、`test/openai-protocol-route.test.js`（新增）、`test/providers.test.js`、`scripts/verify-wiring.mjs`、`config.example.yml`、`README.md`、`README.zh.md`、`docs/lessons/openai-decisions-wire-format.md`（新增）、`DECISIONS.md`。
+
+
 ## DEC-076 状态信息与诊断结果跟着「测试端点」进「连接方式」分组，页脚只剩保存状态（2026-11-25）
 
 **背景**：DEC-051 把配置页拆成四组可折叠分组时，「测试端点」按钮被移进了「连接方式」组的最后一项，但它的**结果**——紧凑状态信息（提供方 / 端点 / 模型 / 超时 / 请求次数 / 密钥来源）与 `msg` 诊断结果（`端点连通 ✅ ...` 或失败原因）——仍留在页脚。于是出现「按钮在组里、结果显示在页面最底部」的割裂：用户配完地址点测试，得跨半个页面去对照；更糟的是**「连接方式」一旦收起，刚测出的结果就完全看不见了**，而这一组恰恰是用户配完就会折起来的那一组。用户明确要求：整个测试结果那一段都要跟着挪过去。
