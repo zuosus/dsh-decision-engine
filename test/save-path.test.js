@@ -264,7 +264,7 @@ test("/models：systemone 风格的端点不做类型过滤（沿用既有规则
     const res = await routes["/api/decision-engine/models"].fetch({ method: "GET" });
     const data = await res.json();
     // 既有规则：systemone 风格的端点不按类型过滤（该风格下的服务自管模型表）。
-    // 类型过滤只作用于 decisions 风格的预设与 knownModels 清单。
+    // 类型过滤只作用于 decisions 风格的预设与 models 清单。
     assert.deepEqual(data.models.map((m) => m.id), ["jev-latest", "some-chat"]);
   } finally {
     globalThis.fetch = originalFetch;

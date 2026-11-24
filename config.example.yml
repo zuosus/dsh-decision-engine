@@ -43,7 +43,7 @@ mode: shadow
 # ============================================================================
 # 服务提供方（provider）
 # ============================================================================
-# 八选一：
+# 八选一（这份清单来自 lib/providers.json；加一家服务就改那个文件）：
 #   bamboonode        内置。StartLux 官方端点 POST /v1/decisions，本插件的原有默认值。
 #   systemone         内置。任意 System One 协议服务 POST /v1/systemone，
 #                     默认指向 TypeSafe（https://api.typesafe.ai/v1）。
@@ -67,7 +67,9 @@ mode: shadow
 #
 # perplexity / openrouter 也已预置，但**端点风格与默认模型尚未实测**（接入时
 # 按各家公开 API 地址写的）：首次使用若 404，插件会自动换另一条路径重试；
-# 跑通后建议把实测结论写回 lib/providers.js 的预设表。
+# 跑通后建议把实测结论写回 lib/providers.json 的对应条目
+# （每个 provider 一个对象；该服务支持多个模型就写进它的 models 数组。
+#  新增一家服务 = 往数组里加一个对象，不需要改代码）。
 provider: bamboonode
 
 # ---- bamboonode 预设的地址覆盖 ----------------------------------------------

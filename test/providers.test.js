@@ -2,8 +2,9 @@
  * Provider 配置模型的验收测试。
  *
  * 这一层刻意**不导入 lib/index.js**：那个模块依赖 `@deepseek-ai/schemastery`
- * （宿主 peer 依赖），在裸仓库里加载不了。providers.js 是零依赖的纯模块，
- * 因此地址拼接、校验、鉴权头这些最容易被改坏的东西可以脱离 DSH 单独测。
+ * （宿主 peer 依赖），在裸仓库里加载不了。providers.js（及其数据层
+ * provider-presets.js）是零依赖的纯模块，因此地址拼接、校验、鉴权头、以及
+ * 「JSON 里的一条 provider 怎么归一」这些最容易被改坏的东西可以脱离 DSH 单独测。
  *
  * 覆盖的验收项（对应需求里的 6 条）：
  *
@@ -34,6 +35,7 @@ import {
   normalizeBaseUrl,
   normalizeThinkMode,
   parseCustomHeaders,
+  parseProviderPresets,
   providerCatalog,
   resolveKeyFor,
   resolveProvider,
@@ -61,6 +63,77 @@ test("内置预设齐备：systemone / bamboonode / siliconflow / siliconflow-in
   }
   // 自定义 provider 的「默认值」由用户给，因此地址为空是刻意设计。
   assert.equal(PROVIDER_PRESETS.custom.baseUrl, "");
+});
+
+test("provider 预设由 JSON 数组提供，models 映射为可选模型清单", () => {
+  const definitions = JSON.parse(
+    readFileSync(new URL("../lib/providers.json", import.meta.url), "utf8"),
+  );
+  assert.ok(Array.isArray(definitions));
+  assert.deepEqual(definitions.map(({ id }) => id), [...PROVIDER_IDS]);
+  for (const definition of definitions) {
+    assert.ok(Array.isArray(definition.models), `${definition.id} 缺少 models 数组`);
+    assert.deepEqual(PROVIDER_PRESETS[definition.id].models, definition.models);
+    assert.deepEqual(PROVIDER_PRESETS[definition.id].knownModels, definition.models);
+  }
+});
+
+test("默认 provider 与 custom 标记也来自 JSON，代码里不再写死", () => {
+  const definitions = JSON.parse(
+    readFileSync(new URL("../lib/providers.json", import.meta.url), "utf8"),
+  );
+  const defaults = definitions.filter((item) => item.default === true);
+  assert.equal(defaults.length, 1, "必须恰好有一个 default: true");
+  assert.equal(defaults[0].id, DEFAULT_PROVIDER);
+  assert.equal(PROVIDER_PRESETS[DEFAULT_PROVIDER].default, true);
+
+  const customizable = definitions.filter((item) => item.customizable === true);
+  assert.equal(customizable.length, 1, "必须恰好有一个 customizable: true");
+  // 界面拿这个标记决定「哪些字段归自定义区」，不是按 id 猜。
+  assert.deepEqual(
+    providerCatalog().filter((item) => item.customizable).map((item) => item.id),
+    [customizable[0].id],
+  );
+});
+
+test("providerCatalog 下发 models 数组（前端与统计只认这一份）", () => {
+  const catalog = providerCatalog();
+  const siliconflow = catalog.find((item) => item.id === "siliconflow");
+  assert.deepEqual(siliconflow.models, ["Kev-4B", "SemIf"]);
+  // 兼容字段与 canonical 字段同源，避免两处漂移。
+  assert.deepEqual(siliconflow.knownModels, siliconflow.models);
+  for (const item of catalog) {
+    assert.ok(Array.isArray(item.models), `${item.id} 的 models 不是数组`);
+  }
+});
+
+test("parseProviderPresets：最小条目就能新增 provider（字段名由 id 推导）", () => {
+  const [preset] = parseProviderPresets([
+    { id: "my-gateway", baseUrl: "https://gw.example.com/v1", models: ["m1", "m2"] },
+  ]);
+  assert.equal(preset.id, "my-gateway");
+  // 只有 id 必填：显示名、端点风格、字段名、变量名都由数据/ id 推导。
+  assert.equal(preset.label, "my-gateway");
+  assert.equal(preset.endpointStyle, "auto");
+  assert.equal(preset.modelField, "myGatewayModel");
+  assert.equal(preset.keyField, "myGatewayApiKey");
+  assert.equal(preset.keyEnvField, "myGatewayApiKeyEnv");
+  assert.equal(preset.apiKeyEnv, "MY_GATEWAY_API_KEY");
+  // 一家服务多个模型：数组即清单，默认取第一项。
+  assert.deepEqual(preset.models, ["m1", "m2"]);
+  assert.deepEqual(preset.knownModels, ["m1", "m2"]);
+  assert.equal(preset.defaultModel, "m1");
+});
+
+test("parseProviderPresets：坏数据在加载时就报错（不能静默半生效）", () => {
+  assert.throws(() => parseProviderPresets([{ id: "a" }, { id: "a" }]), /重复/, "重复 id 必须报错");
+  assert.throws(
+    () => parseProviderPresets([{ id: "a", keyField: "sameKey" }, { id: "b", keyField: "sameKey" }]),
+    /共用/,
+    "两个 provider 共用一个配置字段会互相覆盖",
+  );
+  assert.throws(() => parseProviderPresets([{ id: "Bad Id" }]), /id/, "非法 id 必须报错");
+  assert.throws(() => parseProviderPresets([]), /至少/, "空数组没有可用的 provider");
 });
 
 test("system one 预设有显示名、默认地址、默认模型与端点风格", () => {
@@ -503,12 +576,12 @@ test("请求头不随 provider 泄露服务商域名", () => {
 });
 
 test("请求构造代码里不再出现硬编码的 bamboonode.dev", () => {
-  // 源码级检查：预设表之外（providers.js 的 bamboonode 条目）不允许再出现该域名。
+  // 源码级检查：服务商地址只允许出现在 providers.json，代码里不得写死。
   const index = readFileSync(new URL("../lib/index.js", import.meta.url), "utf8");
   assert.equal(
     index.includes("bamboonode.dev"),
     false,
-    "lib/index.js 仍在请求路径上硬编码 bamboonode.dev；地址必须来自 providers.js",
+    "lib/index.js 仍在请求路径上硬编码 bamboonode.dev；地址必须来自 providers.json",
   );
   const client = readFileSync(new URL("../lib/client.js", import.meta.url), "utf8");
   assert.equal(
@@ -516,6 +589,8 @@ test("请求构造代码里不再出现硬编码的 bamboonode.dev", () => {
     false,
     "lib/client.js 仍在界面里硬编码 bamboonode.dev；默认地址应由服务端下发",
   );
+  const presets = readFileSync(new URL("../lib/providers.json", import.meta.url), "utf8");
+  assert.ok(presets.includes("bamboonode.dev"), "默认地址必须来自 providers.json 的 bamboonode 条目");
 });
 
 test("数据目录用新名，同时保留旧名做迁移/回退", () => {

@@ -19,13 +19,13 @@
  *      **静默失效**：用户只看到「守卫没反应」，日志里是 http-400 降级。
  *   3. 反过来把模型名钉死在配置里也不好：服务商给模型改名时配置就失效了。
  *      正确做法是**预设带默认模型、配置留空即用默认、填了以填的为准**
- *     （见 providers.js 的 `requiresModel` / `defaultModel`）。
+ *      （见 lib/providers.json 的 `requiresModel` / `defaultModel`）。
  *
  * 附带一条同源的坑：/v1/models 不能直接当决策模型清单用。SiliconFlow 会返回
  * 98 个模型、且**没有一条**带 `supported_endpoint_types`，而 /systemone 只认
  * Kev-4B / SemIf——chat 模型打过去是 400 `Model does not exist.`。把它们都塞进
- * 下拉，就是「96 个选了就失败的选项」。这类端点只能按预设的 `knownModels`
- * 白名单筛。
+ * 下拉，就是「96 个选了就失败的选项」。这类端点只能按预设的 `models`
+ * 白名单筛（providers.json 里是数组，一项一个可用模型）。
  */
 
 export {};

@@ -18,8 +18,9 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-// providers.js 是零依赖纯模块（请求体构造就住在它里面），直接导入即可：
-// lib/index.js 没有再导出 buildRequestBody，而这里要验的正是它。
+// providers.js 是零依赖纯模块（请求体构造就住在它里面，数据只读同目录的
+// providers.json），直接导入即可：lib/index.js 没有再导出 buildRequestBody，
+// 而这里要验的正是它。
 import { buildRequestBody } from "../lib/providers.js";
 
 const profileDir = join(homedir(), ".dsh", "profiles", "desktop");

@@ -637,7 +637,7 @@ test("provider 下拉包含全部预设，默认 bamboonode", async () => {
   const options = providerSelect.children
     .filter((child) => child !== null && typeof child === "object" && child.type === "option")
     .map((child) => child.props.value);
-  // 下拉必须与 providers.js 的预设清单完全一致：多一个少一个都是漏改。
+  // 下拉必须与 providers.json 的 provider 清单完全一致：多一个少一个都是漏改。
   assert.deepEqual(options, [...PROVIDER_IDS]);
 });
 

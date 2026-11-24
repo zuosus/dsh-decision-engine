@@ -16,6 +16,8 @@ The decision model answers exactly those questions: it reads a trimmed-down stat
 
 The free decision model is on by default for fresh installs; any other service exposing a decision endpoint can be plugged in instead — built-in presets, or your own base URL.
 
+Provider definitions live in [`lib/providers.json`](./lib/providers.json): one object per provider, each with its base URL, endpoint style, key field and a `models` array listing the models that service can use (an empty array means "let the service decide"). Adding or changing a provider is a JSON edit — no code change.
+
 ## 2. Which model a subagent uses, and how hard it thinks, is decided by the decision model
 
 DeepSeek Harness gives a spawned subagent the exact same provider, model and reasoning effort as the lead. That default only holds when the lead is doing the same kind of work itself: sending a research subtask to the lead's strong model is pure waste, and pushing a high-fidelity refactor down to a cheap tier buys a rewrite.

@@ -386,6 +386,55 @@ test("英文：custom provider 表单与本地校验提示不残留中文", asyn
   assert.deepEqual(leftover, [], `custom 表单仍有中文：\n${leftover.join("\n")}`);
 });
 
+test("英文：新加的 provider 直接用 JSON 里的 labelEn / hintEn，不必补词典", async () => {
+  // 模拟「只改了 lib/providers.json 就多出一家服务」：它的中英文案都来自
+  // catalog，客户端的 EN_LABELS 里**没有**这两个中文串。若界面仍按 id 特判
+  // 或只认词典，英文界面就会冒出「我的网关」这样的中文。
+  const acme = {
+    id: "acme",
+    label: "我的网关",
+    labelEn: "Acme Gateway",
+    baseUrl: "https://acme.example.com/v1",
+    endpointStyle: "systemone",
+    defaultModel: "acme-small",
+    apiKeyEnv: "ACME_API_KEY",
+    keyField: "acmeApiKey",
+    modelField: "acmeModel",
+    requiresModel: true,
+    models: ["acme-small", "acme-large"],
+    knownModels: ["acme-small", "acme-large"],
+    hint: "自建网关的说明（只有中文）",
+    hintEn: "A self-hosted gateway",
+    customizable: false,
+  };
+  const { text } = await renderLang({
+    lang: "en",
+    slots: {
+      [SLOTS.status]: stateWith({
+        provider: "acme",
+        providerLabel: "我的网关",
+        providerLabelEn: "Acme Gateway",
+        providerCatalog: [...providerCatalog(), acme],
+        rawModels: { acmeModel: "" },
+        keyStatus: {
+          acme: {
+            configured: true, hint: "…abcd", refName: "ACME_API_KEY", keyField: "acmeApiKey",
+            source: "credentials", sourceLabel: "~/.dsh/.credentials.yaml 的 ACME_API_KEY",
+          },
+        },
+      }),
+      [SLOTS.decisions]: decisionsFixture,
+      // loading=true 时 provider 说明被「正在读取服务端配置…」顶掉，测不到 hintEn。
+      [SLOTS.loading]: false,
+    },
+  });
+
+  assert.ok(text.includes("Acme Gateway"), `下拉应显示 labelEn，实际：\n${text.slice(0, 600)}`);
+  assert.ok(text.includes("A self-hosted gateway"), "说明应取 hintEn");
+  assert.ok(!text.includes("我的网关"), "英文界面不该出现中文 label");
+  assert.ok(!text.includes("自建网关的说明"), "英文界面不该出现中文 hint");
+});
+
 test("英文：保存失败态与重试按钮不残留中文", async () => {
   const { text } = await renderLang({
     lang: "en",

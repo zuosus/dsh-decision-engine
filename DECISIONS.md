@@ -2,6 +2,46 @@
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
 
+## DEC-074 内置 provider 抽象成 `lib/providers.json`（一个 provider 一个对象，`models` 数组即多个可用模型）（2026-11-24）
+
+**背景**：provider 的地址、端点风格、密钥字段名、默认模型原先写在 `lib/providers.js` 的 `PROVIDER_PRESETS` 字面量里，而「哪些字段要落进配置」又散在 `lib/index.js` 的 `DEFAULTS`、`Config` schema、保存白名单、`persistKeys` 槽位、`buildKeyStatus` 五处逐个列举。于是「加一家服务」等于改 8+ 处代码，漏一处就是静默失效（面板能填、保存时被丢掉；或字段名撞车导致切换 provider 互相覆盖）。用户要求：把内置 provider 抽象成 JSON，每个 provider 是数组里的一个对象，一家服务支持多个模型就写进对象里的数组，以后加自定义 provider 只改 JSON。
+
+**决定**：
+
+- **数据文件 `lib/providers.json`**：顶层数组，每个元素一个 provider，顺序即设置界面下拉顺序。字段：`id`（必填）/`label`、`labelEn`/`baseUrl`/`endpointStyle`/`apiKeyEnv`、`legacyApiKeyEnvs`/`keyField`、`modelField`、`keyEnvField`/`models`（该服务可用的模型，空数组 = 不限定）/`defaultModel`/`requiresModel`/`hint`、`hintEn`/`default`/`customizable`，以及只给老记录用的兼容标记（`legacyBaseUrlField`、`legacyKeyField`、`legacyKeyEnvOverride`、`legacyKeyEnvField`、`legacyModelDefault`、`typedModelsOnly`）。
+- **数据层单独一个文件 `lib/provider-presets.js`**（零依赖，只读同目录 JSON 一次）：`parseProviderPresets()` 把数组归一成运行时清单，`PROVIDER_LIST` 是加载即用的结果。`providers.js` 只保留「请求怎么构造、端点怎么拼」，并把 `ENDPOINT_STYLES` / `parseProviderPresets` 原样再导出，对外 API 不变。
+- **只有 `id` 必填，其余可推导**：`keyField`/`modelField`/`keyEnvField` 缺省按 id 推导（`my-gateway` → `myGatewayApiKey` / `myGatewayModel` / `myGatewayApiKeyEnv`），`apiKeyEnv` 缺省为 `MY_GATEWAY_API_KEY`，`label`/`labelEn` 缺省为 id，`defaultModel` 缺省取 `models[0]`，`endpointStyle` 缺省 `auto`。所以新增一家服务的最小写法是三行：`{ "id", "baseUrl", "models" }`。
+- **坏数据在加载时抛错**：重复 id、两个 provider 共用同一个配置字段、id 不合 `[a-z0-9-]`、空数组、`default: true` 多于一条，一律直接抛。写坏的 JSON 会让插件起不来——这比「切过去没地址 / 没 key」的静默失效好。
+- **代码里不再按 id 特判**：`if (id === "custom")` 改为预设的 `customizable` 标记；`id === "bamboonode"` 的三处历史字段兼容改为数据里的 `legacyBaseUrlField` / `legacyKeyField` / `legacyKeyEnvOverride`；`typedModelsOnly`、`legacyModelDefault` 同理。`DEFAULT_PROVIDER` 取 `"default": true` 的那一条。
+- **`lib/index.js` 的字段清单改为从数据推导**：`DEFAULTS`、`Config` schema、保存白名单、`persistKeys` 槽位、`rawModels`、`buildKeyStatus` 全部由 `PROVIDER_PRESETS` 生成，新增 provider 三格自动出现。
+- **`models` 成为 canonical 字段**，`knownModels` 保留为同一份数据的兼容别名（外部脚本/旧测试在用）。
+- **英文文案也走数据**：`providerCatalog()` 一直下发 `labelEn`/`hintEn`，客户端新增 `providerText()` 按语言取；`/status` 补 `providerLabelEn`。于是新增 provider 只写 JSON 的中英两栏，不必再到 `lib/client.js` 的 `EN_LABELS` 里补两行——那份镜像表已经漂移过一次（perplexity / openrouter 的 hint 从没登记）。
+
+**为什么**：
+
+- **为什么是 JSON 而不是 YAML**：YAML 需要新依赖（本插件目标之一是零运行时依赖），而 `JSON.parse` 是内置的；且 JSON 不允许注释、不允许隐式类型，正好避免「`true` 是字符串还是布尔」这类在自研 YAML 子集里踩过的坑。
+- **为什么用 `readFileSync` 而不是 `require("./providers.json")`**：`require` 的 JSON 缓存会让「同进程里改数据再断言」永远读到旧值，测试无法覆盖解析与校验；ESM 的 JSON 导入语法（`assert` / `with`）在 Node 20.3 与 22 之间不兼容，与 `engines.node: >=20.3.0` 冲突。`readFileSync` 在模块加载时只跑一次，不在请求路径上。
+- **为什么校验放数据层而不是 `resolveProvider`**：数据错误是**启动期**问题，应当在加载时就炸；`resolveProvider` 在每次决策的热路径上，那里抛错会把一次「配置坏了」放大成每步都失败，而守卫是 fail-open 的，结果仍是静默。
+- **为什么拆出 `provider-presets.js`**：`providers.js` 在改动前已 1038 行，超过「单文件 500 行」的预算；再往里塞 190 行归一与校验只会更难定位。按职责拆（数据 vs 线协议）后 `providers.js` 875 行、数据层 186 行，且数据层可脱离线协议单独测。
+- **为什么保留 `knownModels` 别名**：`scripts/`、`bench/` 与既有测试按这个名字读；同时保留 `models` 与 `knownModels` 两个名字是唯一的重复，注释里写清「同一份数据」，不引入第二个真相源。
+
+**被否决的方案**：
+
+- **把 `default: true` 也留给代码（`DEFAULT_PROVIDER = "bamboonode"` 常量）**：否决。这样「换默认 provider」仍要改代码，与「只改 JSON」的承诺不一致；且新增 `default` 标记后测试可以断言「恰好一条」。
+- **允许 `label`/`hint` 缺省为空串，让界面回落到 id**：否决。缺省文案会让下拉出现空白项，用户以为是加载失败；统一回落到 id 至少可读。
+- **两个字段名撞车时只警告不抛错**：否决。撞车的后果是「切到 A 再切回 B，B 的值被 A 覆盖」——最典型也最难自查的一类静默失效，必须在加载时就拒绝。
+- **支持用户自己的 `providers.json` 覆盖（`~/.dsh/plugins/<dir>/providers.json` 合并内置）**：本次不做。用户当前要的是「改内置数据」，而运行时合并要定义「覆盖 / 追加 / 删除」三种语义与冲突优先级，还会让「你的配置为什么和文档不符」变成常态。`custom` provider 已经覆盖了「接任意服务」的场景；真要多家自定义，值得单独设计一次。
+- **把 provider 定义挪进 `config.yml`**：否决。`config.yml` 是**用户**配置（会被面板读改写），provider 定义是**插件**数据（随包发布、随版本更新）；混在一起会让升级覆盖用户改动，或让用户改动被升级冲掉。
+
+**验证**：
+
+- `test/provider-json-catalog.test.js`（新增 3 项）：**复制一份 `lib/` 到临时目录**，往副本的 `providers.json` 里追加一个 `my-gateway`（一家服务三个模型），再真的加载副本的 `lib/index.js`，断言 ① `Config` 能解析 `myGatewayModel` / `myGatewayApiKey` / `myGatewayApiKeyEnv`；② `resolveProvider` 拼出地址 `/systemone`、留空时回落 `m-large`（JSON 里填的显式值），`apiKeyEnv` 推导为 `MY_GATEWAY_API_KEY`；③ `providerCatalog` 的 label/labelEn/models/字段名/requiresModel 全部正确；④ 默认 provider 不受追加影响。另两项分别验证「改 `default` 标记就换默认 provider」与「重复 id 让加载失败并说明原因」。
+- `test/providers.test.js`（新增 5 项）：JSON 与运行时清单同源、`models` ↔ `knownModels` 同源、`default`/`customizable` 各恰好一条、`parseProviderPresets` 的最小条目推导出全部字段、坏数据（重复 id / 字段撞车 / 非法 id / 空数组）抛错。既有 59 项全部保持绿色（行为逐字不变）。
+- `test/client-i18n.test.js`（新增 1 项）：只存在于 catalog 里的 `acme`（中文 label + `labelEn`，`EN_LABELS` 里没有登记），英文界面显示 `Acme Gateway` 与 `A self-hosted gateway`，且不出现中文 label/hint。
+- `node --test test/`：**800 项 / 800 通过 / 0 失败**（改前 792 项全绿；本次新增 8 项）。`node scripts/verify-wiring.mjs`：全部接线检查通过。
+
+**改动文件**：`lib/providers.json`（新增，143 行）、`lib/provider-presets.js`（新增，186 行）、`lib/providers.js`（预设字面量删除、`customizable`/`legacy*`/`typedModelsOnly` 改为读数据、`providerCatalog` 下发 `models`）、`lib/index.js`（`DEFAULTS`、`Config` schema、保存白名单、`persistKeys`、`rawModels`、模型清单过滤改读 `preset.models`、`/status` 补 `providerLabelEn`）、`lib/client.js`（新增 `providerText()`；下拉/说明/统计页展示名按语言取；`isCustom` 改为读 `customizable`）、`test/providers.test.js`、`test/provider-json-catalog.test.js`（新增）、`test/client-i18n.test.js`、`test/client-ui.test.js`、`test/save-path.test.js`、`config.example.yml`、`README.md`、`README.zh.md`、`docs/lessons/model-field-required-by-provider.md`、`scripts/verify-wiring.mjs`、`scripts/verify-endpoint.mjs`、`DECISIONS.md`。
+
 ## DEC-073 免费模型配置下发地址改为 cdn.zuos.us 静态文件（2026-11-24）
 
 **背景**：用户要求把免费模型接口（「使用免费模型」开关的配置下发端点）下载地址改为 `https://cdn.zuos.us/dsh-market/decision-config-free.json`。原地址是授权服务的动态 API `https://dsh.zuos.us/api/provider-config`（DEC-030 引入），新地址是 cdn.zuos.us 上的静态 JSON 文件。
@@ -21,7 +61,6 @@
 **为什么**：改动范围严格限制在用户点名的那个 tab label；页面的表头、空态文案、配置项说明里的「决策历史」是同一个功能的不同语境叫法，不在本次请求范围内，避免连带修改十几处文案与对应测试。
 
 **验证**：TDD 红→绿——先把 `test/client-decisions-view.test.js` 的标签断言从 `决策历史` 改成 `决策`，并新增英文界面断言 `Decision`，两者先失败（实际分别为 `决策历史` / `Decisions`），改完后通过。`node --test test/` 共 792 项全绿（原 791 项 + 新增 1 项）；`node scripts/verify-wiring.mjs` 全部通过。
-
 
 
 ## DEC-071 新增「书生·端砚」预设 + custom 模型框可手填（2026-11-24）

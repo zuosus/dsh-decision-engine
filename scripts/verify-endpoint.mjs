@@ -25,7 +25,8 @@ import { resolveDshHome } from "../lib/home-paths.js";
  * 在没有 DSH node_modules 的裸仓库里无法加载。
  *
  * 但也不在这里另写一套地址规则——那正是「脚本打 A、插件打 B」的来源。
- * providers.js 是零依赖纯模块，直接复用它，脚本与运行期只有一份真相。
+ * providers.js 是零依赖纯模块（只读同目录的 providers.json），直接复用它，
+ * 脚本与运行期只有一份真相。
  */
 
 /**
