@@ -1,6 +1,6 @@
 {
   "name": "dsh-decision-engine",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "description": "dsh-decision-engine: a judgement layer for DeepSeek Harness — before the main model acts, a small, cheap decision model judges each call: allow, escalate, reroute to a cheaper model, or skip. The plugin provides a free decision model, so a fresh install works out of the box; any other service exposing a decision endpoint can be plugged in (built-in presets or a custom base URL). All nine decision points (tool authorization, model routing, delegation, subagent model selection, compaction, turn continuation, retrieval, skill pick, COT translation) are implemented and individually switchable.",
   "icon": "./icon.svg",
   "type": "module",
