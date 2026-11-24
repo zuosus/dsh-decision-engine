@@ -17,6 +17,7 @@
   },
   "files": [
     "lib",
+    "!lib/client-src",
     "cordis.patch.yml",
     "README.md",
     "README.zh.md",
@@ -78,6 +79,7 @@
     "@deepseek-ai/schemastery": "*"
   },
   "scripts": {
+    "build:client": "node scripts/build-client.mjs",
     "test": "node --test test/",
     "verify:endpoint": "node scripts/verify-endpoint.mjs",
     "verify:wiring": "node scripts/verify-wiring.mjs",

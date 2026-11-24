@@ -41,11 +41,27 @@ pnpm install
   从 `0.6.0` 改写成 `0.6.1`（pnpm 的行为）。这是**一次性**的，之后
   `Already up to date` 不再动它。版本号被改了直接 `git checkout package.json` 还原。
 
+## 前端 bundle 是构建产物
+
+`lib/client.js` 由 `lib/client-src/*.js` 拼成，**不要直接编辑它**：
+
+```sh
+node scripts/build-client.mjs          # 改完分片后重建
+node scripts/build-client.mjs --check  # 只校验是否同步（提交前 / CI）
+```
+
+改样式仍然改 `lib/client.config.css`（构建期覆盖 `CFG_SECTION_CSS`），
+改行渲染与控件标签关联仍然改 `lib/client.config-controls.js`。分片约定见
+[`lib/client-src/README.md`](../lib/client-src/README.md)。
+
+忘了重建不会静默生效：`test/client-build.test.js` 会把「产物 == 构建(源)」
+断言成失败。
+
 ## 测试
 
 ```sh
 cd /Users/chi/Code/dsh-decision-engine
-node --test test/          # 190 项
+node --test test/          # 919 项
 node scripts/verify-wiring.mjs
 ```
 

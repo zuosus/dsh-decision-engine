@@ -2,6 +2,46 @@
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
 
+## DEC-083 把 8355 行的 client.js 拆成 lib/client-src 分片，构建期拼回单文件 bundle（2026-11-25）
+
+**背景**：`lib/client.js` 涨到 8355 行 / 318 KB，远超 AI_CODING 的 500 行文件预算。后果是具体的：`grep` 一次命中一屏、读一段就要花掉大量上下文，而且「配置页」「统计页」「图表」「i18n」四种职责挤在同一个路径里，改任何一处都要先读完整个文件才能确认该动哪里。
+
+**关键约束（决定了拆分形态）**：宿主把 `client.js` 当**单文件浏览器 bundle** 直接加载（`window.__ModuleLoader__.load({ factory })`）。factory 收到的 `require` 只解析 shell 的共享模块表，**加载不了本包的其它源文件**；`require.async("./client.<name>.js")` 虽然存在，但它把内容变成**异步分块**——配置页是首屏同步渲染的，拆成异步块会让面板先空白一段时间，且分块失败就等于设置页没了。所以「拆成多个 ES 模块、运行时 import」这条路在宿主约束下不可用。
+
+**决定**：
+
+- **源码分片 + 构建期拼接**：新增 `lib/client-src/NN-<职责>.js`（39 个分片），`scripts/client-bundle.mjs` 按文件名前缀顺序**纯连接**成 `lib/client.js`；`scripts/build-client.mjs` 只做读写与 `--check`。沿用 DEC-051 已经立过的套路（可编辑源单独放、构建期嵌进 bundle），只是把范围从「CSS 与控件」扩到整个 bundle。
+- **拼接是纯连接，不做任何空白规整**：分片是原文件的字符区间切片，只有纯连接才能保证产物逐字节等于拆分前。这条是「拆分没改行为」的机械证明，不是靠人眼比对。
+- **切分点按「可读边界」吸附，而不是硬编码行号**：`scripts/split-client-once.mjs` 里存的是锚点 + 吸附规则（优先语句级边界，退而求其次接受编号注释行）。主分支上代码上下挪几行不会让切分点落进表达式中间——本条目落地时就撞上过一次（main 期间前进了两个提交，`client.js` 多了 135 行）。
+- **单次切分脚本保留在仓库里**：它记录「原文件 → 分片表」的映射，并在写盘前断言拼回结果与原文逐字节相同；同时**拒绝再次运行**（分片已存在即报错），因为重跑会把构建期覆盖区里的展开副本写回分片。
+- **两份可编辑源继续覆盖分片内容**：`lib/client.config.css` 覆盖 `CFG_SECTION_CSS` 模板字符串正文，`lib/client.config-controls.js` 覆盖 `BEGIN/END CONFIG CONTROLS` 之间。改样式仍然改 CSS 文件、不改分片。
+- **分片里那两块只留占位注释，不留展开副本**：既然构建期一定会覆盖，分片里再存一份就是「改了不生效」的静默失效陷阱。占位注释明确写出「构建期由哪个文件覆盖」。
+- **旧 `scripts/sync-config-css.mjs` 删除**，职责并入 `build-client.mjs`；`package.json` 新增 `build:client`。
+- **拆分后每个分片 ≤ 500 行**（最大 418 行），并新增 `test/client-build.test.js` 把预算钉成断言，防止分片重新长大。
+
+**为什么**：
+
+- **单一写入路径**：分片是唯一可编辑源，bundle 是产物。之前任何人都可以直接改产物，改完还没有任何机制告诉你「源码在哪」——拆分后这种歧义消失。
+- **构建一致性必须被测试守住**：拆开之后多了一类只在提交时才暴露的事故——改了分片忘记构建，浏览器拿旧 bundle，而所有渲染测试都对着产物跑、全绿。所以把「产物 == 构建(源)」写成断言。
+- **纯函数与 CLI 分离**：第一版把构建逻辑和写文件放在同一模块，测试 `import` 它会**顺手把 bundle 重新生成**——漂移断言在比对之前就被自己的 import 悄悄修好了，测试永远绿（实测：故意制造漂移后仍然 5/5 通过）。改成 `client-bundle.mjs`（纯函数、无副作用）+ `build-client.mjs`（读写 + CLI）后，漂移才真的会红。这是本次最重要的实现细节。
+
+**被否决的方案**：
+
+- **拆成运行时 ES 模块 / 动态 import**：宿主 factory 的 `require` 解析不到本包其它文件；`require.async` 是异步分块，会让首屏配置页变成空白等待，且分块失败即设置页不可用。
+- **拆成多个 `client.<name>.js` 分块按需加载**：配置页是首屏必需的，拆块只增加失败面，不减少首屏体积（首屏本来就要它）。
+- **保留 `sync-config-css.mjs` 另加一个拼接脚本**：两个脚本都要读同一批分片、都要处理同样的漂移判定，属于「两个文件都能改同一件事」的歧义，合并成一个。
+
+**验证**：
+
+- 切分当次（基线 main = DEC-082）：39 个分片拼回与原文**逐字节一致**（317895 字节）。
+- 构建往返：`node scripts/build-client.mjs` 后与拆分前 `client.js` 相比只差 1 行注释（指向新脚本），语义为零；一遍 `diff` 零差异。
+- `test/client-build.test.js`（新增 5 项）：产物与分片同步、分片按前缀升序且以换行结尾、每片 ≤ 500 行、bundle 内嵌 CSS/控件与两份可编辑源逐字一致、分片里的可编辑源只留占位不留展开副本。
+- **红→绿证据**：在 `01-header.js` 末尾追加一行 → 「产物与分片同步」失败；在 `client.config.css` 末尾追加一行 → 同步用例与内嵌用例**两条**同时失败；把 `associateConfigControl` 正文塞回占位区 → 「只留占位」失败；撤销后均恢复 5/5。
+- `node --test --test-concurrency=1 test/`：**919 项 / 919 通过 / 0 失败**（基线 914 + 新增 5）。`node scripts/verify-wiring.mjs`：全部接线检查通过。
+- **发布包不受影响**：`package.json` 的 `files` 增加 `!lib/client-src`，分片只是开发期源码，不进 npm 包。
+
+**改动文件**：`lib/client-src/`（新增 39 个分片 + README）、`lib/client.js`（改为构建产物，内容仅 1 行注释变化）、`scripts/client-bundle.mjs`（新增，纯构建逻辑）、`scripts/build-client.mjs`（新增，CLI）、`scripts/split-client-once.mjs`（新增，一次性切分与逐字节校验）、`scripts/sync-config-css.mjs`（删除，职责并入）、`test/client-build.test.js`（新增）、`package.json`（`build:client`、`files` 排除 `lib/client-src`）、`docs/local-dev-link.md`（补构建流程）、`DECISIONS.md`。
+
 ## DEC-082 服务提供方 picker 改成 grid 线框按钮：选中反色、已配 Key 标小字（2026-11-25）
 
 **背景**：配置页「服务提供方」原来是一个 `<select>` 下拉：要确认「现在用的是哪家」得点开、在长列表里找高亮项，更没法一眼看出哪些 provider 已经配过 key。用户要求把 picker 改成 grid 线框按钮，放在标题与说明之间，选中项用高亮底色 + 文字反色表示，已配置的 provider 在按钮右侧用小字标 `已配置Key`，方便查看和切换。
