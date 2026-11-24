@@ -6,7 +6,9 @@
     "baseUrl": "https://api.typesafe.ai/v1",
     "endpointStyle": "systemone",
     "apiKeyEnv": "TYPESAFE_API_KEY",
-    "legacyApiKeyEnvs": ["DECISION_ENGINE_KEY"],
+    "legacyApiKeyEnvs": [
+      "DECISION_ENGINE_KEY"
+    ],
     "keyField": "systemoneApiKey",
     "defaultModel": "jev-latest",
     "default": true,
@@ -33,7 +35,10 @@
     "defaultModel": "Kev-4B",
     "modelField": "siliconflowModel",
     "keyEnvField": "siliconflowApiKeyEnv",
-    "models": ["Kev-4B", "SemIf"],
+    "models": [
+      "Kev-4B",
+      "SemIf"
+    ],
     "hint": "硅基流动（国内站）的 System One 端点（POST /v1/systemone）；可用模型 Kev-4B / SemIf，默认 Kev-4B，只填一个 API key 即可使用",
     "hintEn": "SiliconFlow China (POST /v1/systemone); models Kev-4B / SemIf, default Kev-4B — just add an API key"
   },
@@ -50,7 +55,10 @@
     "defaultModel": "Kev-4B",
     "modelField": "siliconflowIntlModel",
     "keyEnvField": "siliconflowIntlApiKeyEnv",
-    "models": ["Kev-4B", "SemIf"],
+    "models": [
+      "Kev-4B",
+      "SemIf"
+    ],
     "hint": "Silicon Flow（国际站）的 System One 端点（POST /v1/systemone）；与国内站账号不通用，可用模型 Kev-4B / SemIf，默认 Kev-4B，只填一个 API key 即可使用",
     "hintEn": "Silicon Flow global (POST /v1/systemone); separate account from the CN site, models Kev-4B / SemIf, default Kev-4B — just add an API key"
   },
@@ -67,7 +75,9 @@
     "defaultModel": "intern-decision-4b",
     "modelField": "duanyanModel",
     "keyEnvField": "duanyanApiKeyEnv",
-    "models": ["intern-decision-4b"],
+    "models": [
+      "intern-decision-4b"
+    ],
     "hint": "书生·端砚（Intern InkStone，上海人工智能实验室）的 System One 端点（POST /v1/systemone）；默认模型 intern-decision-4b，只填一个 API key 即可使用",
     "hintEn": "Intern InkStone (Shanghai AI Lab) System One endpoint (POST /v1/systemone); default model intern-decision-4b — just add an API key"
   },
@@ -118,7 +128,12 @@
     "defaultModel": "s1-fast",
     "modelField": "decisionModelsModel",
     "keyEnvField": "decisionModelsApiKeyEnv",
-    "models": ["s1-fast", "s1-pro", "s1-vision", "reax-1"],
+    "models": [
+      "s1-fast",
+      "s1-pro",
+      "s1-vision",
+      "reax-1"
+    ],
     "hint": "Decision Models（decisionmodels.io）的 System One 端点（POST /v1/systemone）；可用模型 s1-fast / s1-pro / s1-vision / reax-1，默认 s1-fast，只填一个 API key 即可使用",
     "hintEn": "Decision Models (decisionmodels.io) System One endpoint (POST /v1/systemone); models s1-fast / s1-pro / s1-vision / reax-1, default s1-fast — just add an API key"
   },
@@ -136,9 +151,31 @@
     "defaultModel": "gemini-decision-1",
     "modelField": "googleDecisionsModel",
     "keyEnvField": "googleDecisionsApiKeyEnv",
-    "models": ["gemini-decision-1"],
+    "models": [
+      "gemini-decision-1"
+    ],
     "hint": "Google AI Studio Decisions API（gemini-decision-1）的 REST 端点（POST /v1beta/decisions），使用 x-goog-api-key 鉴权",
     "hintEn": "Google AI Studio Decisions API REST endpoint (POST /v1beta/decisions) with gemini-decision-1 and x-goog-api-key authentication"
+  },
+  {
+    "id": "openai-decisions",
+    "label": "OpenAI Decisions",
+    "labelEn": "OpenAI Decisions",
+    "baseUrl": "https://api.openai.com/v1",
+    "endpointStyle": "decisions",
+    "protocol": "openai-decisions",
+    "apiKeyEnv": "OPENAI_API_KEY",
+    "legacyApiKeyEnvs": [],
+    "keyField": "openaiDecisionsApiKey",
+    "requiresModel": true,
+    "defaultModel": "gpt-6-luna",
+    "modelField": "openaiDecisionsModel",
+    "keyEnvField": "openaiDecisionsApiKeyEnv",
+    "models": [
+      "gpt-6-luna"
+    ],
+    "hint": "OpenAI Decisions API（POST /v1/decisions，模型 gpt-6-luna）的官方 REST 端点，使用 Bearer 鉴权",
+    "hintEn": "OpenAI Decisions API REST endpoint (POST /v1/decisions, model gpt-6-luna) with Bearer authentication"
   },
   {
     "id": "custom",

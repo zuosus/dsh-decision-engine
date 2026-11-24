@@ -56,6 +56,7 @@ test("内置预设齐备", () => {
       "openrouter",
       "decisionmodels",
       "google-decisions",
+      "openai-decisions",
       "custom",
     ],
   );
@@ -221,6 +222,7 @@ test("providerCatalog 覆盖全部 provider 且带展示信息", () => {
     "openrouterApiKey",
     "decisionModelsApiKey",
     "googleDecisionsApiKey",
+    "openaiDecisionsApiKey",
     "customApiKey",
   ]);
   // 字段必须互不相同：共用一格会导致切换 provider 时互相覆盖。
@@ -236,6 +238,7 @@ test("providerCatalog 覆盖全部 provider 且带展示信息", () => {
     "openrouterModel",
     "decisionModelsModel",
     "googleDecisionsModel",
+    "openaiDecisionsModel",
     "customModel",
   ]);
   assert.equal(new Set(modelFields).size, modelFields.length);
