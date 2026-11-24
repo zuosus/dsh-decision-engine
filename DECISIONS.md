@@ -2,6 +2,43 @@
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
 
+## DEC-078 配置项按 provider 能力表个性化显示：能力写进 JSON，UI 与传输层共用一张表（2026-11-25）
+
+**背景**：用户提出「不同 provider/model 对请求参数有不同要求，能不能在 `lib/providers.json` 里给他们定好参数，然后 UI 配置层根据参数决定个性化显示配置项」。这不是假设——`decisionmodels.io` 实测对 `think_mode` 回 400 `{"loc":["think_mode"],"msg":"Extra inputs are not permitted"}`，而 `google-decisions` / `openai-decisions` 的请求体里根本没有这个字段（它们用 `input` / `questions`）。此前的第一个补丁（`19e1556`）只在**传输层**跳过了该字段，UI 上「思考模式」下拉仍然无条件显示、可选、可存——用户选了 `always` 什么也不会发生，正是本插件反复强调的「配了没反应」。
+
+**决定**：
+
+- **能力写进 `lib/providers.json` 的 `capabilities` 表**：`{ "thinkMode": false }` 表示该端点不接受 `think_mode`。表是**开放**的——数据层不认识的新键原样下发，因此以后加一种能力只需要改 JSON，前端与传输层都不用动。
+- **协议事实优先于 JSON**：只有 `systemone` 线协议有 `think_mode` 字段，另两种协议恒为 `false`——即使在 JSON 里写 `thinkMode: true` 也不能改变。否则能力表就成了谎报（请求体里根本没有该字段）。
+- **`supportsThinkMode` 保留为 `capabilities.thinkMode` 的别名**（顶层老写法仍被接受）：`19e1556` 已经提交的顶层字段、传输层的读取点、既有测试都还在用它，直接删会造出一次无声的行为变化。
+- **UI 读 `capabilities`，不认专用字段**：`capabilityOf(key)` 统一取值，`providerCatalog()` 把整张表下发。界面按 `capabilities.thinkMode` 决定「思考模式」下拉**禁用 + 说明原因**（不是隐藏——隐藏会让人以为设置丢了，也无法解释「为什么我选的 always 没反应」）。
+- **拿不到能力表时按「支持」处理**：老服务端不下发这一项，行为与改前逐字一致。
+
+**为什么**：
+
+- **能力必须与请求构造同源**。分成「UI 一份、传输层一份」就会出现「界面说支持、实际发不出去」——那正是这次要消灭的故障。`test/protocols.test.js` 里专门有一条把两者钉在一起：声明 `supportsThinkMode: true` 的 provider，请求体里必须真的能看到 `think_mode`。
+- **为什么用一张开放表而不是每项一个布尔**：每加一个参数就加一个专用字段，意味着每加一个参数都要改前端；而界面读的是同一套键，新能力天然被支持。
+- **为什么禁用而不是隐藏**：这个插件里已经出现过太多次「静默失效」。隐藏控件让用户无从判断「是我不支持，还是它丢了」；禁用 + 一行说明把答案直接写在界面上。
+
+**被否决的方案**：
+
+- **在 `client.js` 里按 provider id 或协议名写 if/else**：否决。那是把服务商的脾气抄进前端，新增一家就要改前端，漏改就是又一次静默失效（DEC-074 已经为字段名否决过同一类做法）。
+- **不支持时直接隐藏「思考模式」整行**：否决。用户看不到这一项，会以为设置丢了或插件坏了；而且「这个端点没有该字段」这条信息本身就值得显示。
+- **删掉 `supportsThinkMode`、只留 `capabilities`**：否决。`19e1556` 已提交，传输层与测试都在读它；保留为别名是零风险的向后兼容，删它只为「好看」。
+- **让 JSON 里的 `thinkMode: true` 覆盖协议推断**：否决。请求体是协议决定的，声明盖不过事实；允许覆盖只会让能力表可以说谎。
+
+**验证**：
+
+- `test/protocols.test.js`（+4 项）：`capabilities` 与 `supportsThinkMode` 一致；`providerCatalog()` 下发 `capabilities`；未知能力键原样下发；非 systemone 协议即使写 `true` 也按不支持；以及既有的一条「声明支持就必须真的发得出 `think_mode`」。
+- `test/client-ui.test.js`（+5 项）：不支持的 provider 上「思考模式」行仍在但下拉 `disabled`；说明文案点明端点没有该字段；支持的 provider 行为不变；切换 provider 时能力跟着变；**界面读的是能力表而不是专用字段**（把 `capabilities.thinkMode` 改成 `false` 即禁用）。
+- **变异验证**：把 UI 的 `capabilityOf("thinkMode")` 写死成 `true` → 4 条 UI 用例转红；把传输层的 `supportsThinkMode` 判断删掉 → 2 条协议用例转红。两侧都承重。
+- `node --test --test-concurrency=1 test/`：**876 项 / 876 通过 / 0 失败**。`node scripts/verify-wiring.mjs`：全部接线检查通过。
+
+**附记（并行测试的既有 flake，未在本次修复）**：并行跑 `node --test test/` 时 `test/backup-model-route.test.js` 的「primary-is-free」偶发失败（3 次里 1 次）；串行与单文件跑均稳定通过，`main` 基线连跑 4 次也全绿。判断是多文件并行时 `DSH_HOME` 环境变量互相覆盖导致，属于既有测试隔离问题，与本次改动无关；串行即绿。
+
+**改动文件**：`lib/provider-presets.js`（新增 `capabilitiesOf()`，`capabilities` 归一 + `supportsThinkMode` 别名）、`lib/providers.js`（`resolveProvider` 三个分支与 `providerCatalog()` 下发 `capabilities`）、`lib/client.js`（`capabilityOf()` + 「思考模式」行按能力禁用与说明 + 英文文案）、`lib/providers.json`（`decisionmodels` 改用 `capabilities: { thinkMode: false }`）、`test/protocols.test.js`、`test/client-ui.test.js`、`README.md`、`README.zh.md`、`config.example.yml`、`DECISIONS.md`。
+
+
 ## DEC-077 新增 OpenAI Decisions API 预设，并把线协议拆成独立模块（2026-11-25）
 
 **背景**：用户要求把 OpenAI 的 Decisions API（https://developers.openai.com/api/docs/guides/decisions）接成内置预设。它和现有的 System One 系端点**三样都不同**：请求体（`input` 而不是 `state`，`questions` 是带 `name` 的数组而不是对象）、题型名（`noul` 对应 `predicate`）、答案形状（`answers` 是数组，靠 `name` 认领，而不是按 id 索引的对象）。上一个提交（041a2c9，Google AI Studio）已经在 `providers.js` 里加了 `protocol` 字段与 `buildHeaders` / `buildRequestBody` 的分支，但当时没有答案归一这一半。

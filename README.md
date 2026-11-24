@@ -18,6 +18,8 @@ The free decision model is on by default for fresh installs; any other service e
 
 Provider definitions live in [`lib/providers.json`](./lib/providers.json): one object per provider, each with its base URL, endpoint style, key field and a `models` array listing the models that service can use (an empty array means "let the service decide"). To add a preset provider, edit this file and submit a PR.
 
+Different endpoints accept different request fields, so each preset carries a `capabilities` table (for example `{ "thinkMode": false }` for `decisionmodels.io`, which rejects `think_mode` with HTTP 400). The configuration UI reads that table and disables the matching control with an explanation instead of offering a setting that silently does nothing. Adding a capability is a JSON edit — the UI needs no change.
+
 Presets ship for System One-compatible services (TypeSafe, SiliconFlow, Intern InkStone, Decision Models, or your own llama.cpp / vLLM), Google AI Studio Decisions, and OpenAI Decisions. Wire protocols differ — `protocol` in the JSON selects one: `systemone` (the generic `state` + `questions` shape), `google-decisions`, or `openai-decisions` (`POST /v1/decisions` with an `input` / `questions` array and `answers` returned as a named array). Request body, auth header and answer shape for a protocol all live in [`lib/wire-protocol.js`](./lib/wire-protocol.js), so a new protocol is one module plus one JSON entry.
 
 ## 2. Which model a subagent uses, and how hard it thinks, is decided by the decision model

@@ -116,6 +116,11 @@ siliconflowIntlModel: ""
 duanyanModel: ""
 
 # Decision Models 的模型。留空时使用预设默认 s1-fast。
+#
+# 注意：decisionmodels.io 不接受 think_mode（实测回 400
+# `Extra inputs are not permitted`），因此它的预设带
+# `capabilities: { thinkMode: false }`——请求里不发该字段，设置界面的
+# 「思考模式」下拉也会被禁用并说明原因。
 decisionModelsModel: ""
 
 # Google AI Studio Decisions 的模型。留空时使用预设默认 gemini-decision-1。
