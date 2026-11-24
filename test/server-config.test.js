@@ -76,7 +76,7 @@ function readySource(overrides = {}) {
 // ------------------------------------------------------- parseServerConfig
 
 test("parseServerConfig 常量与冻结接口一致", () => {
-  assert.equal(SERVER_CONFIG_ENDPOINT, "https://dsh.zuos.us/api/provider-config");
+  assert.equal(SERVER_CONFIG_ENDPOINT, "https://cdn.zuos.us/dsh-market/decision-config-free.json");
   assert.equal(DEFAULT_TTL_SECONDS, 600);
   assert.equal(MIN_TTL_SECONDS, 60);
   assert.equal(MAX_TTL_SECONDS, 3600);

@@ -325,7 +325,7 @@ function stateWith(over) {
     serverProvider: {
       enabled: false,
       active: false,
-      endpoint: "https://dsh.zuos.us/api/provider-config",
+      endpoint: "https://cdn.zuos.us/dsh-market/decision-config-free.json",
       label: "服务端下发",
       status: "idle",
       usable: false,
@@ -1919,7 +1919,7 @@ function serverProviderWith(over) {
   return {
     enabled: true,
     active: true,
-    endpoint: "https://dsh.zuos.us/api/provider-config",
+    endpoint: "https://cdn.zuos.us/dsh-market/decision-config-free.json",
     label: "服务端下发",
     status: "ready",
     usable: true,

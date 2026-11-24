@@ -60,7 +60,7 @@ function setup(options = {}) {
 
   globalThis.fetch = async (url, init) => {
     const target = String(url);
-    if (target.includes("provider-config")) {
+    if (target === SERVER_CONFIG_ENDPOINT) {
       serverCalls.push({ url: target, init });
       const responder = options.responder;
       if (typeof responder === "function") return responder(target, init);

@@ -2,6 +2,16 @@
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
 
+## DEC-073 免费模型配置下发地址改为 cdn.zuos.us 静态文件（2026-11-24）
+
+**背景**：用户要求把免费模型接口（「使用免费模型」开关的配置下发端点）下载地址改为 `https://cdn.zuos.us/dsh-market/decision-config-free.json`。原地址是授权服务的动态 API `https://dsh.zuos.us/api/provider-config`（DEC-030 引入），新地址是 cdn.zuos.us 上的静态 JSON 文件。
+
+**决定**：`lib/server-config.js` 的 `SERVER_CONFIG_ENDPOINT` 改为新 URL。该常量是唯一的真实来源：`lib/index.js` 的实例创建与 `/status` 展示都直接引用它，因此只改一处，运行时请求与面板显示同步生效。同步更新 `config.example.yml` 的注释与测试里的硬编码 fixture（`test/server-config.test.js`、`test/client-ui.test.js`）。`test/server-provider-route.test.js` 的 fetch 桩原先用 URL 子串 `provider-config` 识别下发请求，改为与 `SERVER_CONFIG_ENDPOINT` 常量做全等比较——这样下次再换地址时桩不会静默失配。
+
+**协议兼容性**：新 URL 的响应体沿用既有格式（curl 实测旧端点为 `{ ok, v:1, baseUrl, model, endpointStyle, key, ttlSeconds }`）；`parseServerConfig` 的校验逻辑一个字节都不改。注意：本次验证时（2026-11-24）新 URL 尚返回 Cloudflare 404，属待部署状态；免费通道本就 fail-open，404 时静默回落到本地配置，与既有「服务端未部署 key」路径一致。
+
+**验证**：TDD 红→绿——先把 `test/server-config.test.js` 的端点断言改成新 URL，确认因实际值仍为旧地址而失败（失败原因是行为缺失，非环境/语法问题），再改实现转绿。`npm test` 792 项全绿；`node scripts/verify-wiring.mjs` 全部通过。全库 grep 确认旧地址零残留。
+
 ## DEC-072 会话标签「决策历史」改名为「决策」（2026-11-24）
 
 **背景**：用户要求把会话标签页的 label `决策历史` 改成 `决策`。页面正文、配置页开关、文档里的「决策历史」叫法不变——只改会话标签栏那一个 label。
