@@ -2,6 +2,51 @@
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
 
+
+## DEC-079 按「单次请求的题目上限」拆题：decisionmodels 的 s1-fast 只收 1 道（2026-11-25）
+
+**背景**：用户报「openai、decisionmodels.io 两者请求都失败了，fallback to free model」。实测两家的失败**完全不同**：
+
+- **OpenAI**：`HTTP 429 insufficient_quota / credit_balance_exhausted`——账号余额为 0，与插件无关。
+- **decisionmodels**：`HTTP 400 too_many_questions`，`GET /v1/models` 写着 `s1-fast` 的 `max_questions: 1`，而本插件的决策点动辄一次问 2–4 道（授权点 4 道、turnStop 4 道、route/delegate 各 3 道）。于是**每一次**决策都被整笔拒掉后静默降级：面板显示「已连接、模型正确」，守卫一次都没生效过。八个决策点里只有 `skillPick`（1 道题）能过。
+
+上限是**模型**属性而不是服务属性：同一家的 `s1-pro` / `reax-1` 是 3、`s1-llm-auto-router` 是 7。
+
+**决定**：
+
+- **新增 `lib/question-batching.js`（纯函数 + 一个记忆表）**：`chunkQuestions` 按上限切份（顺序不变、不超上限时原样一份）、`mergeAnswers` 合并、`isTooManyQuestions` 认拒绝信号、`QuestionLimitMemory` 按「provider × baseUrl × model」记学到的上限（只往小改）。
+- **`providers.json` 新增 `maxQuestions` 字段**（0 / 缺省 = 不限制），decisionmodels 预设填 `1`（默认模型 s1-fast 的保守值）。服务端下发分支固定 0——下发值不声明上限，行为与改动前逐字一致。
+- **`index.js` 的 `#attempt` 拆成两层**：原实现改名 `#attemptOnce`（单次请求，题目已切好），新的 `#attempt` 负责「算上限 → 切份 → 串行发 → 合并答案」。**不超上限时逐字走原路径**（一次请求），绝大多数 provider 不多出任何请求或延迟。
+- **没声明上限的服务自愈**：单发被 `too_many_questions` 拒时，学成 1 并拆开重发一次。这不是重试策略——它换的是**请求形状**，不是把同一份请求再发一遍。
+- **任何一份失败即整体失败**：只拿半份答案就裁决，等于让决策点的 `parse()` 对着缺字段的对象判断（返回 undefined），看起来像降级、实际是「一部分题目根本没问」。
+
+**为什么**：
+
+- **声明 + 学习，两条都要**。只有声明：用户填了没预设的服务（自建 vLLM、中转）仍会静默失效。只有学习：每次决策都要先被 400 拒一次再拆开重发，多一次注定失败的往返，遥测里持续出现 `http-400`，看起来像服务坏了。
+- **上限必须跟着模型走**。按 baseUrl 记会把 s1-fast 的 1 套到 s1-pro 上（拆多了，只是多几次请求），反过来把 3 套到 s1-fast 上就是再次静默失效。
+- **串行而不并发**：这些题目属于同一次决策，并发会把单次决策放大成 N 倍瞬时并发，而限流（429）恰好是本插件最不该自己制造的东西。
+- **token 与延迟按整次决策累加**：拆成三发时用户等的是三发之和，遥测记的也该是这一次决策的真实消耗。有一发没报 usage 就不假装知道总数（保持 undefined，与单发语义一致）。
+
+**被否决的方案**：
+
+- **遇到 400 就自动换模型**（s1-fast → s1-pro）：否决。那等于替用户改配置（DEC-037/062 同一条约束），而且 s1-pro 贵 3 倍（$0.097 vs $0.032 / 百万 token）。
+- **把 decisionmodels 预设的默认模型改成 s1-pro**（上限 3）：否决。仍不够（授权点与 turnStop 各 4 道），且贵 3 倍；拆题才是通用解。
+- **按 baseUrl 记上限**：否决。上限是模型属性，见上。
+- **并发发各份题目**：否决。理由见上（自造限流）。
+- **学到的上限可以被更宽松的值覆盖**：否决。学到的值来自一次真实拒绝，比猜测可信；拆分不足会静默失效，拆分过多只是多几次请求。
+
+**顺带修掉的第二个缺陷**：`scripts/verify-endpoint.mjs` 自己拼 `{ state, questions, think_mode }` 并自己读 `body.answers`，**绕过了线协议层**。后果是它对 OpenAI 报「HTTP 400 Missing required parameter: 'model'」——而插件运行时其实是 429 余额不足，两个完全不同的结论；对 decisionmodels 则把「只收一道题」误报成端点不可用。现在改为走 `buildHeaders` / `buildRequestBody` / `readAnswers` + 同一套 `chunkQuestions`。验收脚本必须和插件同一条路径，否则它说的不是插件的事。
+
+**验证**：
+
+- `test/question-batching.test.js`（新增，9 项）：上限归一、切份（顺序 / 每份只含自己的题 / 不超上限时原样一份）、畸形输入不抛、合并、拒绝信号识别（不误判普通 400）、记忆表（只往小改 / 按模型分开 / 畸形 provider 不抛）、`runChunks`（串行保序 / 一份失败即停 / 空输入不抛）。
+- `test/question-batching-route.test.js`（新增，4 项）：真实 `StartluxClient` + 桩 fetch 走 `classify()`。四问授权集在 `maxQuestions: 1` 下拆成 4 次请求、每次只带自己那道题、答案合并后 `extractGuardAnswers` 真的解析出裁决；未声明上限时仍是一次请求发完；某一份失败即整体 `http-400` 且不返回半份答案；未声明上限的服务回 `too_many_questions` 时学成 1 并重发（第一次 5 发、第二次直接 4 发）。
+- `node --test test/`：**877 项 / 877 通过 / 0 失败**（原 864 + 新增 13）。
+- `node scripts/verify-wiring.mjs`：全部接线检查通过。
+- **真实端点验收**（`node scripts/verify-endpoint.mjs`）：decisionmodels **8/8 个决策点通过**（改动前 0/8）；OpenAI 仍为 0/8，但原因已明确是 `429 credit_balance_exhausted`（账号余额为 0，不是形状问题——同一份请求在 429 之前已通过参数校验）。
+
+**改动文件**：`lib/question-batching.js`（新增）、`lib/index.js`（`#attempt` 拆两层 + `#sendChunks`）、`lib/providers.js`（provider 上暴露 `maxQuestions`）、`lib/provider-presets.js`（解析 `maxQuestions`）、`lib/providers.json`（decisionmodels 填 1）、`scripts/verify-endpoint.mjs`（走线协议 + 分批）、`test/question-batching.test.js`（新增）、`test/question-batching-route.test.js`（新增）、`docs/lessons/max-questions-per-request.md`（新增）、`DECISIONS.md`。
+
 ## DEC-078 配置项按 provider 能力表个性化显示：能力写进 JSON，UI 与传输层共用一张表（2026-11-25）
 
 **背景**：用户提出「不同 provider/model 对请求参数有不同要求，能不能在 `lib/providers.json` 里给他们定好参数，然后 UI 配置层根据参数决定个性化显示配置项」。这不是假设——`decisionmodels.io` 实测对 `think_mode` 回 400 `{"loc":["think_mode"],"msg":"Extra inputs are not permitted"}`，而 `google-decisions` / `openai-decisions` 的请求体里根本没有这个字段（它们用 `input` / `questions`）。此前的第一个补丁（`19e1556`）只在**传输层**跳过了该字段，UI 上「思考模式」下拉仍然无条件显示、可选、可存——用户选了 `always` 什么也不会发生，正是本插件反复强调的「配了没反应」。

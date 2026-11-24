@@ -17,6 +17,8 @@ import { join } from "node:path";
 
 import { POINT_SPECS } from "../lib/points/spec.js";
 import { resolveKeyFor, resolveProvider, PROVIDER_IDS } from "../lib/providers.js";
+import { buildHeaders, buildRequestBody, readAnswers } from "../lib/wire-protocol.js";
+import { chunkQuestions, mergeAnswers } from "../lib/question-batching.js";
 import { resolveDshHome } from "../lib/home-paths.js";
 
 /*
@@ -228,25 +230,80 @@ if (key === undefined || key.length === 0) {
 
 console.log(`provider: ${provider.label}（${provider.id}）`);
 console.log(`endpoint: ${endpoint}`);
-console.log(`model:    ${provider.model || "自动（服务端默认）"}\n`);
+console.log(`model:    ${provider.model || "自动（服务端默认）"}`);
+console.log(
+  `题目上限: ${provider.maxQuestions > 0 ? `每次 ${provider.maxQuestions} 道（超出自动拆分）` : "未声明（一次发完）"}\n`,
+);
 
-/** 打一次端点，返回 { ok, answers, error }。 */
-async function decide(state, questions) {
+/**
+ * 打**一次**端点，返回 `{ ok, answers, error }`。
+ *
+ * 必须走 `lib/wire-protocol.js` 的 `buildHeaders` / `buildRequestBody` /
+ * `readAnswers`，不能自己拼 `{ state, questions, think_mode }`：
+ *
+ *   - 自己拼的话，OpenAI / Google 这类**换了整套形状**的协议根本发不对，
+ *     脚本会报一个与插件无关的 400（实测：对着 OpenAI 报「missing model」，
+ *     而插件运行时其实是 429 余额不足——两个完全不同的结论）。
+ *   - 答案也要用 `readAnswers` 归一：OpenAI 回的是数组，自己读 `body.answers`
+ *     会把它当成「按 id 索引的对象」，于是一个能用的端点被判成不可用。
+ *
+ * @param state - 决策上下文。
+ * @param questions - `{ id: question }`（已按上限切好的一份）。
+ * @returns `{ ok: true, answers, usage, model }` 或 `{ ok: false, error }`。
+ */
+async function decideOnce(state, questions) {
   const controller = AbortSignal.timeout(60000);
   try {
     const response = await fetch(endpoint, {
       method: "POST",
-      headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
-      body: JSON.stringify({ state, questions, think_mode: "never" }),
+      headers: buildHeaders(provider, key),
+      body: JSON.stringify(buildRequestBody(provider, { state, questions, thinkMode: "never" })),
       signal: controller,
     });
     const text = await response.text();
     if (!response.ok) return { ok: false, error: `HTTP ${response.status}: ${text.slice(0, 300)}` };
     const body = JSON.parse(text);
-    return { ok: true, answers: body.answers, usage: body.usage, model: body.model };
+    return {
+      ok: true,
+      answers: readAnswers(provider, body),
+      usage: body.usage,
+      model: body.model,
+    };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
+}
+
+/**
+ * 按该 provider 的题目上限分批发完，再把答案合并成一份。
+ *
+ * 与插件运行期同一套拆分规则（`chunkQuestions`）：上限 1 的服务要发 N 次，
+ * 验收脚本若仍一次塞完，会报 400 `too_many_questions` 并把一个**能用的**
+ * 端点判成不可用——那是脚本在说谎，不是端点在坏。
+ *
+ * @param state - 决策上下文。
+ * @param questions - `{ id: question }`。
+ * @returns `{ ok: true, answers, usage }` 或 `{ ok: false, error }`。
+ */
+async function decide(state, questions) {
+  const chunks = chunkQuestions(questions, provider.maxQuestions ?? 0);
+  if (chunks.length <= 1) return decideOnce(state, questions);
+  const parts = [];
+  let inputTokens = 0;
+  let model;
+  for (const chunk of chunks) {
+    const part = await decideOnce(state, chunk);
+    if (!part.ok) return part;
+    parts.push(part.answers);
+    if (typeof part.usage?.input_tokens === "number") inputTokens += part.usage.input_tokens;
+    model = part.model;
+  }
+  return {
+    ok: true,
+    answers: mergeAnswers(parts),
+    usage: { input_tokens: inputTokens },
+    model,
+  };
 }
 
 let failures = 0;

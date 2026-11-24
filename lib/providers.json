@@ -134,11 +134,12 @@
       "s1-vision",
       "reax-1"
     ],
-    "hint": "Decision Models（decisionmodels.io）的 System One 端点（POST /v1/systemone）；可用模型 s1-fast / s1-pro / s1-vision / reax-1，默认 s1-fast，只填一个 API key 即可使用",
-    "hintEn": "Decision Models (decisionmodels.io) System One endpoint (POST /v1/systemone); models s1-fast / s1-pro / s1-vision / reax-1, default s1-fast — just add an API key",
+    "hint": "Decision Models（decisionmodels.io）的 System One 端点（POST /v1/systemone）；可用模型 s1-fast / s1-pro / s1-vision / reax-1，默认 s1-fast（每次只收 1 道题，插件会自动拆分），只填一个 API key 即可使用",
+    "hintEn": "Decision Models (decisionmodels.io) System One endpoint (POST /v1/systemone); models s1-fast / s1-pro / s1-vision / reax-1, default s1-fast (one question per request; the plugin splits automatically) — just add an API key",
     "capabilities": {
       "thinkMode": false
-    }
+    },
+    "maxQuestions": 1
   },
   {
     "id": "google-decisions",
