@@ -80,7 +80,7 @@
 **验证**：
 
 - TDD 红→绿，新增 21 项：`test/backup-model.test.js`（18 项纯函数，覆盖触发集合的正反两侧、四种 `blocked`、畸形输入不抛、plan 不含明文 key）+ `test/backup-model-route.test.js`（13 项端到端：默认关零请求、就绪时接管且用下发 key、请求体除 model 外逐字相同、兜底也失败时保留主因并记 `backupAttempted`、超时不触发、互斥、key 不落盘 canary、白名单与布尔校验、统计/明细带 `backup`）。另有配置页 6 项与决策历史 2 项。先跑红确认失败原因是行为缺失（非环境/语法），再实现转绿。
-- `node --test test/`：**831/831 全绿**（基线 792 + 39 新增 + 其余为既有）。`node scripts/verify-wiring.mjs` 全部通过（含新增的 `Config 含 provider 键 backupModel`）。
+- `node --test test/`：**840/840 全绿**（rebase 到含 DEC-074 provider-JSON 重构的 main 之后；main 基线 801 + 39 新增）。`node scripts/verify-wiring.mjs` 全部通过（含新增的 `Config 含 provider 键 backupModel`）。
 - 抽取那一步单独验收：改动前后都是 792/792、测试文件零改动，证明「零行为变化」再叠功能。
 - 三道既有护栏继续成立：下发明文 key 不落盘（沿用 `server-provider-route` 的递归读盘 canary，兜底路径也覆盖）；`serverProvider` 关闭时零请求下发端点；i18n 覆盖测试（新增 8 条中文文案全部登记英文）。
 
