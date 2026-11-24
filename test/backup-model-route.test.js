@@ -701,3 +701,129 @@ test("统计与决策明细都带 backup 标记（且不影响既有字段）", 
     await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 30 });
   }
 });
+
+// ---------------------------------------------------------- 8. 冷却
+
+test("冷却期间若兜底可用：跳过主模型、由兜底接住", async () => {
+  // 冷却的意义是「别再对着故障端点烧钱」，不是「放弃这次决策」。若兜底可用
+  // 却仍整段降级，最有用的能力恰好在最需要的时刻失效——而那时免费通道
+  // 往往还活着（它是另一套账号）。
+  const dir = await mkdtemp(join(tmpdir(), "dsh-backup-cooldown-"));
+  try {
+    const cfg = {
+      provider: "custom",
+      customBaseUrl: `${LOCAL_ORIGIN}/v1`,
+      customEndpointStyle: "decisions",
+      customApiKey: "sk-local-test-key-0123456789",
+      customModel: "local-model",
+      cacheSize: 0,
+      cacheTtlMs: 0,
+      timeoutMs: 5000,
+      thinkMode: "never",
+      mode: "shadow",
+      // 失败一次就进冷却，且试探窗口推到很远——冷却期内不会有主模型试探。
+      failureThreshold: 1,
+      cooldownMs: 60000,
+      cooldownProbeMs: 600000,
+      retryAttempts: 0,
+      serverProvider: false,
+      backupModel: true,
+    };
+    const urls = [];
+    const client = new StartluxClient({
+      getConfig: () => cfg,
+      logger: { warn() {}, info() {} },
+      telemetryDir: dir,
+      getBackupOverride: () => ({
+        baseUrl: `${FREE_ORIGIN}/v1`,
+        model: "Kev-4B",
+        endpointStyle: "systemone",
+        key: BACKUP_KEY,
+      }),
+      fetchFn: async (url) => {
+        urls.push(String(url));
+        // 用 5xx：只有 5xx 会累计失败计数（429 是配置/额度问题，不点冷却），
+        // 而这条用例要的正是「已经进入冷却之后的行为」。
+        return String(url).startsWith(LOCAL_ORIGIN) ? statusResponse(500) : okResponse();
+      },
+    });
+    const call = () => ({
+      point: "authorize",
+      tag: "guard",
+      mode: "shadow",
+      tool: "bash",
+      state: { tool: "bash", args_preview: "{}" },
+      questions: { alive: { type: "noul", instructions: "?" } },
+    });
+
+    // 第一次：主模型 500 → 兜底接住；同时 noteFailure 把冷却点着了。
+    const first = await client.classify(call());
+    assert.equal(first?.backup, true, "第一次应由兜底接住");
+    assert.ok(urls.some((u) => u.startsWith(FREE_ORIGIN)));
+
+    // 第二次（仍在冷却期内）：不该再打主模型，直接由兜底答。
+    urls.length = 0;
+    const second = await client.classify(call());
+    assert.equal(second?.degraded, undefined, `冷却期内兜底应接住：${JSON.stringify(second)}`);
+    assert.equal(
+      urls.filter((u) => u.startsWith(LOCAL_ORIGIN)).length,
+      0,
+      "冷却期内不该再打主模型（那正是冷却要避免的白烧）",
+    );
+    assert.equal(
+      urls.filter((u) => u.startsWith(FREE_ORIGIN)).length,
+      1,
+      "应由兜底发一次请求并成功",
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 30 });
+  }
+});
+
+test("冷却期间兜底不可用：仍报 cooldown（与改动前逐字一致）", async () => {
+  // 这条是回归护栏：加了「跳过主模型」之后，兜底不可用时必须退回原来那句话，
+  // 而不是冒出一个内部词 cooldown-skip。
+  const dir = await mkdtemp(join(tmpdir(), "dsh-backup-cooldown2-"));
+  try {
+    const cfg = {
+      provider: "custom",
+      customBaseUrl: `${LOCAL_ORIGIN}/v1`,
+      customEndpointStyle: "decisions",
+      customApiKey: "sk-local-test-key-0123456789",
+      customModel: "local-model",
+      cacheSize: 0,
+      cacheTtlMs: 0,
+      timeoutMs: 5000,
+      thinkMode: "never",
+      mode: "shadow",
+      failureThreshold: 1,
+      cooldownMs: 60000,
+      cooldownProbeMs: 600000,
+      retryAttempts: 0,
+      serverProvider: false,
+      backupModel: true,
+    };
+    const client = new StartluxClient({
+      getConfig: () => cfg,
+      logger: { warn() {}, info() {} },
+      telemetryDir: dir,
+      // 兜底不可用（等价于开关关着 / 配置没取到）。
+      getBackupOverride: () => undefined,
+      fetchFn: async () => statusResponse(500),
+    });
+    const call = () => ({
+      point: "authorize",
+      tag: "guard",
+      mode: "shadow",
+      tool: "bash",
+      state: { tool: "bash", args_preview: "{}" },
+      questions: { alive: { type: "noul", instructions: "?" } },
+    });
+
+    await client.classify(call());
+    const second = await client.classify(call());
+    assert.equal(second?.degraded, "cooldown", `应报 cooldown，实际 ${String(second?.degraded)}`);
+  } finally {
+    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 30 });
+  }
+});

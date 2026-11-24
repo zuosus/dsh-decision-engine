@@ -41,6 +41,52 @@
 - `node --test test/`：**800 项 / 800 通过 / 0 失败**（改前 792 项全绿；本次新增 8 项）。`node scripts/verify-wiring.mjs`：全部接线检查通过。
 
 **改动文件**：`lib/providers.json`（新增，143 行）、`lib/provider-presets.js`（新增，186 行）、`lib/providers.js`（预设字面量删除、`customizable`/`legacy*`/`typedModelsOnly` 改为读数据、`providerCatalog` 下发 `models`）、`lib/index.js`（`DEFAULTS`、`Config` schema、保存白名单、`persistKeys`、`rawModels`、模型清单过滤改读 `preset.models`、`/status` 补 `providerLabelEn`）、`lib/client.js`（新增 `providerText()`；下拉/说明/统计页展示名按语言取；`isCustom` 改为读 `customizable`）、`test/providers.test.js`、`test/provider-json-catalog.test.js`（新增）、`test/client-i18n.test.js`、`test/client-ui.test.js`、`test/save-path.test.js`、`config.example.yml`、`README.md`、`README.zh.md`、`docs/lessons/model-field-required-by-provider.md`、`scripts/verify-wiring.mjs`、`scripts/verify-endpoint.mjs`、`DECISIONS.md`。
+## DEC-075 新增「免费模型兜底」（backup model）：主模型 4xx/5xx 时自动改用免费模型（2026-11-24）
+
+**背景**：用户要求「当指定的 model 出现错误，不管是 429 insufficient balance 还是其他 4xx/5xx 时，如果本插件指定的免费模型可达，则本次调用自动使用免费模型。这个功能是可选项，默认关闭。当然这就要求本插件需要提前自动下载免费模型配置。」
+
+现状的痛点很具体：用户填了自己的决策服务后，一旦额度用光（429/402）或 key 失效（401/403），守卫就整段 fail-open 降级——「没拦人」与「没工作」在界面上长得一模一样。而插件本来就有免费通道（DEC-030/037/062 的服务端下发），只是过去只能二选一：要么当主模型（`serverProvider` 开着），要么完全不用。
+
+**决定**：
+
+- **默认关闭的 `backupModel`**。打开后：主模型返回任何非 2xx（4xx 全族 + 5xx 全族，含 429/402/401/403）或 200 但响应体不可用（`invalid-json` / `invalid-response` / `missing-answers`）时，**本次调用**换免费通道再问一遍；免费配置不可达则行为与今日逐字一致。
+- **复用现有下发通道，不新增第二个服务商**。兜底目标就是 `ServerConfigSource`（`SERVER_CONFIG_ENDPOINT`）那份配置，因此地址/模型/key 的校验、TTL、并发去重、失败重试下限、`keyHint` 末位脱敏全部继承，DEC-030 的三条红线（不落盘 / 绝不抛错 / 绝不外泄 key）自动适用。
+- **判断层单独成模块** `lib/backup-model.js`（零依赖、零 I/O 纯函数）：`shouldFallback()` 定「哪些失败值得换人」，`backupPlanOf()` 定「此刻可不可用、为什么不可用」（`off` / `primary-is-free` / `no-config` / `expired`）。与 `endpoint-fallback.js` / `resilience.js` 同一分层，可裸 Node 单测。
+- **超时与网络错误刻意不触发**。这两类已有专门的冷启动重试（resilience.js 的实测依据：首发被超时掐断时服务端已被焐热，第二发 1–2 秒必中）。再叠一次兜底会把单次决策的最坏等待从 2×timeout 抬到 3×timeout，而换一家服务商并不解决本机链路问题。`caller-aborted`（调用方已取消）与 `cooldown`（本地保护机制）同理排除。
+- **与 `serverProvider` 互斥**。后者开着时免费模型**就是**主模型，再兜底等于拿同一份配置重问一遍。运行期报 `primary-is-free`，界面明说，但**不自动替用户关掉任何开关**（与 DEC-062 同一条约束）。
+- **冷却语义改为「跳过主模型，直接走兜底」**。原来冷却期内一律 `degrade("cooldown")`；现在若兜底可用，冷却期间不发主模型请求、直接用它，每 `cooldownProbeMs` 仍放行一次主模型试探（半开冷却不变，试探成功即彻底解除）。否则「服务抖了一下」会让最有用的能力在最需要的时刻失效。
+- **兜底成功不解除主模型的冷却**。`noteSuccess()` 会同时把 `cooldownUntil`/`cooldownStreak` 归零；免费模型答上来只证明**另一套账号**可用，对主模型是否恢复一无所知。若在这里清冷却，下一轮就会立刻再打一次已知故障的主模型——正是冷却要避免的白烧。主模型的冷却只由它自己的一次成功试探来解除（实测：第一版漏了这条，冷却期内的第二次调用又打了一次主模型，被新用例逮到）。
+- **归因分得清**：`provider` 记既有常量 `server`，另加 `backup: true`；遥测、统计（`buildRecord`/`normalizeRecord`）、决策明细（`buildDecisionRecord`）三处各自透传，界面「标记」列显示「免费兜底」（排序值 2，夹在已降级与缓存命中之间）。降级路径额外回传 `backupAttempted`，审计能回答「为什么这次没兜底」。
+- **兜底结果不进缓存**。缓存键由**主模型**的 endpoint/model 算；把兜底答案塞进去，后续同题会直接命中——既不再打主模型（也就无从得知它是否恢复），归因还会错记成主模型。
+- **提前获取三个触发点**：启动（`reloadOwnConfig` 落定后）、热路径（`classify()` 开头）、进配置页（`/status`）。全部 `void`、不 await。另加 `BACKUP_REFRESH_MARGIN_MS = 120000`：临近过期也补一发，否则会出现「正好在过期窗口里失败 → 兜底不可用」。三处都只在开关打开时发生（关闭时零请求）。
+- **先做了一次纯抽取**：把 `classify()` 里「对一个 provider 发一次请求（含重试循环、端点 404 回退、状态码分支、响应体解析）」抽成 `#attempt()` / `#successResult()`。兜底只是「换一套 provider+key 再调一次」，若复制一份发送逻辑，四段最容易漂移的代码会各自演化，而漂移的后果是「主模型与兜底模型对同一份题给出不可比的结论」。该提交单独可验证：792/792 全绿、测试文件一行未改。
+
+**为什么**：
+
+- **为什么不新增一个「backup provider」预设**：那会引入第二套地址/密钥/TTL 管理，而免费通道已经把这些做完了（含「不落盘、只给末四位」的既有承诺）。多一套就等于多一处会漂移的配置面。
+- **为什么判断不写进 `classify()`**：四个闸（开关/互斥/有无配置/过期）各有独立失败语义与文案，散在 4300 行的 `index.js` 里就没法单测，也没法解释「为什么这次没兜底」。
+- **为什么兜底只试一次**：它换的是「另一套账号与地址」，不是重试策略。再叠几轮只会成倍拉长最坏等待，却不会提高成功率。
+- **为什么失败时保留主模型的失败原因**：主模型才是用户配的那个。用兜底的错误（可能是 401/404）盖掉 429，会把人引向完全错误的排查方向；「试过兜底」这件事另用 `backupAttempted` 记录。
+- **为什么默认关且不跟随 DEC-062 的「全新安装默认开」**：DEC-062 那条是「开箱即用的免费主模型」，不产生额外网络行为；兜底要求提前取配置、并可能在失败时多打一次请求，属于必须由用户显式选择的行为变更。
+
+**被否决的方案**：
+
+- **把兜底塞进 `resilience.js` 的重试链**（当作「第三种可重试原因」）：**否决**。重试链换的是同一个端点的第二发，而兜底换的是另一套 provider + key + endpoint；混进去会让 `shouldRetry` 同时表达两件事，而它的 `maxAttempts`/`maxBudgetMs` 口径是按时长算的，容不下「换一家」。
+- **把兜底结果写进缓存**：**否决**，理由见上（会遮蔽主模型是否恢复，并污染归因）。
+- **在「使用免费模型」开着时自动关掉它，好让兜底生效**：**否决**。那等于替用户改了一个隐私相关开关（DEC-037/062 明令禁止），且用户本来可能就是想要免费模型当主模型。
+- **让 `POST /test`（测试端点）也走兜底**：**否决**。它是「测你配的这个地址通不通」的诊断工具；静默改道后，它的结果就不再回答那个问题了。
+- **把「用户主模型（reasoning model）自身报错」也接管**：不在本插件职责内——插件只判断决策模型，不拦截宿主主模型的请求。
+
+**验证**：
+
+- TDD 红→绿，新增 21 项：`test/backup-model.test.js`（18 项纯函数，覆盖触发集合的正反两侧、四种 `blocked`、畸形输入不抛、plan 不含明文 key）+ `test/backup-model-route.test.js`（13 项端到端：默认关零请求、就绪时接管且用下发 key、请求体除 model 外逐字相同、兜底也失败时保留主因并记 `backupAttempted`、超时不触发、互斥、key 不落盘 canary、白名单与布尔校验、统计/明细带 `backup`）。另有配置页 6 项与决策历史 2 项。先跑红确认失败原因是行为缺失（非环境/语法），再实现转绿。
+- `node --test test/`：**831/831 全绿**（基线 792 + 39 新增 + 其余为既有）。`node scripts/verify-wiring.mjs` 全部通过（含新增的 `Config 含 provider 键 backupModel`）。
+- 抽取那一步单独验收：改动前后都是 792/792、测试文件零改动，证明「零行为变化」再叠功能。
+- 三道既有护栏继续成立：下发明文 key 不落盘（沿用 `server-provider-route` 的递归读盘 canary，兜底路径也覆盖）；`serverProvider` 关闭时零请求下发端点；i18n 覆盖测试（新增 8 条中文文案全部登记英文）。
+
+**改动文件**：`lib/backup-model.js`（新增）、`lib/index.js`（DEFAULTS/schema/白名单/校验/`#attempt` 抽取/兜底分支/冷却跳过主模型/`backupPlan`/`backupOverride`/`prefetchBackupConfig`/`statusPayload`/遥测与明细透传）、`lib/stats.js`、`lib/decision-store.js`、`lib/engine.js`、`lib/client.js`（配置页行、决策历史标记、provider 标签、英文词表）、`config.example.yml`、`README.md`、`README.zh.md`、`scripts/verify-wiring.mjs`、`test/backup-model.test.js`（新增）、`test/backup-model-route.test.js`（新增）、`test/client-ui.test.js`、`test/client-decisions-view.test.js`、`DECISIONS.md`。
+
+
 
 ## DEC-073 免费模型配置下发地址改为 cdn.zuos.us 静态文件（2026-11-24）
 

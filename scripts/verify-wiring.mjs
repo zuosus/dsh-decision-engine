@@ -299,6 +299,8 @@ const providerKeys = [
   "provider",
   // 服务端下发开关（DEC-030）：它不在 schema 里，设置页那个开关拨了也没处存。
   "serverProvider",
+  // 免费模型兜底：与上面同一个理由——少一个 schema 键，那一行拨了也存不下。
+  "backupModel",
   "baseUrl",
   "customBaseUrl",
   "customEndpointStyle",

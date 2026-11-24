@@ -35,6 +35,10 @@ The same mechanism covers the harness's other judgements: model routing (mechani
 
 Each decision point has its own three-state switch: off · observe · enforce. Only tool authorization is on out of the box (in observe, recording without blocking); the rest you turn on as you want them. Any error, timeout or malformed answer fails open and lets the call through: the decision model must never be the reason a tool call gets stuck.
 
+## 4. The free model can also be a fallback, not just a primary
+
+The free model above is normally either your primary decision model or unused. There is a third role: **keep your own provider as primary, and switch to the free model only when it fails.** Turn on "free-model fallback" and any 4xx (429 insufficient balance, 402 out of credit, 401/403 bad key) or 5xx from your provider — plus a 200 with an unusable body — makes that one call retry on the free model instead of degrading. Timeouts and network errors are deliberately excluded: they already have their own cold-start retry, and re-issuing them elsewhere only stretches the worst-case wait. Off by default, since it makes the plugin fetch the free-model config ahead of time and can add one request on failure.
+
 ## License
 
 MIT
