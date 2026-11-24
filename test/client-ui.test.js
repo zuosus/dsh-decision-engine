@@ -3123,3 +3123,70 @@ test("兜底开关归属「连接方式」组（它是地址来源的一部分�
   const guardText = textsOf(bodyOf(byId.get("guard"))).join("\n");
   assert.equal(guardText.includes("免费模型兜底"), false, "兜底开关不该出现在守卫行为组");
 });
+
+// ------------------------------------------- 配置项按 provider 能力个性化显示
+//
+// 背景：不同端点对请求参数的要求不同。`decisionmodels.io` 实测对 `think_mode`
+// 回 400 `Extra inputs are not permitted`；google-decisions / openai-decisions
+// 的协议里根本没有这个字段。数据层已经按 provider 声明能力
+// （`supportsThinkMode`），但界面过去无条件显示「思考模式」下拉——用户选了
+// always 却什么也不会发生，正是本插件最忌讳的「配了没反应」。
+//
+// 这一组盯的不变量：**界面不能让人设置一个没有效果的选项**。
+
+/** 按 config.yml 字段名取到那一行（找不到返回 undefined）。 */
+function rowByField(tree, field) {
+  return findNode(tree, (item) => item?.props?.["data-field"] === field);
+}
+
+test("provider 不支持 think_mode 时：下拉被禁用并说明原因，不会「配了没反应」", async () => {
+  const { tree } = await render(stateWith({ provider: "decisionmodels" }));
+  const row = rowByField(tree, "thinkMode");
+  assert.ok(row !== undefined, "该行仍应存在——直接消失会让用户以为设置丢了");
+  // 控件必须是禁用的：禁用而不是隐藏，是为了解释「为什么这里不生效」。
+  const select = findNode(row, (item) => item.type === "select");
+  assert.ok(select !== undefined, "应仍渲染下拉，只是禁用");
+  assert.equal(select.props.disabled, true, "不支持的 provider 上该下拉必须禁用");
+});
+
+test("provider 不支持 think_mode 时，行内说明点明「端点没有这个字段」", async () => {
+  const { tree } = await render(stateWith({ provider: "decisionmodels" }));
+  const row = rowByField(tree, "thinkMode");
+  const texts = collectText(row).join("\n");
+  assert.ok(
+    texts.includes("不支持") || texts.includes("没有"),
+    `应说明该端点不支持思考模式，实际：${texts}`,
+  );
+});
+
+test("支持 think_mode 的 provider（systemone）：下拉可用，行为与改前一致", async () => {
+  const { tree } = await render(stateWith({ provider: "systemone" }));
+  const row = rowByField(tree, "thinkMode");
+  const select = findNode(row, (item) => item.type === "select");
+  assert.ok(select !== undefined);
+  assert.notEqual(select.props.disabled, true, "支持的 provider 上不该禁用");
+});
+
+test("能力随 provider 切换：同一份状态换成 openai-decisions 后下拉即禁用", async () => {
+  // 能力必须来自**当前 provider**，不能是「某个 provider 一旦不支持就全局关掉」。
+  const supported = await render(stateWith({ provider: "systemone" }));
+  const unsupported = await render(stateWith({ provider: "openai-decisions" }));
+  const enabledSelect = findNode(rowByField(supported.tree, "thinkMode"), (n) => n.type === "select");
+  const disabledSelect = findNode(rowByField(unsupported.tree, "thinkMode"), (n) => n.type === "select");
+  assert.notEqual(enabledSelect.props.disabled, true);
+  assert.equal(disabledSelect.props.disabled, true);
+});
+
+test("界面读的是能力表而不是专用字段：capabilities.thinkMode=false 即禁用", async () => {
+  // 这条盯的是「可扩展性」：前端必须按 capabilities 里的键判断，而不是
+  // 认死一个名为 supportsThinkMode 的专用布尔。否则以后加第二种能力，
+  // 又得回来改前端。
+  const catalog = providerCatalog().map((item) =>
+    item.id === "systemone"
+      ? { ...item, capabilities: { ...item.capabilities, thinkMode: false } }
+      : item,
+  );
+  const { tree } = await render(stateWith({ provider: "systemone", providerCatalog: catalog }));
+  const select = findNode(rowByField(tree, "thinkMode"), (n) => n.type === "select");
+  assert.equal(select.props.disabled, true, "能力表说 false 就必须禁用，与字段名无关");
+});
