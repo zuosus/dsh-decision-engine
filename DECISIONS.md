@@ -2,6 +2,18 @@
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
 
+## DEC-072 会话标签「决策历史」改名为「决策」（2026-11-24）
+
+**背景**：用户要求把会话标签页的 label `决策历史` 改成 `决策`。页面正文、配置页开关、文档里的「决策历史」叫法不变——只改会话标签栏那一个 label。
+
+**决定**：`lib/client.js` 里 `conversation.view` 注册的 `label: () => t("决策历史")` 改为 `t("决策")`。英文词典里 `决策` 已有映射 `Decision`（原 tab 用的 `决策历史` → `Decisions` 不再被 tab 使用），因此中文显示「决策」、英文显示 `Decision`，无需新增词条。`t()` 的 thunk 机制不变：语言切换仍由宿主每次投影重新读取。
+
+**为什么**：改动范围严格限制在用户点名的那个 tab label；页面的表头、空态文案、配置项说明里的「决策历史」是同一个功能的不同语境叫法，不在本次请求范围内，避免连带修改十几处文案与对应测试。
+
+**验证**：TDD 红→绿——先把 `test/client-decisions-view.test.js` 的标签断言从 `决策历史` 改成 `决策`，并新增英文界面断言 `Decision`，两者先失败（实际分别为 `决策历史` / `Decisions`），改完后通过。`node --test test/` 共 792 项全绿（原 791 项 + 新增 1 项）；`node scripts/verify-wiring.mjs` 全部通过。
+
+
+
 ## DEC-071 新增「书生·端砚」预设 + custom 模型框可手填（2026-11-24）
 
 **背景**：上游 issue #2（`[Feature] 可自定义手动填写 authorization / content-type / model 字段`）提出：选 custom 时模型只能从下拉里选，而有些决策服务的 `/v1/models` 里**根本没有**它的决策模型——书生·端砚（Intern InkStone，上海人工智能实验室）的 `intern-decision-4b` 就是这样，用户只能手填，但界面没有地方可填。

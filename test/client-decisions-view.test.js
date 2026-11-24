@@ -223,7 +223,12 @@ test("开关关闭时不注册这个视图", async () => {
 test("标签名是随语言重读的 thunk（切换语言不必重新注册）", async () => {
   const { meta } = await loadClient({ status: { decisionsTabEnabled: true }, lang: "zh" });
   assert.equal(typeof meta.label, "function", "label 应该是 thunk");
-  assert.equal(meta.label(), "决策历史");
+  assert.equal(meta.label(), "决策");
+});
+
+test("英文界面的标签名跟着词典走（t('决策') → Decision）", async () => {
+  const { meta } = await loadClient({ status: { decisionsTabEnabled: true }, lang: "en" });
+  assert.equal(meta.label(), "Decision");
 });
 
 // ------------------------------------------------------------------ 渲染
