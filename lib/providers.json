@@ -1,8 +1,8 @@
 [
   {
     "id": "systemone",
-    "label": "system one",
-    "labelEn": "system one",
+    "label": "System One",
+    "labelEn": "System One",
     "baseUrl": "https://api.typesafe.ai/v1",
     "endpointStyle": "systemone",
     "apiKeyEnv": "TYPESAFE_API_KEY",
