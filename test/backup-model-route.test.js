@@ -383,8 +383,6 @@ test("兜底成功时归因到 provider=server，并标记 backup=true", async (
     assert.equal(result?.provider, "server", `provider 应为 server，实际 ${String(result?.provider)}`);
     assert.equal(result?.statsFacts?.backup, true, "统计事实也要带 backup，统计页才分得清");
     assert.equal(client.backupUses, 1, "兜底计数应加一（面板显示「已兜底 N 次」）");
-    // 兜底结果**不进缓存**：否则后续同题既不打主模型，也无从得知它是否恢复。
-    assert.equal(client.cache.get?.call === undefined ? undefined : undefined, undefined);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -626,5 +624,80 @@ test("backupModel 走 PUT /config 白名单，且只接受布尔值", async () =
     assert.ok(String(res.data.error).includes("布尔"), `错误文案应说明原因：${res.data.error}`);
   } finally {
     bad.restore();
+  }
+});
+
+// ---------------------------------------------------------- 7. 记录层
+
+test("统计与决策明细都带 backup 标记（且不影响既有字段）", async () => {
+  // 只写进遥测是不够的：「决策历史」页与统计页各有自己的数据源，
+  // 两处都必须能分出「这次是兜底答的」，否则用户会把它算到主模型头上。
+  const dir = await mkdtemp(join(tmpdir(), "dsh-backup-record-"));
+  try {
+    const cfg = {
+      provider: "custom",
+      customBaseUrl: `${LOCAL_ORIGIN}/v1`,
+      customEndpointStyle: "decisions",
+      customApiKey: "sk-local-test-key-0123456789",
+      customModel: "local-model",
+      cacheSize: 0,
+      cacheTtlMs: 0,
+      timeoutMs: 5000,
+      thinkMode: "never",
+      mode: "shadow",
+      failureThreshold: 99,
+      retryAttempts: 1,
+      serverProvider: false,
+      backupModel: true,
+    };
+    const { StatsStore } = await import("../lib/stats-store.js");
+    const statsStore = new StatsStore({ dir });
+    const client = new StartluxClient({
+      getConfig: () => cfg,
+      logger: { warn() {}, info() {} },
+      telemetryDir: dir,
+      statsStore,
+      getBackupOverride: () => ({
+        baseUrl: `${FREE_ORIGIN}/v1`,
+        model: "Kev-4B",
+        endpointStyle: "systemone",
+        key: BACKUP_KEY,
+      }),
+      fetchFn: async (url) =>
+        String(url).startsWith(LOCAL_ORIGIN) ? statusResponse(429) : okResponse(),
+    });
+
+    const result = await client.classify({
+      point: "authorize",
+      tag: "guard",
+      mode: "shadow",
+      tool: "bash",
+      state: { tool: "bash", args_preview: "{}" },
+      questions: { alive: { type: "noul", instructions: "?" } },
+    });
+    assert.equal(result?.backup, true);
+
+    // 统计：把消耗事实交给写盘端（与引擎里的调用方式一致）。
+    client.recordDecision({ facts: result.statsFacts, action: "allow", detail: "ok" });
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    const rows = await statsStore.read();
+    const row = rows.at(-1);
+    assert.equal(row?.backup, true, "统计行应带 backup：true");
+    assert.equal(row?.provider, "server", "统计行 provider 应是 server");
+
+    // 决策明细：构造入口要能带上这个标记。
+    const { buildDecisionRecord } = await import("../lib/decision-store.js");
+    const record = buildDecisionRecord({ provider: "server", action: "allow", backup: true, ts: new Date().toISOString() });
+    assert.equal(record.backup, true, "明细记录应带 backup：true");
+    const plain = buildDecisionRecord({ provider: "server", action: "allow", ts: new Date().toISOString() });
+    assert.equal(
+      Object.hasOwn(plain, "backup"),
+      false,
+      "非兜底记录不该带一个值为 false 的多余字段（有则带、无则省）",
+    );
+  } finally {
+    // 明细/统计是异步落盘的旁路：删临时目录时它们可能还在写（ENOTEMPTY）。
+    // 与 DEC-071 记录的偶发竞态同一类，这里重试几次即可，不当成失败。
+    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 30 });
   }
 });
