@@ -638,23 +638,81 @@ test("服务端没给 provider 字段映射时绝不猜格子：宁可延后也�
   assert.equal(configCall, undefined, "字段映射缺失时不该发 /config（宁可延后也不猜着写）");
 });
 
-test("provider 下拉包含全部预设，默认 systemone", async () => {
-  const { controls } = await render(stateWith({}));
-  const providerSelect = controls.find((node) => node.type === "select" && node.props.value === "systemone");
-  assert.ok(providerSelect !== undefined, "没有找到 provider 下拉（或当前值不是 systemone）");
-  const options = providerSelect.children
-    .filter((child) => child !== null && typeof child === "object" && child.type === "option")
-    .map((child) => child.props.value);
-  // 下拉必须与 providers.json 的 provider 清单完全一致：多一个少一个都是漏改。
-  assert.deepEqual(options, [...PROVIDER_IDS]);
+test("服务提供方改为 grid 线框按钮：每个 provider 一格、选中高亮，已配置的标「已配置Key」", async () => {
+  const { tree } = await render(stateWith({}), { slots: { [SLOTS.decisions]: decisionsFixture } });
+  const row = connectionRow(tree, "provider");
+  assert.ok(row !== undefined, "仍应有 data-field=provider 的配置行");
+
+  const grid = findNode(row, (node) => (node.props?.className ?? "").split(/\s+/).includes("de-cfg__provider-grid"));
+  assert.ok(grid !== undefined, "provider 行应含 de-cfg__provider-grid 容器");
+  const buttons = [];
+  const walk = (node) => {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) return node.forEach(walk);
+    if (node.type === "button" && Object.hasOwn(node.props ?? {}, "aria-pressed")) buttons.push(node);
+    walk(node.children);
+  };
+  walk(grid);
+  assert.equal(buttons.length, PROVIDER_IDS.length, `按钮数应等于 provider 清单长度 ${PROVIDER_IDS.length}`);
+  const pressed = buttons.filter((node) => node.props["aria-pressed"] === true);
+  assert.equal(pressed.length, 1, "选中的 provider 只有一个");
+  assert.ok(textsOf(pressed[0]).join("").includes("System One"), "默认选中的是 System One");
+
+  // `keyStatus` 里 siliconflow 未配置、systemone 已配置（stateWith 夹具），
+  // 只有 systemone 按钮右侧带「已配置Key」小字。
+  const labeled = buttons.filter((node) => textsOf(node).join("").includes("已配置Key"));
+  assert.equal(labeled.length, 1, "只有已配置 key 的 provider 带「已配置Key」角标");
+  assert.ok(textsOf(labeled[0]).join("").includes("System One"));
 });
 
-test("选 system one 时下拉回显它、且不出现 custom 专属字段", async () => {
-  const { text, controls } = await render(
+test("点击 provider 按钮切到 siliconflow：发 /config 且带 provider=siliconflow", async () => {
+  const { tree } = await render(stateWith({}), { slots: { [SLOTS.decisions]: decisionsFixture } });
+  const row = connectionRow(tree, "provider");
+  const grid = findNode(row, (node) => (node.props?.className ?? "").split(/\s+/).includes("de-cfg__provider-grid"));
+  const button = findNode(grid, (node) => node.type === "button" && textsOf(node).join("").includes("硅基流动"));
+  assert.ok(button !== undefined, "siliconflow 按钮应存在");
+
+  const stub = stubFetch();
+  try {
+    button.props.onClick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  } finally {
+    stub.restore();
+  }
+  const call = stub.calls.find((item) => item.url.endsWith("/api/decision-engine/config"));
+  assert.ok(call !== undefined, `应 PUT /config，实际：${stub.calls.map((c) => c.url).join(", ")}`);
+  assert.equal(JSON.parse(call.init.body).provider, "siliconflow");
+});
+
+test("provider 按钮包含全部预设，默认 systemone 高亮", async () => {
+  const { tree } = await render(stateWith({}), { slots: { [SLOTS.decisions]: decisionsFixture } });
+  const grid = findNode(connectionRow(tree, "provider"),
+    (node) => (node.props?.className ?? "").split(/\s+/).includes("de-cfg__provider-grid"));
+  assert.ok(grid !== undefined, "没有找到 provider 按钮网格");
+  const buttons = [];
+  const walk = (node) => {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) return node.forEach(walk);
+    if (node.type === "button" && Object.hasOwn(node.props ?? {}, "aria-pressed")) buttons.push(node);
+    walk(node.children);
+  };
+  walk(grid);
+  assert.equal(buttons.length, PROVIDER_IDS.length, "按钮必须与 providers.json 的 provider 清单完全一致");
+  const pressed = buttons.filter((node) => node.props["aria-pressed"] === true);
+  assert.equal(pressed.length, 1, "默认只有一个 provider 高亮");
+  assert.ok(textsOf(pressed[0]).join("").includes("System One"), "默认高亮的是 System One");
+});
+
+test("选 system one 时它高亮、且不出现 custom 专属字段", async () => {
+  const { text, tree } = await render(
     stateWith({ provider: "systemone", providerLabel: "system one", baseUrl: "https://api.typesafe.ai/v1/systemone", keyEnvName: "TYPESAFE_API_KEY" }),
+    { slots: { [SLOTS.decisions]: decisionsFixture } },
   );
-  const providerSelect = controls.find((node) => node.type === "select" && node.props.value === "systemone");
-  assert.ok(providerSelect !== undefined, "provider 下拉未回显 systemone");
+  const grid = findNode(connectionRow(tree, "provider"),
+    (node) => (node.props?.className ?? "").split(/\s+/).includes("de-cfg__provider-grid"));
+  const pressed = findNode(grid, (node) => node.type === "button" && node.props?.["aria-pressed"] === true);
+  assert.ok(pressed !== undefined && textsOf(pressed).join("").includes("System One"),
+    "systemone 按钮应高亮");
   assert.equal(text.includes("Base URL（必填）"), false, "内置预设不该出现 custom 字段");
 });
 
@@ -2154,19 +2212,17 @@ test("「重新获取」发的是 POST /server-provider，不是又存一次配�
   assert.equal(call.init.method, "POST", "强制刷新应走 POST");
 });
 
-test("服务端生效时，手动输入 key 与 provider 下拉都还在（手动方案不变）", async () => {
+test("服务端生效时，手动输入 key 与 provider 按钮都还在（手动方案不变）", async () => {
   // 这条是 DEC-030 的验收核心之一：新功能**不得**以任何方式削弱手工路径。
   // 不 disable、不隐藏——服务端一旦不可用，用户要靠这些控件自己救场。
   const { tree } = await render(stateWith({ serverProvider: serverProviderWith({}) }));
   const keyInput = findNode(tree, (node) => node.type === "input" && node.props.type === "password");
   assert.ok(keyInput !== null && keyInput !== undefined, "服务端生效时 API Key 输入框被隐藏了");
-  // 不按具体 provider 名匹配：默认值历史上在 systemone / systemone 之间来回
-  // 换过（DEC-031 与其撤销），钉死名字会让这条 DEC-030 验收随默认值翻车。
-  const select = findNode(
-    tree,
-    (node) => node.type === "select" && PROVIDER_IDS.includes(node.props.value),
-  );
-  assert.ok(select !== null && select !== undefined, "服务端生效时 provider 下拉消失或不再回显当前值");
+  const grid = findNode(tree,
+    (node) => (node.props?.className ?? "").split(/\s+/).includes("de-cfg__provider-grid"));
+  assert.ok(grid !== undefined, "服务端生效时 provider 按钮网格消失");
+  const pressed = findNode(grid, (node) => node.type === "button" && node.props?.["aria-pressed"] === true);
+  assert.ok(pressed !== undefined, "服务端生效时没有高亮的 provider 按钮（不再回显当前值）");
 });
 
 test("播开关会 PUT /config 且带上 serverProvider: true", async () => {

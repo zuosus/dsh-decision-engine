@@ -120,20 +120,23 @@ test("default config root exposes de-settings scope", async () => {
   assert.ok(hasClass(root, "de-settings"), "config root is missing className de-settings");
 });
 
-test("provider row owns its original select through a labelled control wrapper", async () => {
+test("provider row owns its grid of labelled buttons", async () => {
   const root = await render();
   const row = nodes(root, (node) => hasClass(node, "de-cfg__row") && node.props["data-field"] === "provider")[0];
   assert.ok(row, "provider row missing de-cfg__row / data-field=provider");
-  const control = nodes(row, (node) => hasClass(node, "de-cfg__control"))[0];
-  assert.ok(control, "provider row missing de-cfg__control wrapper");
-  const select = nodes(control, (node) => node.type === "select")[0];
-  assert.ok(select, "control wrapper must contain the existing provider select");
-  assert.equal(select.props.value, "systemone");
-  assert.ok(nodes(select, (node) => node.type === "option" && node.props.value === "custom").length,
-    "provider select must preserve custom provider option");
-  const labels = associatedLabel(root, select);
-  assert.ok(labels.some((label) => nodes(row).includes(label)), "select label must belong to its row");
-  assert.ok(labels.some((label) => text(label).includes("服务提供方")), "select must name its row title");
+  const grid = nodes(row, (node) => hasClass(node, "de-cfg__provider-grid"))[0];
+  assert.ok(grid, "provider row missing de-cfg__provider-grid");
+  const buttons = nodes(grid, (node) => node.type === "button" && Object.hasOwn(node.props, "aria-pressed"));
+  assert.ok(buttons.length > 1, "provider grid must render one button per provider");
+  assert.ok(buttons.some((button) => text(button).includes("custom")),
+    "provider grid must preserve the custom provider button");
+  const selected = buttons.find((button) => button.props["aria-pressed"] === true);
+  assert.ok(selected && text(selected).includes("System One"), "default selected provider must be System One");
+  for (const button of buttons) {
+    const labels = associatedLabel(root, button);
+    assert.ok(labels.some((label) => nodes(row).includes(label)), "provider button label must belong to its row");
+    assert.ok(labels.some((label) => text(label).includes("服务提供方")), "button must name its row title");
+  }
 });
 
 test("config toggles have readable, unique aria-labelledby targets", async () => {
@@ -180,6 +183,45 @@ test("configuration stylesheet removes old multicolour icon tone backgrounds", (
     "old per-tone icon backgrounds must not survive the redesign");
   assert.doesNotMatch(css, /--de-cfg-tone\s*:\s*color-mix/,
     "old multicolour section tone variables must not survive the redesign");
+});
+
+test("服务提供方用 grid 线框 buttons 渲染在标题与说明之间，选中高亮反色", async () => {
+  const root = await render();
+  const row = nodes(root, (node) => hasClass(node, "de-cfg__row") && node.props["data-field"] === "provider")[0];
+  assert.ok(row, "provider row missing de-cfg__row / data-field=provider");
+
+  // grid 容器是标题与 hint 之间的兄弟节点（不是塞进右侧 control）。
+  const textCol = nodes(row, (node) => hasClass(node, "de-cfg__text"))[0];
+  assert.ok(textCol, "provider row missing de-cfg__text");
+  const children = (textCol.children ?? []).filter((node) => node !== null && typeof node === "object");
+  const label = children.find((node) => hasClass(node, "de-cfg__label"));
+  const hint = children.find((node) => hasClass(node, "de-cfg__hint"));
+  const grid = children.find((node) => hasClass(node, "de-cfg__provider-grid"));
+  assert.ok(grid, "provider grid must live between the title and the desc");
+  assert.ok(children.indexOf(grid) > children.indexOf(label) && children.indexOf(grid) < children.indexOf(hint),
+    "provider grid must be placed between the title and the desc");
+
+  // 每个 provider 一个 button，选中态用 aria-pressed 表达；选中项高亮反色由 CSS 承担。
+  const buttons = nodes(grid, (node) => node.type === "button" && Object.hasOwn(node.props, "aria-pressed"));
+  assert.equal(buttons.length, status.providerCatalog.length,
+    `按钮数应等于 provider 清单长度 ${status.providerCatalog.length}，实际 ${buttons.length}`);
+  const pressed = buttons.filter((node) => node.props["aria-pressed"] === true);
+  assert.equal(pressed.length, 1, "exactly one provider button must be selected");
+  assert.ok(text(pressed[0]).includes("System One"), "default selected provider must be System One");
+  for (const button of buttons) assert.equal(typeof button.props.onClick, "function", "provider button must be clickable");
+  assert.match(css, /\.de-cfg__provider-grid\b[^{}]*\{[^{}]*grid-template-columns\s*:/,
+    "provider grid must use CSS grid for its wireframe buttons");
+  assert.match(css, /\[aria-pressed="true"\]/,
+    "selected provider button must be styled via aria-pressed=true");
+});
+
+test("provider 已在别处配好 key 的按钮右侧显示小字「已配置Key」", async () => {
+  const root = await render({ 0: { ...status, keyStatus: { ...status.keyStatus, siliconflow: { configured: true } } } });
+  const buttons = nodes(root, (node) => node.type === "button" && Object.hasOwn(node.props, "aria-pressed") && text(node).includes("硅基流动"));
+  assert.ok(buttons.length >= 1, "should render a 硅基流动 provider button");
+  assert.ok(text(buttons[0]).includes("已配置Key"), "configured provider button should show 已配置Key badge");
+  const systemone = nodes(root, (node) => node.type === "button" && Object.hasOwn(node.props, "aria-pressed") && text(node).includes("System One"))[0];
+  assert.ok(systemone && !text(systemone).includes("已配置Key"), "unconfigured provider button must not show the badge");
 });
 
 test("failed autosave is readable inside config root, retryable, and announced", async () => {

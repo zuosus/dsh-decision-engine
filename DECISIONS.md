@@ -2,6 +2,31 @@
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
 
+## DEC-082 服务提供方 picker 改成 grid 线框按钮：选中反色、已配 Key 标小字（2026-11-25）
+
+**背景**：配置页「服务提供方」原来是一个 `<select>` 下拉：要确认「现在用的是哪家」得点开、在长列表里找高亮项，更没法一眼看出哪些 provider 已经配过 key。用户要求把 picker 改成 grid 线框按钮，放在标题与说明之间，选中项用高亮底色 + 文字反色表示，已配置的 provider 在按钮右侧用小字标 `已配置Key`，方便查看和切换。
+
+**决定**：
+
+- **picker 从 `<select>` 改成一组 `button[aria-pressed]`**：每个 provider 一格（`options = catalog`，含 custom），grid 用 `repeat(auto-fit, minmax(88px, 1fr))` 自然换行。按钮放在 `de-cfg__text` 里、title 与 hint 之间；hint 随当前选择变化，正好在按钮下方解释刚选的那家。
+- **选中态用 `aria-pressed` 表达、CSS 画高亮反色**：`.de-cfg__provider-grid button[aria-pressed="true"]` 用 `--de-accent` 做底色、`--dsw-alias-state-business-contrast`（回落 `--de-surface`）做文字色，边框同强调色。语义由 `aria-pressed` 承担，视觉由 CSS 承担，测试断言 `aria-pressed=true` 恰好一个且随点击切换。
+- **「已配置Key」角标只读服务端下发的 `keyStatus`**：与「删除配置」行用同一份判断（明文不回传，凭据 / config.yml / 环境变量三个来源只有服务端算得准）。每个 provider 独立判断，角标是 button 内的 `<span class="de-cfg__provider-grid-key">`，选中时用更高 opacity 保证反色底上也读得清。
+- **`configRow` 加可选第 6 参数 `beforeHint`**：渲染在 label 与 hint 之间；传入的控件同样走 `associateConfigControl`，让按钮自动挂上 `aria-labelledby` / `aria-describedby`（复用既有可访问性链路，不另写一份）。第 5 参数 `note` 语义与位置不变，老调用点逐字兼容。
+- **交互与旧下拉一致**：点按钮 → `setProviderDraft` + `setProviderError("")` + `scheduleSave({providerDraft}, true)`；`busy !== ""` 时整体禁用；catalog 为空时降级为单个禁用按钮，不空白。`EN_CONFIG` 增加 `已配置Key → Key set`，英文界面不夹中文。
+
+**为什么**：
+
+- **grid 按钮把「有哪些、选了谁、谁配了 key」三件事压进一屏**：下拉只回答「当前选了谁」，另外两件要逐个点开才能看到，与「方便查看和切换」的目标直接冲突。
+- **位置放在 title 与 desc 之间**：说明是当前的解释，必须紧跟在被解释的控件下面；放在右侧 control 区会让 10 个预设挤成一条窄栏，说明与控件分家。
+- **角标以 `keyStatus` 为准**：输入框内容只是用户此刻的草稿，不代表已经落盘；用凭据文件里的状态判断才不会被「粘贴了但没失焦」骗到。
+- **`aria-pressed` 而非自定义 class 表达选中**：既拿到无障碍语义，又能复用 `associateConfigControl` 对 `aria-pressed` 按钮的既有处理，不引入第二套键盘/读屏路径。
+
+**被否决的方案**：
+
+- **保留 `<select>`、只在旁边加「已配置」列表**：否决。查看与切换仍要两步，没解决用户要的「一眼看清」。
+- **用前端 key 输入框内容或顶层 `view.keyConfigured` 判断角标**：否决。前者可能是未提交的草稿，后者只是「生效 provider」的状态，都不能回答「这家 provider 到底配没配 key」。
+
+
 ## DEC-081 模型级 capabilities 覆盖 provider 级：同一家不同模型可以有不同脾气（2026-11-25）
 
 **背景**：用户给出 decisionmodels.io 的模型说明：s1-fast 是快速文本模型，s1-pro 处理较难判断且每次最多收三道题，s1-vision 接受图片。此前 DEC-079 的 `maxQuestions` 写在 provider 层（decisionmodels 填 1，取默认模型 s1-fast 的保守值），DEC-078 的 `capabilities` 也只写在 provider 层。这与事实冲突：上限与能力都是**模型**属性——把 1 套到 s1-pro 上会让它被无谓拆成四发，把 `thinkMode:false` 写死在 provider 层则挡住「某款模型重开该字段」的可能。用户要求：把 capabilities 加进 `models` 数组每个对象的配置里，模型的配置 override provider 的配置。
