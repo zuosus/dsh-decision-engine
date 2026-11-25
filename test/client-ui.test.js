@@ -3255,7 +3255,16 @@ test("图表：点击图例可隐藏决策点，其余点重新归一化", async
     walk(node.children);
     walk(node.props?.children);
   })(tree);
-  const legendButtons = buttons.filter((node) => "aria-pressed" in (node.props ?? {}));
+  /**
+   * 只取**图例**的按钮：统计页上还有一组同样带 `aria-pressed` 的控件——
+   * 时间范围预设（DEC-085 把它改成与配置页 picker 同一种线框按钮）。
+   * 不加这层过滤，那个默认选中的预设会混进来，断言的就是两件不同的事。
+   */
+  const legendButtons = buttons.filter(
+    (node) =>
+      "aria-pressed" in (node.props ?? {}) &&
+      String(node.props?.className ?? "").split(/\s+/).includes("de-stats__legend"),
+  );
   assert.ok(legendButtons.length >= 3, `图例应有可点击按钮，实际 ${legendButtons.length}`);
   // 默认全部参与：aria-pressed 全为 true。
   assert.ok(

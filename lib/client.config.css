@@ -24,9 +24,18 @@
   text-underline-offset: 4px !important;
 }
 .de-settings > a { margin-bottom: var(--de-space-2) !important; }
+.de-settings a.de-settings__site-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 1.4;
+}
 .de-settings__tabs {
+  display: flex;
   gap: var(--de-space-3) !important;
   margin-bottom: var(--de-space-3) !important;
+  border-bottom: 1px solid var(--de-border);
   border-color: var(--de-border) !important;
 }
 .de-settings__tabs button {
@@ -179,6 +188,114 @@
 .de-settings .de-cfg__footer > div:not(.de-cfg__actions) {
   color: var(--de-muted); opacity: 1 !important; overflow-wrap: anywhere; word-break: normal !important;
 }
+/* Statistics surface (DEC-085). Same shell, same tokens and same section rhythm
+ * as the configuration rows above: sections separated by one hairline, no card
+ * boxes, hierarchy carried by type size, weight and whitespace. Every colour
+ * comes from a host semantic alias so light/dark stay in sync. */
+.de-settings .de-stats { display: flex; flex-direction: column; gap: 0; }
+.de-settings .de-stats__section { display: flex; flex-direction: column; padding: var(--de-space-3) 0; }
+.de-settings .de-stats__section:first-child { padding-top: 0; }
+.de-settings .de-stats__section + .de-stats__section { border-top: 1px solid var(--de-border); }
+.de-settings .de-stats__head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: var(--de-space-2); margin: 0;
+}
+.de-settings .de-stats__title {
+  margin: 0; font-size: 15px; font-weight: 600; line-height: 1.5; color: var(--de-text);
+}
+.de-settings .de-stats__sub, .de-settings .de-stats__hint, .de-settings .de-stats__meta {
+  margin: var(--de-space-1) 0 0; color: var(--de-muted); font-size: 12px; line-height: 1.6;
+}
+.de-settings .de-stats__hint { font-size: 11px; }
+.de-settings .de-stats__meta { font-size: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.de-settings .de-stats__range { display: flex; flex-wrap: wrap; align-items: center; gap: var(--de-space-1); margin-top: var(--de-space-1); }
+/* Discrete range presets: wireframe buttons, same language as the provider /
+ * model pickers on the configuration tab (DEC-082 / DEC-084). */
+.de-settings .de-stats__presets {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
+  gap: var(--de-space-1); margin: var(--de-space-1) 0 0; width: 100%;
+}
+.de-settings .de-stats__presets button {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 34px; padding: 4px 8px; margin: 0;
+  border: 1px solid var(--de-border) !important; border-radius: var(--de-radius);
+  background: transparent !important; color: var(--de-text) !important;
+  font: inherit; font-size: 12px; line-height: 1.3;
+}
+.de-settings .de-stats__presets button:hover { background: var(--de-surface) !important; }
+.de-settings .de-stats__presets button[aria-pressed="true"],
+.de-settings .de-stats__presets button[aria-pressed="true"]:hover {
+  background: var(--de-accent) !important;
+  color: var(--dsw-alias-state-business-contrast, var(--de-surface, Canvas)) !important;
+  border-color: var(--de-accent) !important;
+}
+/* Metric chips: one value per cell, label above, tabular figures below. */
+.de-settings .de-stats__metrics {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  gap: var(--de-space-1); margin-top: var(--de-space-2);
+}
+.de-settings .de-stats__metric {
+  padding: var(--de-space-1) 10px;
+  border: 1px solid var(--de-border); border-radius: var(--de-radius);
+}
+.de-settings .de-stats__metric-label { color: var(--de-muted); font-size: 11px; line-height: 1.6; }
+.de-settings .de-stats__metric-value {
+  font-size: 14px; line-height: 1.5; color: var(--de-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.de-settings .de-stats__metric-value--saved,
+.de-settings .de-stats__metric-value--allow { color: var(--dsw-alias-label-success, var(--de-text)); }
+.de-settings .de-stats__metric-value--ask { color: var(--dsw-alias-label-warning, var(--de-text)); }
+.de-settings .de-stats__metric-value--reject { color: var(--dsw-alias-label-error, var(--de-text)); }
+/* Tables: hairline separators only, numbers right-aligned and monospaced. */
+.de-settings .de-stats__table-wrap { margin-top: var(--de-space-2); overflow-x: auto; }
+.de-settings .de-stats__table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.de-settings .de-stats__th {
+  padding: var(--de-space-1) 6px; border-bottom: 1px solid var(--de-border);
+  color: var(--de-muted); font-weight: 500; font-size: 11px;
+  text-align: right; white-space: nowrap; cursor: pointer; user-select: none;
+}
+.de-settings .de-stats__th:hover, .de-settings .de-stats__th--active { color: var(--de-text); }
+.de-settings .de-stats__th--name { text-align: left; }
+.de-settings .de-stats__td {
+  padding: 6px; border-bottom: 1px solid var(--de-border);
+  text-align: right; white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.de-settings .de-stats__td--name { text-align: left; }
+.de-settings .de-stats__td--sub { color: var(--de-muted); font-size: 10px; }
+.de-settings .de-stats__td--saved { color: var(--dsw-alias-label-success, var(--de-text)); }
+/* Notices: one neutral line block for caveats, one warning tone, one error tone. */
+.de-settings .de-stats__notice {
+  margin-top: var(--de-space-2); padding: var(--de-space-1) 10px;
+  border: 1px solid var(--de-border); border-left-width: 2px; border-radius: var(--de-radius);
+  color: var(--de-muted); font-size: 12px; line-height: 1.6;
+}
+.de-settings .de-stats__notice--warn { border-color: var(--dsw-alias-state-warn-primary, var(--de-border)); }
+.de-settings .de-stats__notice--error { border-color: var(--dsw-alias-state-error-primary, var(--de-border)); color: var(--dsw-alias-label-error, var(--de-text)); }
+.de-settings .de-stats__notice pre { margin: var(--de-space-1) 0 0; font-size: 10px; line-height: 1.5; max-height: 220px; overflow: auto; white-space: pre-wrap; word-break: break-all; }
+/* Chart slots keep the same spacing rhythm as every other block. */
+.de-settings .de-stats__chart {
+  margin-top: var(--de-space-2); padding-top: var(--de-space-1);
+  border-top: 1px dashed var(--de-border);
+}
+.de-settings .de-stats__chart-label {
+  display: flex; align-items: baseline; justify-content: space-between; gap: var(--de-space-1);
+  color: var(--de-muted); font-size: 11px; line-height: 1.6;
+}
+.de-settings .de-stats__charts { display: flex; flex-direction: column; gap: var(--de-space-1); margin-top: var(--de-space-1); }
+/* 区块内的二级标题（例如「横向对比」里的节省量小节）。 */
+.de-settings .de-stats__subtitle {
+  margin: var(--de-space-2) 0 0; font-size: 13px; font-weight: 600; color: var(--de-text);
+}
+/* 页头右侧的重查按钮：与配置页的次级按钮同一形状，靠右不抢标题。 */
+.de-settings .de-stats__reload { flex: none; margin-left: auto; }
+/* 渲染失败时的信息区：消息本身可换行，堆栈折叠起来。 */
+.de-settings .de-stats__message { white-space: pre-wrap; word-break: break-word; font-size: 12px; }
+.de-settings .de-stats__details { margin-top: var(--de-space-1); }
+.de-settings .de-stats__details summary { color: var(--de-muted); font-size: 11px; cursor: pointer; }
 @container (max-width: 560px) {
   .de-settings .de-cfg__row { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--de-space-1) !important; }
   .de-settings .de-cfg__text, .de-settings .de-cfg__control { grid-column: 1 / -1; }

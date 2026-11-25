@@ -44,6 +44,45 @@
 
 - **只在前两处派生表里补一行 `telemetryLevel`**：否决。它能让这次测试变绿，但三份字段表仍然并存，下一个新配置项照样漏——而且漏在哪一处，表现各不相同（显示错 / 保存后回弹）。
 - **把 `patchDiffersFromServer` 也并入派生函数**：否决。它比的是「界面值 vs 服务端生效值」，与「由服务端派生草稿」方向相反，合并会让两边都不好读。
+## DEC-087 统计与对比页按 DEC-070 的视觉系统重做，两页共用 de-settings 外壳（2026-11-25）
+
+**背景**：DEC-070（以及其后的 DEC-082 / DEC-084）把「配置」页重构成了语义变量 + 12 列行网格 + 分组细线的克制系统，但「统计与对比」tab 没有跟进。真机上切 tab 就能看出两页是两套设计：统计页根节点没有 `de-settings` class，整页落在样式表作用域之外；每个区块是一张自带 `rgba(128,128,128,.04)` 底色和边框的卡片，表头与单元格各自内联硬编码灰与绿，`汇总` / `裁决统计` 的指标格是另一套圆角盒子，时间范围预设是一组胶囊按钮——和配置页的线框 picker 语言相反。用户明确指出两者 UI 有差异。
+
+**决定**：
+
+- **两页共用一个 `de-settings` 外壳**：`tab === "stats"` 时根节点 className 改成 `de-settings de-stats`；`de-stats` 只是统计页专属规则的作用域标记。插件市场链接与 tab 栏也改为挂 `de-settings__site-link` / `de-settings__tabs` 类名，去掉 `S.siteLink` / `S.tabBar` / `S.tab()` 的内联色值。共享令牌（`--de-space-*` / `--de-border` / `--de-accent` / `--de-text` / `--de-muted`）的入口从此只有一个。
+- **区块节奏与配置页一致**：新增 `statsSection` / `statsMetric` / `statsNotice` / `statsTable` 四个纯渲染构件（26 分片顶部）。区块用 `.de-stats__section`，相邻块之间一条 `--de-border` 顶边细线（和配置页 `.de-cfg__section + .de-cfg__section` 同一条规则），不再各自画卡片；标题是 `.de-stats__title`，解释文字是 `.de-stats__sub` / `.de-stats__hint` / `.de-stats__meta`，层级靠字号、字重和留白承担。
+- **离散控件语言统一**：时间范围预设从 `S.tabItem(active)` 胶囊改成 `button[aria-pressed]` 线框按钮组 `.de-stats__presets`，与配置页的 provider / 模型 / 密钥保存位置 picker（DEC-082 / DEC-084）视觉一致：选中态由样式源用 `--de-accent` 反色绘制，`aria-pressed` 承担语义。图例按钮加 `de-stats__legend` 类名以便与预设按钮区分（两者都是 `button[aria-pressed]`）。
+- **表格与指标格只走类名**：表头 `.de-stats__th`、单元格 `.de-stats__td`、名称列 `--name`、节省列 `--saved`；裁决计数改用 `statsMetric` + `tone`（allow/ask/reject 的语义色由 CSS 从 `--dsw-alias-label-*` 取），不再在渲染函数里写 `#7dd3a0` / `#f5b26b` / `#e8797f`。
+- **提示条分三种语气**：`.de-stats__notice` 中性说明、`.de-stats__notice--warn` 误读警告（无观察模式记录 / 含历史推算数据）、`.de-stats__notice--error` 读取失败与渲染失败。旧的错误红框卡片与虚线脚注框消失。
+- **删除双重实现**：bundle 里 `S.statsTable` / `S.statsTh` / `S.statsTd` / `S.statsNameTd` / `S.savedTd` / `S.statsCards` / `S.statsCard*` / `S.tabBar` / `S.tab()` / `S.tabItem` / `S.statsWrap` / `S.siteLink` / `S.chartTrendBlock` / `S.chartTrendLabel` 这些键全部不再使用，从分片里删除；配置页的真实来源始终是 `lib/client.config.css`，改那里才生效。`S.statsNote` 保留给会话里的「决策」视图（它不在 de-settings 作用域内）。
+- **i18n 随行补齐**：新增区块标题「汇总」→ Summary、「走势」→ Trend、「口径说明」→ Method，避免英文界面残留中文。
+
+**为什么**：
+
+- **样式作用域是根 class 决定的**：配置页的整套视觉都写在 `.de-settings ...` 后代选择器下，统计页不挂这个 class 就等于主动退出样式系统；只改统计页内部的 CSS 而不统一外壳，tab 栏和链接仍是另一套颜色，用户切 tab 的割裂感不会消失。
+- **两处定义同一套控件必然漂移**：DEC-082 / DEC-084 已经把 picker 的语言定为线框按钮，统计页再保留胶囊预设按钮，用户要在同一面板里学两种控件语义。共用一个 CSS 规则也避免以后改一处忘另一处。
+- **渲染函数里的 hex/rgba 是主题切换的隐患**：宿主浅色/深色主题靠 `--dsw-alias-*` 别名切换，任何内联色值都会盖过它——旧统计页的浅灰卡片在浅色主题下几乎与背景同色，绿色节省数字在深色主题下又过亮。颜色语义下放给 CSS 是唯一能两主题都对的做法。
+- **四个小构件只负责摆放，不碰口径**：统计数字怎么算全部在服务端（lib/stats.js），前端重排只改 DOM 结构，不动任何计算、文案、条件分支——把视觉重构限制在「怎么摆」，回归面最小。
+
+**被否决的方案**：
+
+- **只把统计页的 rgba 换成语义变量、保留卡片结构**：否决。两页的根本差异是层级与节奏（卡片 vs 细线分组），换色不改结构仍然一眼看出是两套设计。
+- **保留 `de-settings` 但给统计 tab 单独再写一份 CSS 变量**：否决。那是两份令牌各自漂移，DEC-070 立「唯一可编辑样式源」的意义就没了。
+- **把时间范围改成 `<select>` 下拉**：否决。DEC-082 的教训是下拉把「有哪些、选了谁」藏起来，和「一眼看清」的目标冲突。
+- **改产物 `lib/client.js` 而不是分片**：否决。DEC-083 之后产物由 `node scripts/build-client.mjs` 生成，直接改产物会在 `build-client --check` 里判为漂移。
+
+**验证**：
+
+- 先写 `test/stats-design.test.js` 7 条设计验收（外壳 class、区块节奏、预设按钮语义、零内联硬编码配色、CSS 令牌、类名化的指标/表格/通知），实现前 **7/7 红**（失败原因均为行为缺失：根节点无 `de-settings`、无 `de-stats__section`、无 `aria-pressed` 预设、仍有 rgba/hex、类名计数器为 0），实现后 **7/7 绿**。
+- `node --test test/`：**930/930 通过**（基线 923 + 新增 7）。红→绿途中暴露的 3 类回归全部修掉：新增区块标题漏登记英文（i18n 覆盖测试红）、图例按钮与时间范围预设同为 `button[aria-pressed]` 被测试混选（给图例加 `de-stats__legend` 类名并在测试里过滤）、英文界面残留中文。
+- `node scripts/verify-wiring.mjs` 全部通过；`node scripts/build-client.mjs --check` 无漂移；`node --check lib/client.js` 通过。
+- 视觉核对：用无头 Chrome 分别渲染两页静态快照截图，确认 tab 下划线、分组细线、按钮与表格字体一致（临时脚本已删，不入仓库）。
+- 所有改动分片均 ≤ 500 行（最大 392 行）。
+
+**改动文件**：`lib/client.config.css`（统计页样式区 + 共享外壳规则）、`lib/client-src/26-stats-tab-props.js`（四个构件 + 标题/范围/汇总重写）、`27-stats-tab-trend.js`、`28-stats-tab-verdicts.js`、`29-stats-tab-breakdown.js`（区块类名化）、`25-chart-render-savings.js`（渲染失败壳）、`24-chart-render-ranking.js`（图例类名）、`17-decision-table.js`（排序表头）、`38-config-page-render.js`（共用外壳）、`10-` / `11-` / `12-` / `13-styles-*.js`（删双重实现）、`03-i18n-stats-dictionary.js`（三个区块标题）、`lib/client.js`（构建产物）、`test/stats-design.test.js`（新增）、`test/client-ui.test.js`（图例按钮过滤）、`DECISIONS.md`。
+
+
 
 ## DEC-084 模型 / 密钥保存位置 picker 同样改成 grid 线框按钮（2026-11-25）
 
