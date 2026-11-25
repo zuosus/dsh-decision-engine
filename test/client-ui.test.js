@@ -939,6 +939,116 @@ test("状态未加载时思考模式下拉仍有兜底选项", async () => {
   assert.deepEqual(options, ["never", "auto", "always"]);
 });
 
+// ------------------------------------------- 匿名统计档位必须回显生效值
+//
+// 背景（用户反馈，长期存在）：配置页把「匿名统计」改成 off / install 后，
+// 底部显示「已保存」，config.yml 也确实写对了；但退出配置页再进来，下拉
+// 又回到 daily。改动的值没丢，丢的是**回显**：页面首屏与服务端状态回来时
+// 各自手写了一份「由 /status 派生草稿」的表，其中都漏了 telemetryLevel，
+// 于是控件读到的永远是兜底值 daily；同一份样式还让『保存后草稿』那一处
+// 有这一项，于是只有「刚点完」那一小段时间是对的。
+//
+// 这一组盯的不变量：**控件显示的就是服务端生效的档位**。
+
+test("匿名统计下拉回显服务端的档位（不是兜底的 daily）", async () => {
+  const { tree } = await render(stateWith({ telemetryLevel: "off" }));
+  const row = rowByField(tree, "telemetryLevel");
+  assert.ok(row !== undefined, "配置页没有「匿名统计」这一行");
+  const select = findNode(row, (item) => item.type === "select");
+  assert.ok(select !== undefined, "「匿名统计」行里没有下拉");
+  assert.equal(
+    select.props.value,
+    "off",
+    "下拉必须显示服务端生效的档位；落到 daily 就是「关掉的隐私开关看起来又开着」",
+  );
+  // 选项顺序沿用服务端下发的清单，不因回显而变。
+  const options = select.children
+    .filter((child) => child !== null && typeof child === "object" && child.type === "option")
+    .map((child) => child.props.value);
+  assert.deepEqual(options, ["off", "install", "daily"]);
+});
+
+test("匿名统计的说明文字跟着回显的档位走（不是只看下拉）", async () => {
+  // 只把 value 改对还不够：说明文字是另一处独立的 `draft.telemetryLevel`
+  // 判断，两边不一致时用户会读到「每天上报一次」却看到下拉是 off。
+  const off = collectText(rowByField((await render(stateWith({ telemetryLevel: "off" }))).tree, "telemetryLevel")).join("\n");
+  assert.ok(off.includes("已关闭"), `off 档应说明不联网，实际：${off}`);
+  const install = collectText(rowByField((await render(stateWith({ telemetryLevel: "install" }))).tree, "telemetryLevel")).join("\n");
+  assert.ok(install.includes("仅首次"), `install 档应说明仅首次上报，实际：${install}`);
+});
+
+test("状态未加载时匿名统计下拉仍在，且落到 daily 兜底", async () => {
+  // 兜底值只在「服务端还没回话」时出现，这一条把它钉住：修回显不能把兜底删掉，
+  // 否则 status 失败时这一行会是个空下拉（value 为 undefined）。
+  const { tree } = await render(null);
+  const select = findNode(rowByField(tree, "telemetryLevel"), (item) => item.type === "select");
+  assert.ok(select !== undefined, "status 未返回时下拉不应消失");
+  assert.equal(select.props.value, "daily");
+});
+
+test("回显错了会连带污染 patch：改别的开关不该把 telemetryLevel 写回 daily", async () => {
+  // 这条是回显 bug 的**真实代价**，不只是「看着不对」：patch 里的
+  // telemetryLevel 取自草稿（`?? "daily"`），草稿没有这一项时就是 daily。
+  // 于是用户改任何一个无关开关，都会把 `telemetryLevel: daily` 一起提交，
+  // 服务端照写——他已经关掉的隐私开关被一次无关的保存悄悄打开。
+  const { tree } = await render(stateWith({ telemetryLevel: "off", enabled: false }));
+  const toggleButton = toggleOfRow(tree, "启用守卫");
+  assert.ok(toggleButton !== undefined && toggleButton !== null, "没有找到「启用守卫」开关按钮");
+
+  const stub = stubFetch();
+  try {
+    toggleButton.props.onClick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  } finally {
+    stub.restore();
+  }
+
+  const configCall = stub.calls.find((item) => item.url.endsWith("/api/decision-engine/config"));
+  assert.ok(configCall !== undefined, `应 PUT /config，实际请求：${stub.calls.map((c) => c.url).join(", ")}`);
+  const body = JSON.parse(configCall.init.body);
+  assert.equal(
+    body.telemetryLevel,
+    "off",
+    `patch 必须带上生效档位 off，否则会静默改回 daily，实际：${configCall.init.body}`,
+  );
+});
+
+test("草稿只能由 draftFromStatus 派生：不许再手写第二份字段表", () => {
+  // 这条是「匿名统计回显回落到 daily」的结构性守卫。
+  //
+  // 根因不是某一格拼错，而是**同一份派生写了三份**（首屏兜底 / refresh /
+  // 保存成功后），每加一个配置项就要在三处同时补，漏一处就出事：
+  //   - 漏在 refresh / 首屏 → 控件显示兜底值（用户看到的 bug）；
+  //   - 漏在 applyServerState → 保存成功后开关自己弹回去。
+  // 把三处收敛成 `draftFromStatus` 之后，用静态比对钉住「只有一处」，
+  // 否则下一次改动又会有人在某处手抄一份表回来。
+  const source = readFileSync(new URL("../lib/client.js", import.meta.url), "utf8");
+  const code = source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/.*$/gm, "$1");
+
+  // 派生实现只该有一处；三处调用点（首屏 / refresh / applyServerState）。
+  const implementations = code.match(/function\s+draftFromStatus\s*\(/g) ?? [];
+  assert.equal(implementations.length, 1, "draftFromStatus 只该有一个实现");
+  const callSites = code.match(/draftFromStatus\(/g) ?? [];
+  assert.equal(
+    callSites.length,
+    4,
+    `应有 4 处：实现 1 + 首屏兜底 / refresh / 保存成功后各 1，实际 ${callSites.length}`,
+  );
+
+  // 手写的派生表一定带 `mode ?? "shadow"`：除实现与 patch 比较表之外，
+  // 再有第三处就说明有人又抄了一份。
+  const shadowDefaults = code.match(/\?\?\s*"shadow"/g) ?? [];
+  assert.equal(
+    shadowDefaults.length,
+    2,
+    `"shadow" 兜底应只出现在 draftFromStatus 与 patchDiffersFromServer，实际 ${shadowDefaults.length} 处`,
+  );
+
+  // telemetryLevel 的兜底 `"daily"` 只允许出现在「status 未加载」的 view 兜底里。
+  const dailyLiterals = code.match(/telemetryLevel:\s*"daily"/g) ?? [];
+  assert.equal(dailyLiterals.length, 1, `telemetryLevel 的 daily 兜底只该有一处，实际 ${dailyLiterals.length} 处`);
+});
+
 // ------------------------------------------- 密钥来源必须显示「真实来源」
 
 test("keyStorage=config 时显示配置文件的字段名，不显示凭据变量名", async () => {
