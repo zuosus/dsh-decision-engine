@@ -261,6 +261,20 @@ test("密钥保存位置 picker 改成标题与说明之间的 grid 按钮", asy
   assert.ok(text(buttons[0]).includes(".credentials.yaml"), "默认应高亮 .credentials.yaml");
 });
 
+test("决策模型参与点三态按钮有 scoped CSS 框线与选中态（DEC-085）", () => {
+  // 回归：DEC-070 的通用 `button:not([aria-pressed]) { background: transparent !important }`
+  // 覆盖了三态按钮的内联选中色，按钮本身又没有真正的边框——三态成了一排纯文本。
+  // 现在三态按钮带 de-cfg__seg / de-cfg__seg-item 类与 aria-pressed，样式交给 CSS。
+  assert.match(css, /\.de-settings\s+\.de-cfg__seg\b[^{}]*\{[^{}]*display\s*:\s*inline-flex\b/,
+    "三态按钮容器要有 scoped inline-flex 布局规则");
+  assert.match(css, /\.de-cfg__seg-item\b[^{}]*\{[^{}]*border\s*:\s*1px\s+solid\b/,
+    "三态按钮要有可见边框（不能只靠内联 border:none）");
+  assert.match(css, /\.de-cfg__seg-item\[aria-pressed="true"\]/,
+    "选中态必须由 aria-pressed=true 在 scoped CSS 里画出来");
+  assert.match(css, /\.de-cfg__seg-item\[aria-pressed="true"\]\[data-tone="enforce"\]/,
+    "生效模式要有自己的强调色（沿用原来的绿/琥珀语义）");
+});
+
 test("failed autosave is readable inside config root, retryable, and announced", async () => {
   const failure = "未保存：磁盘写入失败";
   const root = await render({ 18: { error: failure } });

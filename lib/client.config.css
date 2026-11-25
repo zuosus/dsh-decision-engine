@@ -108,6 +108,41 @@
   font-size: 10px; opacity: .7; white-space: nowrap;
 }
 .de-settings .de-cfg__provider-grid button[aria-pressed="true"] .de-cfg__provider-grid-key { opacity: .9; }
+/* 决策模型参与点的三态分段（DEC-085）。
+ * 选中态必须走 aria-pressed：上面的通用
+ * button:not([aria-pressed]) { background: transparent !important }
+ * 会吃掉任何没带该属性的按钮的内联背景，三态按钮以前正是这样变成
+ * 一排无框、无选中反馈的纯文本的。带 aria-pressed 后这条规则不再命中，
+ * 由这里的 scoped CSS 画框和选中态。 */
+.de-settings .de-cfg__seg {
+  display: inline-flex; align-items: center; flex-shrink: 0;
+  gap: 2px; padding: 2px;
+  border: 1px solid var(--de-border); border-radius: 7px;
+}
+.de-settings .de-cfg__seg-item {
+  padding: 3px 8px;
+  border: 1px solid transparent; border-radius: 5px;
+  background: transparent; color: var(--de-muted);
+  font: inherit; font-size: 11px; line-height: 1.3; white-space: nowrap;
+  min-height: 26px; cursor: pointer;
+  transition: color var(--de-transition), background-color var(--de-transition);
+}
+.de-settings .de-cfg__seg-item:hover { background: var(--de-surface); color: var(--de-text); }
+.de-settings .de-cfg__seg-item[aria-pressed="true"] {
+  color: var(--dsw-alias-state-business-contrast, var(--de-surface, Canvas)) !important;
+  border-color: var(--de-accent) !important;
+  background: var(--de-accent) !important;
+}
+.de-settings .de-cfg__seg-item[aria-pressed="true"][data-tone="enforce"] {
+  background: rgba(74, 222, 128, .35) !important;
+  border-color: rgba(74, 222, 128, .6) !important;
+  color: var(--de-text) !important;
+}
+.de-settings .de-cfg__seg-item[aria-pressed="true"][data-tone="observe"] {
+  background: rgba(245, 158, 11, .32) !important;
+  border-color: rgba(245, 158, 11, .55) !important;
+  color: var(--de-text) !important;
+}
 .de-settings .de-cfg__control {
   grid-column: span 5; display: flex; align-items: center;
   justify-content: flex-end; min-width: 0; gap: var(--de-space-1);

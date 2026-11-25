@@ -3594,6 +3594,54 @@ test("能力按选中模型取值：同一 provider 换到不支持的模型后�
   assert.equal(select.props.disabled, true, "选中的模型声明 thinkMode:false 就该禁用");
 });
 
+test("决策模型参与点：三态按钮有 aria-pressed，当前模式由 CSS 高亮（DEC-085）", async () => {
+  // 回归：DEC-070 的 config.css 用
+  // `button:not([aria-pressed]) { background: transparent !important }` 覆盖了
+  // S.segItem 的内联选中色，按钮又没有边框——三态按钮在界面上成了纯文本，
+  // 点下去也看不出选中态。修法是让三态按钮携带 aria-pressed（当前模式为
+  // true），由 scoped CSS 画框与选中态，与 provider/模型 picker 同一套语义。
+  const { tree } = await render(stateWith({}), {
+    slots: { [SLOTS.decisions]: decisionsFixture },
+  });
+  const guardBody = bodyOf(sectionsOf(tree)[1]);
+  assert.ok(guardBody !== undefined, "守卫行为分组的正文节点缺失");
+
+  // 只在「守卫行为」分组里找三态按钮：provider / 模型 / tolerance 的按钮都带
+  // aria-pressed，全局扫会把它们算进来。三态按钮的容器日后会带一个稳定的
+  // de-cfg__seg 类，正好用它限定范围。
+  const groups = [];
+  (function walk(node) {
+    if (node === null || node === undefined || typeof node !== "object") return;
+    if (Array.isArray(node)) return node.forEach(walk);
+    if (node.type === "div" && (node.props?.className ?? "").split(/\s+/).includes("de-cfg__seg")) {
+      groups.push(node);
+    }
+    (node.children ?? []).forEach(walk);
+  })(guardBody);
+  assert.equal(groups.length, 2, `每个决策点应有一组三态按钮，实际 ${groups.length} 组`);
+
+  for (const group of groups) {
+    const buttons = group.children.filter((child) => child?.type === "button");
+    assert.equal(buttons.length, 3, "每个决策点应有 关闭 / 观察 / 生效 三个按钮");
+    const pressed = buttons.filter((button) => button.props["aria-pressed"] === true);
+    assert.equal(pressed.length, 1, "恰好一个模式应被标成 aria-pressed=true");
+    for (const button of buttons) {
+      assert.ok(Object.hasOwn(button.props, "aria-pressed"),
+        "三态按钮必须带 aria-pressed，否则 CSS 的 !important 规则会吃掉内联选中色");
+      assert.ok(Object.hasOwn(button.props, "className") &&
+        button.props.className.split(/\s+/).includes("de-cfg__seg-item"),
+        "三态按钮要有 de-cfg__seg-item 类，供 scoped CSS 画框与选中态");
+    }
+  }
+
+  // 模式语义保持不变：authorize 生效 → 第三个按钮选中；retrieval 生效 → 第三个也选中。
+  const labels = groups.map((group) =>
+    group.children.filter((child) => child?.type === "button")
+      .find((button) => button.props["aria-pressed"] === true)
+      .children.join(""));
+  assert.deepEqual(labels, ["生效", "生效"], "fixture 里两个点都是 enforce，应高亮「生效」");
+});
+
 test("老服务端不下发 modelCapabilities 时，回落到 provider 级能力（行为不变）", async () => {
   const catalog = providerCatalog().map((item) => {
     if (item.id !== "decisionmodels") return item;

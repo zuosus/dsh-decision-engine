@@ -2,6 +2,25 @@
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
 
+## DEC-086 决策模型参与点三态按钮：以 aria-pressed 逃出通用 !important 覆盖，样式交回 CSS（2026-11-25）
+
+**背景**：用户报告配置页「决策模型参与点」不显示按钮位置，点按也不显示。实测（Chrome computed style，2026-11-25）：9 个三态按钮的 `border=0px none`、`background=rgba(0,0,0,0)`、`aria-pressed=null`；内联 `style` 里明明有选中色和 border，却全被 DEC-070 引入的通用规则 `.de-settings button:not(.de-cfg__section-hd):not([aria-pressed]):not(.de-settings__tabs button) { border-color: var(--de-border) !important; background: transparent !important; color: var(--de-text) !important }` 吃掉，而 `S.segItem` 自己又写了 `border: none`。于是三态成了一排无框、无选中反馈的纯文本。DEC-070 的意图是给普通按钮统一的线框外观，但它把所有没有 `aria-pressed` 的按钮都当成了普通按钮——包括这个原本靠内联色表达选中态的三态分段。
+
+**决定**：
+
+- **三态按钮携带 `aria-pressed`**（当前模式 `true`，其余 `false`）：与 provider / 模型 / 密钥存储 picker 同一套语义。这样 DEC-070 的通用 `!important` 规则不再命中，按钮的视觉彻底由 scoped CSS 承担，不再与通用规则抢 `!important`。
+- **容器加 `de-cfg__seg` 类、按钮加 `de-cfg__seg-item` 类与 `data-tone`**：`client.config.css` 新增 scoped 规则——容器 inline-flex + 统一边框；按钮 1px 线框、未选中用 `--de-muted`；选中态 `[aria-pressed="true"]` 用 `--de-accent` 反色，`[data-tone="enforce"]` 绿、`[data-tone="observe"]` 琥珀，保留原来的语义配色。分片 36 里原来的 `S.segItem(...)` 内联样式整段删除（它的 `border: none` 和内联色正是被覆盖的那部分）。
+- **`S.seg` / `S.segItem` 的旧内联定义保留在 `client-src/10` 作为历史**：`S.seg` 仍作为容器内联布局使用；`S.segItem` 已无调用点，但删它需要动 10 号分片并重建，收益为零，留着不影响（没有第二处使用）。
+- **红→绿**：两条新测试先红——`client-ui.test.js` 断言每组三态按钮都带 `aria-pressed` / `de-cfg__seg-item` 且恰好一个 `true`（当时 0 组）；`config-design.test.js` 断言 `client.config.css` 有 scoped 框线与 `[aria-pressed="true"]` 选中态（当时缺）。实现后两条转绿；全套 925/925、`verify-wiring` 全绿。
+
+**为什么**：
+
+- **`aria-pressed` 是这套设计里的“逃生口”**：DEC-082/084 的 picker 早就靠它逃出 DEC-070 的通用规则，三态按钮漏了这一点才坏。补上它不是新增语义，而是让这个控件遵守同一套约定。
+- **不让 CSS 与内联样式打 `!important` 军备竞赛**：继续在内联色上加 `!important` 只是把冲突推到下一层；把视觉交给样式源、把状态交给 `aria-pressed`，才是 DEC-070 当初定的方向。
+- **配色语义不变**：绿=生效、琥珀=观察沿用 `S.segItem` 原来的 rgba 值，用户不会看到陌生的新配色。
+
+**改动文件**：`lib/client-src/35-config-page-guard-items.js`、`lib/client-src/36-config-page-record-items.js`、`lib/client.config.css`、`lib/client.js`（重建产物）、`test/client-ui.test.js`、`test/config-design.test.js`。
+
 ## DEC-085 「由 /status 派生草稿」收敛成唯一一处 draftFromStatus：修匿名统计回显（2026-11-25）
 
 **背景**：用户反馈配置页「匿名统计」下拉显示错误，且「一直存在，但仅限于 UI」：改成 off / install 后实时保存确实写进了 config.yml，退出配置页再进来又显示 daily。查下来根因不是某一格拼错，而是**同一份「由 /status 派生草稿」的字段表写了三份**——首屏兜底（`draftState ?? {...}`）、`refresh()`、保存成功后的 `applyServerState()`。前两处都漏了 `telemetryLevel`，控件读到的因此永远是兜底值 `daily`；只有第三处有这一项，于是「刚点完那一小段时间」是对的，正好对上用户描述的「保存成功但重新进入就回去」。
@@ -25,7 +44,6 @@
 
 - **只在前两处派生表里补一行 `telemetryLevel`**：否决。它能让这次测试变绿，但三份字段表仍然并存，下一个新配置项照样漏——而且漏在哪一处，表现各不相同（显示错 / 保存后回弹）。
 - **把 `patchDiffersFromServer` 也并入派生函数**：否决。它比的是「界面值 vs 服务端生效值」，与「由服务端派生草稿」方向相反，合并会让两边都不好读。
-
 
 ## DEC-084 模型 / 密钥保存位置 picker 同样改成 grid 线框按钮（2026-11-25）
 
