@@ -2,6 +2,28 @@
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
 
+## DEC-088 人工审核比例控件重做：去掉贯穿圆点的横线，配色交回宿主语义令牌（2026-11-25）
+
+**背景**：用户指出「人工审核比例」UI 不够优雅——配色用的是硬编码的 `#818cf8` 圆点 / `#6366f1` 实心，且一条横线穿过所有未选中圆点。两处问题都在 `ToleranceSlider` 的内联样式里：轨道 `.toleranceRail` 绝对定位画一条灰线，四个档位是「圆点 + 标签」，线从圆点正中穿过。这个控件在配置页与「决策」会话页共用，后者不在 `.de-settings` 外壳里，走不到配置页的样式源。
+
+**决定**：
+
+- **四档改成线框分段按钮**：`.de-tolerance__stops` 用 grid 排四个 `.de-tolerance__stop` 按钮，选中态 `aria-pressed=true` 用 `--de-accent` 反色。与 provider / 模型 / 密钥保存位置 picker（DEC-082 / DEC-084）和统计页预设（DEC-087）是同一种控件语言；圆点与轨道横线彻底删除。
+- **配色全部走宿主语义令牌**：`client.config.css` 的 `.de-tolerance` 自己定义 `--de-text` / `--de-muted` / `--de-border` / `--de-surface` / `--de-accent`，映射到 `--dsw-alias-*`。令牌挂在控件自身而非 `.de-settings` 上，于是「决策」会话页（无该外壳）也能拿到同一套值；在视图挂载时 `ensureCfgSectionCss()` 把同一份样式表注入文档（失败方向仍安全：注不上就不注）。
+- **删除旧内联样式**：`10-styles-shell-and-controls.js` 去掉 `toleranceTrack` / `toleranceRail` / `toleranceStop`，`11-styles-points-and-charts.js` 去掉 `toleranceDot` / `toleranceLabel`。渲染逻辑只保留文案、状态与回调，视觉一概下放样式源。
+- **红→绿**：新增 `test/tolerance-design.test.js` 四条验收（类名 + 单一选中、无轨道横线、源码无硬编码配色、CSS 令牌与反色规则），实现前 3/3 渲染类断言红（旧结构缺类名、残留 rail、CSS 缺规则）；实现后全绿。适配一条旧回归测试（「不塞进 rowLine」从检查 inline style 改为检查 `de-tolerance__stop` 类名 + CSS `nowrap`）与一条样式注入测试（从「全局只有一份 `<style>`」改为「每个 id 各一份」）。全套 **940/940 通过**，`verify-wiring` 与 `build-client --check` 全绿。
+
+**为什么**：
+
+- **圆点+横线的形态本身在说谎**：四档是离散选项，不是连续值；画一条线暗示「可以拖到中间」，而实际点击只能落到四档。改成独立按钮后形态与行为一致。
+- **配色必须跟随宿主主题**：硬编码的靛蓝在浅色主题下与面板的深蓝语义色不是一套，在深色主题下又过亮；`--dsw-alias-*` 是宿主唯一的明暗切换源，控件跟着它走才能两主题都对。
+- **与 picker 同语言减少学习成本**：同一个面板里 provider / 模型 / 存储 / 统计预设都是线框按钮，人工审核比例不该是第四种控件形状。
+- **令牌挂在控件自己身上**：DEC-087 让统计页靠挂 `.de-settings` 拿到令牌；本控件有一半场景在那个作用域之外，所以令牌下沉到 `.de-tolerance`，这是两处共用的最小解。
+
+**改动文件**：`lib/client-src/15-config-values-and-url.js`、`10-styles-shell-and-controls.js`、`11-styles-points-and-charts.js`、`19-decisions-view-state.js`、`35-config-page-guard-items.js`、`lib/client.config.css`、`lib/client.js`（构建产物）、`test/tolerance-design.test.js`（新增）、`test/client-ui.test.js`、`test/client-decisions-view.test.js`、`DECISIONS.md`。
+
+
+
 ## DEC-086 决策模型参与点三态按钮：以 aria-pressed 逃出通用 !important 覆盖，样式交回 CSS（2026-11-25）
 
 **背景**：用户报告配置页「决策模型参与点」不显示按钮位置，点按也不显示。实测（Chrome computed style，2026-11-25）：9 个三态按钮的 `border=0px none`、`background=rgba(0,0,0,0)`、`aria-pressed=null`；内联 `style` 里明明有选中色和 border，却全被 DEC-070 引入的通用规则 `.de-settings button:not(.de-cfg__section-hd):not([aria-pressed]):not(.de-settings__tabs button) { border-color: var(--de-border) !important; background: transparent !important; color: var(--de-text) !important }` 吃掉，而 `S.segItem` 自己又写了 `border: none`。于是三态成了一排无框、无选中反馈的纯文本。DEC-070 的意图是给普通按钮统一的线框外观，但它把所有没有 `aria-pressed` 的按钮都当成了普通按钮——包括这个原本靠内联色表达选中态的三态分段。

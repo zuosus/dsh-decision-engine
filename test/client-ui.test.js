@@ -2617,8 +2617,9 @@ test("滑块独占一整行，没被塞进 rowLine 的右半边（真机竖排�
   //
   // 因此这里断言两件事：
   //   1. 滑块**不在**任何 rowLine 容器里（它自成一块 `toleranceSection`）；
-  //   2. 四个落点各自 `minWidth: max-content` 且 `whiteSpace: nowrap`
-  //      ——这两条是「标签永不换行」的实现手段，少了任何一条就会重现竖排。
+  //   2. 四个落点都带 `de-tolerance__stop` 类，且 CSS 用 `white-space: nowrap`
+  //      钉住「标签永不换行」——DEC-088 之后样式从内联搬到了样式源，
+  //      所以这条从「检查 inline style」改成「检查类名 + 样式源」。
   const { tree } = await render(stateWith({}), {
     slots: { [SLOTS.decisions]: decisionsFixture },
   });
@@ -2653,13 +2654,16 @@ test("滑块独占一整行，没被塞进 rowLine 的右半边（真机竖排�
 
   assert.equal(stopButtons.length, 4, `应有四个落点按钮，实际 ${stopButtons.length}`);
   for (const button of stopButtons) {
-    assert.equal(button.props.style.whiteSpace, "nowrap", "落点必须禁止换行（否则中文会竖着叠成一列）");
-    assert.equal(
-      button.props.style.minWidth,
-      "max-content",
-      "落点必须用 max-content（纯 minWidth:0 会让标签逐字换行）",
+    const className = button.props.className ?? "";
+    assert.ok(
+      className.split(/\s+/).includes("de-tolerance__stop"),
+      "落点必须带 de-tolerance__stop 类，样式由 client.config.css 提供",
     );
   }
+  // CSS 里必须钉住 nowrap（DEC-088 把样式从内联搬到了样式源）。
+  const css = readFileSync(new URL("../lib/client.config.css", import.meta.url), "utf8");
+  assert.match(css, /\.de-tolerance__stop[^{}]*\{[^}]*white-space:\s*nowrap/,
+    "CSS 必须让档位标签不换行（否则中文会竖着叠成一列）");
 
   // 每个落点都不能落在 rowLine 里（那就是事故的形状）。
   for (const line of rowLineContainers) {

@@ -1774,8 +1774,14 @@ test("keyframes 只往文档里注一次；没有 document 也只是不动画、
   };
   try {
     const view = await renderDecisions({ page: ANIM_TWO });
-    assert.equal(appended.length, 1, `第一次挂载应注入一次 keyframes，实际 ${appended.length} 次`);
-    const style = appended[0];
+    // DEC-088 起这个视图还要给「人工审核比例」控件共用配置页样式源，
+    // 因此挂载会注入两份不同 id 的 <style>：入场 keyframes + 配置样式。
+    // 幂等的判据是「每个 id 各一份」，不是「总共只能有一个 <style>」。
+    assert.equal(appended.length, 2, `第一次挂载应注入两份样式，实际 ${appended.length} 次`);
+    const style = appended.find((node) => node.id === "dsh-decision-row-enter-css");
+    assert.ok(style, "缺少入场 keyframes 样式");
+    const tolStyle = appended.find((node) => node.id === "dsh-decision-engine-cfg-section-css");
+    assert.ok(tolStyle, "缺少人工审核比例控件共用的样式表");
     // id 是幂等判定的唯一依据，名字错了就等于每次都新注一个。
     assert.equal(style.id, "dsh-decision-row-enter-css", "注入的 <style> 要带固定 id");
     assert.equal(style.tagName, "STYLE", "注的必须是 <style>");
@@ -1797,19 +1803,19 @@ test("keyframes 只往文档里注一次；没有 document 也只是不动画、
     assert.notEqual(fromBg, toBg, "起始背景色与默认色必须不同（否则等于没动画）");
     assert.match(toBg, /,\s*0\s*\)|transparent/, `to 帧应褪到透明/默认色，实际：${toBg}`);
 
-    // 同一个实例里再来一轮轮询 + 一次纯界面动作：都不该再注第二个 <style>。
+    // 同一个实例里再来一轮轮询 + 一次纯界面动作：都不该再注新的 <style>。
     await view.poll(animThree());
     await view.clickTh(COL.ts);
-    assert.equal(appended.length, 1, `轮询/重绘后仍只该有一个 <style>，实际 ${appended.length} 个`);
+    assert.equal(appended.length, 2, `轮询/重绘后仍只该有两份 <style>，实际 ${appended.length} 个`);
     // 有文档可注时动画才是「有处可播」的：这一轮的新记录确实拿到了 animation。
     assert.deepEqual(view.animatedIds(), ["rec-3"]);
 
     // **再挂载一个视图实例**（reconcile 重挂 / 热重载后是全新的一份组件与模块）。
     // 幂等判定必须跨实例成立——它查的是文档，不是组件里的某个标记。
     const second = await renderDecisions({ page: ANIM_TWO });
-    assert.equal(appended.length, 1, `第二个实例挂载后仍只该有一个 <style>，实际 ${appended.length} 个`);
+    assert.equal(appended.length, 2, `第二个实例挂载后仍只该有两份 <style>，实际 ${appended.length} 个`);
     await second.poll(animThree());
-    assert.equal(appended.length, 1, "复用已注过的样式表，不是复用已断掉的动画");
+    assert.equal(appended.length, 2, "复用已注过的样式表，不是复用已断掉的动画");
     assert.deepEqual(second.animatedIds(), ["rec-3"], "第二个实例的动画照样要能播");
   } finally {
     // 必须拆掉：本文件其它用例都靠 `typeof document === "undefined"` 这条

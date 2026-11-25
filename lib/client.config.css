@@ -180,6 +180,48 @@
 }
 .de-settings .de-cfg__control button[aria-pressed] { background: var(--de-border) !important; }
 .de-settings .de-cfg__control button[aria-pressed="true"] { background: var(--de-accent) !important; }
+/* 人工审核比例（DEC-088）：四档线框分段按钮。
+ * 与 provider / 模型 picker 同一种控件语言——独立圆角框、选中反色，
+ * 不再用一条横线把四个圆点串起来（那条线穿过未选中圆点，既难看也
+ * 读不出选了谁）。颜色、边框、圆角全部走宿主语义令牌，明暗主题自动跟随。
+ *
+ * 这个控件同时出现在配置页与「决策」会话页；后者不在 .de-settings 外壳里，
+ * 所以令牌定义在 .de-tolerance 自己身上，两处都能拿到同一套值。 */
+.de-settings .de-tolerance, .de-tolerance {
+  --de-text: var(--dsw-alias-label-primary, CanvasText);
+  --de-muted: var(--dsw-alias-label-secondary, CanvasText);
+  --de-border: var(--dsw-alias-border-l2, GrayText);
+  --de-surface: var(--dsw-alias-interactive-bg-hover-solid, Canvas);
+  --de-accent: var(--dsw-alias-state-business-primary, Highlight);
+  --de-radius: 6px;
+  --de-space-1: 8px;
+  --de-transition: 150ms ease;
+  display: block;
+}
+.de-settings .de-tolerance__stops, .de-tolerance__stops {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+  gap: var(--de-space-1); margin: var(--de-space-1) 0 0; width: 100%;
+}
+.de-settings .de-tolerance__stop, .de-tolerance__stop {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 34px; padding: 4px 8px; margin: 0;
+  border: 1px solid var(--de-border); border-radius: var(--de-radius);
+  background: transparent; color: var(--de-text);
+  font: inherit; font-size: 12px; line-height: 1.3; white-space: nowrap;
+  transition: color var(--de-transition), background-color var(--de-transition),
+    border-color var(--de-transition);
+}
+.de-settings .de-tolerance__stop:hover, .de-tolerance__stop:hover {
+  background: var(--de-surface); color: var(--de-text);
+}
+.de-settings .de-tolerance__stop[aria-pressed="true"],
+.de-settings .de-tolerance__stop[aria-pressed="true"]:hover,
+.de-tolerance__stop[aria-pressed="true"],
+.de-tolerance__stop[aria-pressed="true"]:hover {
+  color: var(--dsw-alias-state-business-contrast, var(--de-surface, Canvas)) !important;
+  border-color: var(--de-accent) !important;
+  background: var(--de-accent) !important;
+}
 .de-settings .de-cfg__footer {
   border-top: 1px solid var(--de-border); padding-top: var(--de-space-2);
   margin-top: var(--de-space-2);
