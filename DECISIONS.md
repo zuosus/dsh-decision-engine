@@ -32,8 +32,22 @@
 
 **改动文件**：`lib/index.js`、`test/sandbox-escalation.test.js`、`DECISIONS.md`。
 
+## DEC-092 深色主题下原生下拉弹层白底白字：option 自带底色 + color-scheme 跟宿主（2026-11-26）
 
+**背景**：来自同项目的平行分支 `LeonhardtHUST/dsh-decision-engine`（该分支 `8238003`）。本项目与其共同祖先为 `ff75846`（1.8.3），此后各走各的；这条改动经复审确认在本项目**前置条件逐条成立**，因此按本仓库的分片结构重新落地。
 
+**根因**：不是配色没调好，而是原生 `<select>` 的弹层根本不在页面的绘制上下文里。弹层由浏览器单独绘制，它不继承页面的背景（页面是深色、弹层默认浅色 = 白），选项行能用的颜色只有 `option` 元素自己的 `background-color` / `color`。本面板此前只给 `select` 设了 `background: transparent; color: inherit`：收起态那一格因此贴合宿主主题、看起来完全正常——这正是 bug 藏得深的原因；但弹层里没有底色，文字又是从页面继承来的主文本色，于是深色下变成**白底白字**，只剩浏览器自己上色的高亮行可见。本项目当时全仓既无 `option` 规则、也无 `color-scheme`，三个原生下拉（端点风格、思考模式、匿名统计）都在受害面上。
+
+**决定**（两半必须同时存在）：
+
+1. **选项自带不透明底色与主文本色**：`.de-settings select option{background-color:var(--dsw-alias-bg-layer-2,Canvas);color:var(--dsw-alias-label-primary,CanvasText)}`。fallback 用 Canvas / CanvasText 这一对系统色——浏览器保证它们互相有对比度，令牌改名或缺失时最坏是「不贴合主题」，绝不退化成「看不见」。只写 `var()` 不给 fallback 就是这次 bug 的形态，因此测试把两处 fallback 一起钉住。选 `bg-layer-2` 而不是 `bg-base`：宿主自己把 layer-2 用在浮层上，弹层正是一层浮在页面上的东西。
+2. **`color-scheme` 跟着宿主主题走**：弹层的外框、圆角边缘与滚动条按 `color-scheme` 绘制，只补选项颜色会得到「深色行 + 白色外框」的半吊子效果。写成 `.de-settings select{color-scheme:var(--de-select-scheme,light dark)}`，变量由渲染时写进 `de-settings` 根节点。
+
+**主题探测**：`hostColorScheme()` 造一个 0 尺寸探针挂上宿主的 `--dsw-alias-bg-base`，读**计算值**算亮度，返回 `dark` / `light` / `null`。**刻意不用 `prefers-color-scheme`**：那个只反映操作系统偏好，用户可以在 DSH 里单独切主题，两者不一致时它就会答错——而答错的后果正是这次要修的那个不可读状态。探不到（Node 渲染测试没有 `document`、宿主未定义该令牌、探针被 CSP 拦下）就返回 `null`，调用方**不写这个变量**，让 CSS 的 `light dark` 兜底交回浏览器：不比现状更糟，也绝不猜一个深浅。
+
+**与 fork 的差异**：fork 的规则前缀是 `.de-cfg`、样式表是它自己的 `PANEL_CSS`；本项目是 `.de-settings`、CSS 源在 `lib/client.config.css`（构建期嵌入 `CFG_SECTION_CSS`）。因此只搬规则与探针逻辑，选址按本项目结构。另注意 `client.config.css` 有构建约束：**不允许出现反引号与 `$`**（要嵌进模板字符串），注释里也不能写，测试与 `node scripts/build-client.mjs` 会当场报错。
+
+**验证**：`test/client-ui.test.js` 钉住三条规则（`color-scheme` 变量与两处 option 的 fallback 底/文字色），只写一半会红。探针在 Node 渲染测试里返回 `null`，渲染走 `S.wrap` 原样，既有断言不受影响。
 
 ## DEC-090 连续慢调用在「统计与对比」tab 上报警：tab 图标 + 内容顶部横幅（2026-11-26）
 

@@ -2667,6 +2667,28 @@ test("滑块独占一整行，没被塞进 rowLine 的右半边（真机竖排�
   assert.match(css, /\.de-tolerance__stop[^{}]*\{[^}]*white-space:\s*nowrap/,
     "CSS 必须让档位标签不换行（否则中文会竖着叠成一列）");
 
+  /**
+   * 深色主题下原生 select 弹层的两条规则（DEC-091）。
+   *
+   * 防的是「只补一半」：只给 option 上色会得到「深色行 + 白色外框」，
+   * 只设 color-scheme 会得到白底白字；两条必须同时存在。
+   *
+   * 同时钉住 fallback：只写 var(--x) 不给兜底色，宿主令牌一旦缺失就
+   * 退化成这次 bug 的形态（不可读），所以两处都必须带 Canvas / CanvasText。
+   */
+  assert.match(css, /\.de-settings select\s*\{[^}]*color-scheme:\s*var\(--de-select-scheme,\s*light dark\)/,
+    "select 必须跟随宿主主题的 color-scheme（弹层外框与滚动条按它绘制）");
+  assert.match(
+    css,
+    /\.de-settings select option\s*\{[^}]*background-color:\s*var\(--dsw-alias-bg-layer-2,\s*Canvas\)/,
+    "option 必须有自带的不透明底色，且 fallback 到 Canvas",
+  );
+  assert.match(
+    css,
+    /\.de-settings select option\s*\{[^}]*color:\s*var\(--dsw-alias-label-primary,\s*CanvasText\)/,
+    "option 必须有主文本色，且 fallback 到 CanvasText",
+  );
+
   // 每个落点都不能落在 rowLine 里（那就是事故的形状）。
   for (const line of rowLineContainers) {
     const texts = collectText(line).join("");

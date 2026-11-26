@@ -199,6 +199,28 @@
 .de-settings input[type="password"], .de-settings input[type="url"] {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace !important;
 }
+/* 原生 <select> 的弹层配色（DEC-091）。
+ *
+ * 弹层由浏览器单独绘制：它不继承页面的透明背景，也不吃 color: inherit。
+ * 上面那条规则只设了收起态的透明底 + 继承文字色，收起态贴合宿主主题、
+ * 看起来完全正常——这正是 bug 藏得深的原因。但弹层里没有底色，文字又是
+ * 继承来的主文本色，深色主题下就是**白底白字**，只剩浏览器自己上色的
+ * 高亮行可见。
+ *
+ * 两半必须同时存在：
+ * 1. option 自带不透明底色与主文本色。fallback 用 Canvas / CanvasText 这
+ *    一对系统色——浏览器保证它们互相有对比度，令牌改名或缺失时最坏是
+ *    「不贴合主题」，而不是「看不见」。只写 var() 不给 fallback 会退化成
+ *    这次的 bug 形态。
+ * 2. color-scheme 跟着宿主主题走：弹层的外框、圆角边缘与滚动条按它绘制，
+ *    只补选项颜色会得到「深色行 + 白色外框」的半吊子效果。变量由渲染时
+ *    写进 .de-settings 根节点（见 hostColorScheme）；探不到就退回
+ *    light dark，交回浏览器按系统偏好判。 */
+.de-settings select { color-scheme: var(--de-select-scheme, light dark); }
+.de-settings select option {
+  background-color: var(--dsw-alias-bg-layer-2, Canvas);
+  color: var(--dsw-alias-label-primary, CanvasText);
+}
 .de-settings input[aria-invalid="true"] { border-color: var(--dsw-alias-state-error-primary, Mark) !important; }
 .de-settings button { cursor: pointer; transition: color var(--de-transition), background-color var(--de-transition); }
 .de-settings button:not(.de-cfg__section-hd):not([aria-pressed]):not(.de-settings__tabs button) {
