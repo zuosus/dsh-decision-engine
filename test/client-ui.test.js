@@ -3695,3 +3695,35 @@ test("老服务端不下发 modelCapabilities 时，回落到 provider 级能力
   const select = findNode(rowByField(tree, "thinkMode"), (n) => n.type === "select");
   assert.equal(select.props.disabled, true, "没有模型级表时按 provider 级能力禁用");
 });
+
+test("配置页把「端点要求」渲染出来（否则开了开关没生效会无从解释）", async () => {
+  // turnStop 依赖端点回答边界问句；不满足时整点降级、不续轮。用户必须在
+  // 打开这个开关之前就看到这条要求，而不是事后对着「降级」记录猜原因。
+  //
+  // 夹具刻意只用「带 requirement 的点」和「不带的点」各一个：既能断言
+  // 要求被渲染，也能断言没有该字段的点不会凭空多出一行空提示。
+  const decisions = {
+    ...decisionsFixture,
+    points: [
+      {
+        id: "turnStop",
+        label: "轮次延续",
+        mode: "off",
+        available: true,
+        mounted: true,
+        gate: "同一轮最多续一次（steer 次数上限），避免无限自续",
+        requirement: "端点必须回答「这一轮是否在等用户」这一问；端点不支持时本点整点降级",
+      },
+      { id: "retrieval", label: "检索必要性", mode: "enforce", available: true, mounted: true },
+    ],
+  };
+  const { tree } = await render(stateWith({}), { slots: { [SLOTS.decisions]: decisions } });
+  const text = JSON.stringify(tree);
+  assert.ok(text.includes("端点要求"), "必须渲染端点要求那一行");
+  assert.ok(text.includes("端点必须回答"), "要求正文要说明「端点不答边界问句时整点降级」");
+  assert.equal(
+    (text.match(/端点要求/g) ?? []).length,
+    1,
+    "没有 requirement 的点不该多出一行空提示",
+  );
+});

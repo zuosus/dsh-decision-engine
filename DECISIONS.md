@@ -30,8 +30,39 @@
 
 **改动文件**：`lib/client-src/16-config-patch-and-format.js`、`lib/client.js`（构建产物）、`test/danger-approval-save.test.js`（新增）、`DECISIONS.md`。
 
+## DEC-094 `turnStop` 的边界问句缺席时整点降级，不照 fork 的「缺席即 stop」（2026-11-27）
 
+**背景**：`turnStop` 的边界问句 `awaiting_user`（「这一轮是否在等用户」）在旧/兼容端点上可能根本不返回。原来的口径是 fail-open：缺席 = 判不出来 = 不据此改变行为，直接往下走 `unfinished` 判据。
 
+**这条口径有个致命形状**：模型在「你要选 A 还是 B？」这类轮次上，对 `unfinished` 必然给高分（确实没干完）。实测 `unfin 0.83 / value 0.39` 双双过线 → `continue`，插件注入 steer 把轮次撑下去——**用一个小模型的猜测把用户的选择权顶掉**。正是 DEC-045 要防的事，只是从「判错」换成了「判不出来还硬判」。
+
+**决定**：缺席（含形状不合格）→ `parse` 返回 `{ degraded: "turnstop-boundary-question-unavailable" }`，整点降级。
+
+三条路的对比与取舍：
+
+| 路子 | 行为 | 为什么没选 / 选 |
+| --- | --- | --- |
+| 保持 fail-open | 照常判，可能误续轮 | 就是上面那个致命形状 |
+| 照 fork：缺席即 `stop` | 不续轮 | `stop` 是**裁决**——会写进决策历史、计入放行/询问/拦截构成，等于告诉用户「我判断过了，该停」。实际发生的是「这一问根本没答案」，把协议不兼容伪装成裁决结果，统计与页面都被这条假裁决污染 |
+| **整点降级（本决定）** | 不续轮、不留裁决、记为未裁决 | 行为上安全，记录上诚实；端点补上后自动恢复 |
+
+**配套三件事**（缺一件这个决定就落不了地）：
+
+1. **引擎要认降级信号**：`parse` 可以返回 `{ degraded: "<reason>" }`，与 `answer-shape-mismatch` 共用记录路径——`action: "degraded"`、遥测 detail 可读、统计落「未裁决」。
+2. **别每轮重复烧钱**：记住这个端点跑不了本点，后续轮次**连请求都不发**。签名 `provider|baseUrl|model` 一变立即重试；另有 30 分钟 TTL 自愈，不要求用户改配置再改回来。本插件的存在意义就是省 token，拿钱去反复确认一件已知的事是最不该有的浪费。
+3. **界面上要能解释**：新增「端点要求」一行（`decision-points.js` 的 `requirement` → 配置页 → 服务端下发白名单）。用户必须在**打开开关之前**就看到「换端点可能不生效」，而不是事后对着一条降级记录猜。下发白名单漏了这个字段的话，客户端拿到 `undefined`、那行静默不渲染——改动看起来做了，其实没生效。
+
+**顺带核对（C1，结论是「不是 bug」，故未改代码）**：`danger-full-access` 是唯一 `approval: "never"` 的预设（宿主 `dsh-permission-presets`）。该预设下插件若判 `ask`，宿主的 `never` 会按文档「自动拒绝」。三条后果逐条查过：
+
+- 记录失真？`action` 字段的契约是「**裁决**与原因」，记 `ask` 准确（那是我们的裁决）；`stats.ok` 统计的是**模型请求成功**而非裁决，无重复计数。
+- 失败原因串了？那是宿主按自身策略拒绝一次**合法**的 ask，不是本插件算错。
+- 模型重试？未证实，不作依据。
+
+所以 C1 属「归因口径」而非缺陷；真要动就是改产品哲学（「查不到 ≠ 不许」，见 DEC-045），不宜顺手改。
+
+**改动文件**：`lib/points/spec.js`、`lib/engine.js`、`lib/adapters/agent.js`、`lib/decision-points.js`、`lib/client-src/35-config-page-guard-items.js`、`lib/client-src/05·06-i18n-*.js`、`lib/client.js`（重新构建）、`DECISIONS.md`。
+
+**红→绿**：把 `parse` 改回旧写法时 5 条新断言全红（spec 3 + 引擎 1 + 适配器 1），修复后全绿。全套 **1029/1029 通过**，`build-client --check` 与 `verify-wiring` 全绿。
 
 
 ## DEC-091 ⛔️ 取代 DEC-089 的注册方式：`approval/request` 必须 prepend，否则永远轮不到（2026-11-26）

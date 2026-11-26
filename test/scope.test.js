@@ -206,26 +206,45 @@ test("轮次：不在等用户时行为逐字不变", () => {
   assert.equal(POINT_SPECS.turnStop.decide(parsed, CFG).kind, "continue");
 });
 
-test("轮次：老端点不认识 awaiting_user 时不改变原有行为", () => {
-  // 答案里没有 awaiting_user = 判不出来 = fail-open，走原来的判据。
+test("轮次：老端点不认识 awaiting_user 时整点降级，不再「判不出来还硬判」", () => {
+  // 曾经的 fail-open 在「你要选 A 还是 B？」这类轮次上是致命的：
+  // 模型对 unfinished 必然给高分（确实没干完），于是 continue，插件注入
+  // steer 把轮次撑下去——用小模型的猜测顶掉用户的选择权（DEC-045）。
+  //
+  // 现在：缺这一问 = 这个端点跑不了本点 → 返回降级信号，本轮不续轮、
+  // **不留裁决**（统计落在「未裁决」那格），端点补上后自动恢复。
   const parsed = POINT_SPECS.turnStop.parse({
     unfinished: noul(0.85),
     value: noul(0.8),
     closed: noul(0.1),
   });
-  assert.equal(parsed.awaitingUser, undefined);
-  assert.equal(POINT_SPECS.turnStop.decide(parsed, CFG).kind, "continue");
+  assert.deepEqual(parsed, { degraded: "turnstop-boundary-question-unavailable" });
+  // 降级信号没有可供 decide 消费的分数——引擎在 decide 之前就返回了，
+  // 这里断言「它不是一个裁决输入」，防止有人误把它当普通 parsed 用。
+  assert.equal(parsed.unfinished, undefined);
 });
 
-test("轮次：awaiting_user 形状不合格不影响其余答案的解析", () => {
+test("轮次：awaiting_user 形状不合格同样按「端点不支持」整点降级", () => {
+  // noul(5) 越界 → readNoul 归一失败 → 与「完全没这一问」等价：
+  // 端点给出的边界答案不可用，就不能拿它当「不在等用户」。
   const parsed = POINT_SPECS.turnStop.parse({
     unfinished: noul(0.85),
     value: noul(0.8),
     closed: noul(0.1),
     awaiting_user: { type: "noul", noul: 5 },
   });
-  assert.ok(parsed !== undefined, "形状不合格的是边界那一问，不该作废整次裁决");
-  assert.equal(parsed.awaitingUser, undefined);
+  assert.deepEqual(parsed, { degraded: "turnstop-boundary-question-unavailable" });
+});
+
+test("轮次：边界问句答得出来时照常裁决（降级不能变成常态）", () => {
+  // 与上面两条配对的负向断言：只要端点答了边界问句，一切照旧。
+  const parsed = POINT_SPECS.turnStop.parse({
+    unfinished: noul(0.85),
+    value: noul(0.8),
+    closed: noul(0.1),
+    awaiting_user: noul(0.05),
+  });
+  assert.equal(parsed.awaitingUser, 0.05);
   assert.equal(POINT_SPECS.turnStop.decide(parsed, CFG).kind, "continue");
 });
 

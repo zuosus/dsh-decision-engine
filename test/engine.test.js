@@ -651,6 +651,9 @@ test("轮次：判 continue 时 steer 一次，且不再续第二次", async () 
         unfinished: { type: "noul", noul: 0.9 },
         value: { type: "noul", noul: 0.9 },
         closed: { type: "noul", noul: 0.1 },
+        // 边界问句必须答得出来，否则本点整点降级、根本走不到 continue
+        // （见「端点不答边界问句时整点降级」那条）。
+        awaiting_user: { type: "noul", noul: 0.05 },
       },
       model: "m",
       latencyMs: 8,
@@ -704,6 +707,85 @@ test("轮次：模型判出在等用户时**不 steer**（让位给用户，DEC-
   const agent = { session: makeSession(), steer: (message) => steered.push(message) };
   await ctx.listener("agent/turn-stopping")({ turn: 1, agent });
   assert.equal(steered.length, 0, "在等用户时绝不续轮");
+});
+
+test("轮次：端点不答边界问句时整点降级——不续轮、不留裁决、不再反复烧钱", async () => {
+  // 端点缺 awaiting_user（旧/兼容端点）→ parse 返回降级信号。
+  // 三条断言对应「整点降级」的三个要求：
+  //   1) 本轮不续轮（绝不用小模型的猜测顶掉用户的选择权）；
+  //   2) 记录成「未裁决」而不是某条假裁决（统计与页面不被污染）；
+  //   3) 记住这个端点跑不了本点，后续轮次连请求都不发。
+  const asks = [];
+  const { runner } = makeRunner({
+    modes: { turnStop: "enforce" },
+    classify: () => {
+      asks.push(1);
+      return {
+        answers: {
+          unfinished: { type: "noul", noul: 0.85 },
+          value: { type: "noul", noul: 0.8 },
+          closed: { type: "noul", noul: 0.1 },
+          // 刻意不给 awaiting_user
+        },
+        model: "m",
+        latencyMs: 8,
+        cached: false,
+      };
+    },
+  });
+  const ctx = makeCtx();
+  const records = [];
+  mountAgentPoints(ctx, {
+    runner,
+    getConfig: () => baseCfg({ turnStopMaxSteers: 1 }),
+    digestRecent: () => "",
+    telemetry: { noteAdapterError() {}, log: (r) => records.push(r) },
+    makeUserMessage: (text, kind) => ({ role: "user", content: [{ type: "text", text }], source: { kind } }),
+  });
+  const steered = [];
+  const session = makeSession();
+  const agent = { session, steer: (message) => steered.push(message) };
+
+  await ctx.listener("agent/turn-stopping")({ turn: 1, agent });
+  assert.equal(steered.length, 0, "降级时绝不续轮");
+  assert.equal(asks.length, 1, "第一次要发出去才知道端点答不了");
+
+  // 第二次同一端点：应当直接跳过，连请求都不发。
+  await ctx.listener("agent/turn-stopping")({ turn: 2, agent });
+  assert.equal(asks.length, 1, "同一端点已判为不支持，不该每轮重复烧钱");
+  assert.equal(steered.length, 0, "跳过时同样不续轮");
+});
+
+test("轮次：降级那条记录必须落在「未裁决」，不能伪装成一条 stop 裁决", async () => {
+  // 「整点降级」与「判断为停」在行为上都是不续轮，但在记录上**必须**分得开：
+  // stop 是裁决（计入放行/询问/拦截构成），降级是「这次没有裁决」。
+  // 混在一起的话，决策历史会显示一堆「我判断过了」，而实际是协议不兼容。
+  const { runner, decisions, entries } = makeRunner({
+    modes: { turnStop: "enforce" },
+    classify: () => ({
+      answers: {
+        unfinished: { type: "noul", noul: 0.85 },
+        value: { type: "noul", noul: 0.8 },
+        closed: { type: "noul", noul: 0.1 },
+      },
+      model: "m",
+      latencyMs: 8,
+      cached: false,
+    }),
+  });
+  const result = await runner.ask("turnStop", { turn: 1, last: "你要选 A 还是 B？", pendingTools: 0, steered: 0 });
+  assert.equal(result.degraded, "turnstop-boundary-question-unavailable");
+  assert.equal(result.action, undefined, "降级不得产出裁决");
+
+  const decision = decisions.at(-1);
+  assert.equal(decision.action, "degraded");
+  assert.equal(decision.detail, "turnstop-boundary-question-unavailable");
+  assert.equal(decision.degraded, true);
+
+  // 遥测同样记 degraded，且原因可读——事后能回答「为什么这一轮没判」。
+  const entry = entries.at(-1);
+  assert.equal(entry.action, "degraded");
+  assert.equal(entry.detail, "turnstop-boundary-question-unavailable");
 });
 
 test("轮次：新宿主形状（只有 snapshotEvents）也能读到助手最后一句话", async () => {

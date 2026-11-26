@@ -288,6 +288,9 @@ test("轮次：仍有未完成且续一轮有价值则继续", () => {
     unfinished: noul(0.85),
     value: noul(0.8),
     closed: noul(0.1),
+    // 边界问句必须显式给出：缺席 = 端点不支持该问 → 整点降级，
+    // 根本走不到下面的判据（见文件末尾「老端点兼容」那条）。
+    awaiting_user: noul(0.05),
   });
   assert.equal(POINT_SPECS.turnStop.decide(parsed, CFG).kind, "continue");
 });
@@ -298,6 +301,7 @@ test("轮次：请求已完成则收束", () => {
     unfinished: noul(0.09),
     value: noul(0.09),
     closed: noul(0.74),
+    awaiting_user: noul(0.05),
   });
   assert.equal(POINT_SPECS.turnStop.decide(parsed, CFG).kind, "stop");
 });
@@ -308,6 +312,7 @@ test("轮次：unfinished 高时优先续轮（判据顺序不可颠倒）", () 
     unfinished: noul(0.83),
     value: noul(0.39),
     closed: noul(0.28),
+    awaiting_user: noul(0.05),
   });
   assert.equal(POINT_SPECS.turnStop.decide(parsed, CFG).kind, "continue");
 });
@@ -317,6 +322,7 @@ test("轮次：没增量价值则收束", () => {
     unfinished: noul(0.5),
     value: noul(0.1),
     closed: noul(0.3),
+    awaiting_user: noul(0.05),
   });
   assert.equal(POINT_SPECS.turnStop.decide(parsed, CFG).kind, "stop");
 });
@@ -333,14 +339,24 @@ test("轮次：模型判出在等用户时让位（DEC-045 的边界）", () => 
   assert.equal(POINT_SPECS.turnStop.decide(parsed, CFG).kind, "defer");
 });
 
-test("轮次：awaiting_user 缺席不改变原有行为（老端点兼容）", () => {
+test("轮次：awaiting_user 缺席 = 端点跑不了本点 → 整点降级（不再照判）", () => {
+  // 老端点的旧口径是 fail-open：缺席就照常按 unfinished 判。那条路在
+  // 「你要选 A 还是 B？」上是致命的——unfin 0.85 / value 0.8 双双过线，
+  // 于是 continue，插件注入 steer 把轮次撑下去，等于用一个小模型的猜测
+  // 把用户的选择权顶掉（DEC-045）。
+  //
+  // 现在缺席 = 降级信号：本轮不续轮、不留裁决、统计落在「未裁决」；
+  // 端点补上这一问后自动恢复，不需要用户改任何配置。
   const parsed = POINT_SPECS.turnStop.parse({
     unfinished: noul(0.85),
     value: noul(0.8),
     closed: noul(0.1),
   });
-  assert.equal(parsed.awaitingUser, undefined);
-  assert.equal(POINT_SPECS.turnStop.decide(parsed, CFG).kind, "continue");
+  assert.deepEqual(parsed, { degraded: "turnstop-boundary-question-unavailable" });
+  // 与「判断为停」的区别必须在数据上看得见：
+  //   stop 是一个裁决（kind === "stop"，计入裁决构成）；
+  //   降级没有 kind，引擎在 decide 之前就返回，记为未裁决。
+  assert.equal(parsed.kind, undefined, "降级不得伪装成一条 stop 裁决");
 });
 
 // ---------------------------------------------------------------- 检索必要性

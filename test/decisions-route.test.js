@@ -436,3 +436,26 @@ test("状态接口回显匿名统计档位（此前永远显示兜底值）", as
     cleanupDir(home);
   }
 });
+
+test("决策点下发的字段里必须带 requirement（否则界面那行永远不渲染）", async () => {
+  // 这条盯的是「服务端白名单」而不是客户端渲染：插件下发的每个点是**手工
+  // 挑字段**拼出来的，新增一个展示字段却忘了加进白名单时，客户端拿到
+  // undefined、那一行静默不出现——改动看起来做了，其实没生效。
+  // turnStop 的「端点要求」正是这种字段：它必须在用户打开开关**之前**可见。
+  const { home, routes } = setup();
+  try {
+    const { status, data } = await get(routes, "/api/decision-engine/decisions");
+    assert.equal(status, 200);
+
+    const turnStop = data.points.find((point) => point.id === "turnStop");
+    assert.ok(turnStop !== undefined, "注册表里应当有轮次延续");
+    assert.equal(typeof turnStop.requirement, "string");
+    assert.ok(turnStop.requirement.includes("在等用户"), `端点要求要说明依赖哪一问，实际：${turnStop.requirement}`);
+
+    // 没有声明该字段的点不该凭空多出一个 key（避免界面上出现空提示）。
+    const authorize = data.points.find((point) => point.id === "authorize");
+    assert.equal(authorize.requirement, undefined);
+  } finally {
+    rmSync(home, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+  }
+});
