@@ -341,8 +341,16 @@ test("写入的文件权限是 600（明细含会话正文）", async () => {
     const store = new DecisionStore({ dir });
     store.record(record());
     await store.flush();
-    const mode = statSync(join(dir, DECISIONS_FILE_NAME)).mode & 0o777;
-    assert.equal(mode, 0o600, `实际权限 ${mode.toString(8)}`);
+    // Windows 不实现 POSIX 权限位（stat.mode 恒 0o666、chmod 只切只读位），
+    // 因此那条断言只适用于 POSIX 平台；win32 上保留「文件确实生成」的信号。
+    // 注意 fork 的同源修复只覆盖了两处，漏了这一处。
+    const file = statSync(join(dir, DECISIONS_FILE_NAME));
+    if (process.platform !== "win32") {
+      const mode = file.mode & 0o777;
+      assert.equal(mode, 0o600, `实际权限 ${mode.toString(8)}`);
+    } else {
+      assert.ok(file.isFile(), "明细文件必须落成普通文件");
+    }
   } finally {
     cleanup();
   }

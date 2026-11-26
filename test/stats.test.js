@@ -551,11 +551,27 @@ test("统计存储：文件不存在时返回空数组", async () => {
 });
 
 test("统计存储：写盘失败不影响调用方（不抛）", async () => {
-  // 目录指向一个不可写的路径：appendFile 会失败，但 record() 不许抛。
-  const store = new StatsStore({ dir: "/proc/definitely-not-writable" });
-  store.record(rec());
-  await store.flush();
-  assert.ok(store.failed > 0, "应记录失败条数");
+  // 让写盘**确定**失败：先造一个普通文件，再拿它的路径当目录用。
+  //
+  // 修之前这里写的是 `dir: "/proc/definitely-not-writable"`，注释声称在测
+  // 「目录不可写」。但 /proc 在 macOS 上根本不存在、在 Windows 上也不是
+  // 合法路径，于是任何平台实测到的都是「父目录不存在」（ENOENT），而不是
+  // 「父目录存在但不可写」（EPERM/EACCES）。它能过纯属 StatsStore 对任何
+  // 写入失败都 failed++，与注释声称的场景无关。
+  //
+  // 现在改用 ENOTDIR：父路径确实存在、确实是文件，于是「当目录用」必然
+  // 失败——这条路径在每个平台都成立，不依赖是否存在某个特殊目录。
+  const root = await mkdtemp(join(tmpdir(), "de-stats-notdir-"));
+  const notADirectory = join(root, "not-a-directory");
+  try {
+    await writeFile(notADirectory, "this is a file, not a directory\n");
+    const store = new StatsStore({ dir: notADirectory });
+    store.record(rec());
+    await store.flush();
+    assert.ok(store.failed > 0, "应记录失败条数");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("回填：从旧遥测推算历史统计，并标明是推算值", async () => {

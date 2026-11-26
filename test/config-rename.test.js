@@ -66,7 +66,15 @@ test("旧名 startlux.yml 会被改名迁移为 config.yml，内容原样保留"
     // 同目录改名用 rename，旧文件不应残留两份配置。
     assert.equal(existsSync(legacy), false, "同目录改名后旧文件应已消失，避免两份配置并存");
     // 含明文 key 的文件权限保持 600。
-    assert.equal(statSync(next).mode & 0o777, 0o600);
+    //
+    // Windows 不实现 POSIX 权限位：chmod 只切只读位，stat.mode 恒为 0o666，
+    // 因此那条断言在 win32 上恒假、与代码正确性无关。这里保留「文件确实
+    // 生成」这一条仍然成立的信号，而不是整段跳过——空断言等于没有测试。
+    if (process.platform !== "win32") {
+      assert.equal(statSync(next).mode & 0o777, 0o600);
+    } else {
+      assert.ok(statSync(next).isFile(), "配置必须落成普通文件");
+    }
   } finally {
     process.env.DSH_HOME = prev ?? "";
     if (prev === undefined) delete process.env.DSH_HOME;
