@@ -39,6 +39,9 @@
   border-color: var(--de-border) !important;
 }
 .de-settings__tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   margin: 0 0 -1px !important;
   padding: var(--de-space-1) 0 !important;
   border: 0 !important;
@@ -53,6 +56,35 @@
   color: var(--de-text) !important;
   font-weight: 600 !important;
 }
+/* Slow-call warning: the icon sits right of the tab title, never wraps away from it. */
+.de-settings__tabs .de-tab__label { white-space: nowrap; }
+.de-settings__tabs .de-tab__warn {
+  display: inline-flex;
+  align-items: center;
+  color: var(--dsw-alias-state-warn-primary, #d9822b);
+  font-size: 12px;
+  line-height: 1;
+  cursor: help;
+}
+/* The banner explains that icon, at the very top of the tab's own content. */
+.de-settings .de-slow {
+  margin-bottom: var(--de-space-2);
+  padding: var(--de-space-1) 10px;
+  border: 1px solid var(--dsw-alias-state-warn-primary, var(--de-border));
+  border-left-width: 2px;
+  border-radius: var(--de-radius);
+  color: var(--de-text);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.de-settings .de-slow__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+.de-settings .de-slow__icon { color: var(--dsw-alias-state-warn-primary, #d9822b); }
+.de-settings .de-slow__text { margin: 4px 0 0; color: var(--de-muted); }
 .de-settings .de-cfg { display: flex; flex-direction: column; gap: 0; }
 .de-settings .de-cfg__section { display: flex; flex-direction: column; padding: var(--de-space-3) 0; }
 .de-settings .de-cfg__section:first-child { padding-top: 0; }

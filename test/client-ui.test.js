@@ -255,8 +255,10 @@ function hasButtonLabeled(node, label) {
   if (Array.isArray(node)) return node.some((child) => hasButtonLabeled(child, label));
   if (typeof node !== "object") return false;
   if (node.type === "button") {
-    const texts = (node.children ?? []).filter((child) => typeof child === "string");
-    if (texts.includes(label)) return true;
+    // 按钮文案可能被包一层 `<span>`（DEC-090：tab 标题要能带一个跟在右边的
+    // 图标，纯文本节点在 flex 容器里会被拆行），所以按**整个按钮的文本**比对，
+    // 而不是只看直接子节点。
+    if (collectText(node).join("").includes(label)) return true;
   }
   return (node.children ?? []).some((child) => hasButtonLabeled(child, label));
 }

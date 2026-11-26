@@ -1,6 +1,36 @@
 # DECISIONS.md — 设计决策日志
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
+## DEC-090 连续慢调用在「统计与对比」tab 上报警：tab 图标 + 内容顶部横幅（2026-11-26）
+
+**背景**：用户要求「如果连续多次出现一次调用耗时超过 10s 的情况，需要在 tab title 右边显示一个 warning icon，并且在 tab 内容的顶部说明这个情况」。经确认：落点是**插件详情页的「统计与对比」tab**（不是会话里的「决策」tab——那条路的宿主 `ViewTabLabel` 只渲染纯文本 label，塞不进真正的图标，只能退化成标题末尾的字符）；连续次数取 **5 次**，阈值**固定 10s**、不做成配置项。
+
+**决定**：
+
+- **判定单独成模块 `lib/slow-calls.js`**：`SLOW_CALL_THRESHOLD_MS = 10_000`、`SLOW_CALL_STREAK = 5`、`classifySlowCall()`、`createSlowCallMonitor()`。理由与 `resilience.js` / `tolerance.js` 同一条：热路径上的规则一旦散在路由和界面里就会漂移，而这里要判的是三种记录（真实往返 / 缓存命中 / 降级）各自的参与方式。
+- **阈值是「严格超过」**：`duration > thresholdMs`，恰好 10000ms 不算。用户原话是「超过 10s」，边界必须逐字对齐——`>=` 会让每一次刚好踩线的调用都被算进来，而那条线的意义就是「明显不对」。
+- **缓存命中不参与判定**（`skip`）：命中时根本没发请求、耗时 0。把它当快调用去清零，真机上「偶发命中一次就再也报不出来」；当慢调用又凭空报警。因此既不计数也不清零。
+- **降级记录只在超过阈值时算慢**：降级的耗时里混着「发出去并超时」（真等了这么久）与「缺 key / 地址非法」（几乎 0ms），记录上分不开。超阈值 → 一定真等了，算慢；未超 → 无法断定，`skip`。
+- **畸形耗时一律 `skip`**：`undefined` / NaN / 负数 / 字符串都不猜成 0。猜 0 会静默清零一段真实的连续段，猜慢会凭空报警。
+- **内存态、不落盘**：这条警告回答「**现在**服务商是不是在拖慢我」。落盘会让昨天的一段慢调用今天还亮着，而一条常亮的警告等于没有警告。进程重启重新攒即可（第 5 次自然会再触发）。
+- **喂数点放在 `recordDecision()` 的最前面、且在 `statsStore` 早退之前**：关掉统计不影响慢调用判定——它回答的问题与「要不要留统计」无关，而慢调用恰恰是最需要被看见的那类问题。
+- **新增 `GET /api/decision-engine/slow-calls`**：读内存计数器，不扫文件不打网络，回 `{ active, streak, needed, thresholdMs, lastDurationMs, sinceAt }`。`status()` 每次返回新对象，路由拿到的是数据不是内部状态。
+- **图标挂在「统计与对比」tab 标题右边**：`<span class="de-tab__warn" role="img" aria-label=…>⚠</span>`，标题文字包一层 `.de-tab__label`（`white-space: nowrap`）——按钮是 flex 容器，纯文本节点 + 图标在窄屏下会被拆行，图标孤零零飘到下一行。`role="img"` + `aria-label` 让读屏器念出一句人话，而不是「警告三角」加一堆标点。
+- **横幅只出现在那个 tab 的内容最顶端**（`safeRenderStatsTab` 之前）：图标在这个 tab 上，解释也必须在这里；放页面级（tab 栏上方）会让用户在配置页反复读一段与当前页无关的文字，放页面底部等于没写。
+- **`null`（还没读到）与 `active: false` 都不提示**：没读到不是「正常」，但沉默好过一个可能过时的红灯。轮询**失败保持上一次的值**——一次请求失败不该把警告抹掉。
+- **轮询 15 秒、且不依赖当前 tab**：图标画在 tab 栏上，两个 tab 下都在；只在统计页拉的话，用户停在配置页时图标永远不会亮。接口读内存，成本可忽略。
+- **文案中英双语**：`t()` 模板两条（悬浮说明 + 横幅正文），静态词表一条（横幅标题）。`i18n-coverage` 测试兜底。
+
+**为什么**：
+
+- **「连续」而不是「单次慢」**：单次 10s 可能只是冷启动或一次网络抖动；连续 5 次都慢才是「服务商在变慢」这个可行动的事实。报警要指向能行动的东西。
+- **交给服务端判定、前端只读**：否则页面上会出现「图标亮着、说明里写 3/5」这种自相矛盾。前端不重复计数。
+- **挂在统计 tab 而不是弹 toast**：警告说的是「长期趋势」，不是「刚才这一下卡了」。弹窗会被关掉、被忽略，而 tab 图标在那儿，用户想看的时候能看到。
+
+**红→绿**：新增 `test/slow-calls.test.js`（13 条：阈值边界、缓存命中、降级两种、畸形数据、连续 5 次、快调用清零、缓存/降级不打断、streak 增长、快照隔离、`recordDecision` 喂数、路由回包形状、接线断言）与 `test/slow-call-ui.test.js`（6 条：报警时图标+aria-label、横幅含次数/阈值/最近耗时、横幅在内容顶部、未报警与未读到都不画、配置 tab 下图标照样在、英文界面零中文）。先跑：`slow-calls.js` 模块不存在（服务端 13 条全红）、客户端 6 条里 5 条红（只有「不画」那条因为功能缺失而侥幸绿）。实现后全绿。全套 **980/980 通过**（原 961 + 新增 19），`verify-wiring` 与 `build-client --check` 全绿；另连续跑 3 轮全套确认无抖动。适配一条既有测试：`test/client-ui.test.js` 的 `hasButtonLabeled` 从「只看按钮的直接文本子节点」改成「比对整个按钮的文本」——标题现在包了一层 `<span>`，旧写法会漏。
+
+**改动文件**：`lib/slow-calls.js`（新增）、`lib/index.js`、`lib/client-src/31-config-page-state.js`、`lib/client-src/38-config-page-render.js`、`lib/client-src/04-i18n-misc-dictionary.js`、`lib/client-src/06-i18n-template-dictionary.js`、`lib/client.config.css`、`lib/client.js`（构建产物）、`test/slow-calls.test.js`（新增）、`test/slow-call-ui.test.js`（新增）、`test/client-ui.test.js`、`DECISIONS.md`。
+
 
 ## DEC-089 危险权限申请（danger-full-access）交决策模型：接管 approval/request，只放行不拒绝（2026-11-26）
 
