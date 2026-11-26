@@ -79,9 +79,13 @@ function setup({ body = answerBody(), status = 200 } = {}) {
   };
 
   const hooks = new Map();
+  // 注册顺序是这个功能能不能成立的前提（见下面「注册在转发桥之前」用例）：
+  // 记录每次 `ctx.on` 的 options，才能断言我们用了 prepend。
+  const registrations = [];
   const ctx = {
     logger: { info() {}, warn() {}, debug() {} },
-    on(name, listener) {
+    on(name, listener, options) {
+      registrations.push({ name, options });
       const list = hooks.get(name) ?? [];
       list.push(listener);
       hooks.set(name, list);
@@ -105,6 +109,7 @@ function setup({ body = answerBody(), status = 200 } = {}) {
     home,
     configPath: join(home, "plugins", "dsh-decision-engine", "config.yml"),
     listener: listeners[0],
+    registrations,
     calls,
     restore() {
       globalThis.fetch = originalFetch;
@@ -356,6 +361,28 @@ test("插件整体关掉：让位（enabled=false 时任何点都不参与）", 
     });
     assert.equal(asked, true);
     assert.equal(env.calls.length, 0);
+  } finally {
+    env.restore();
+  }
+});
+
+test("注册在转发桥之前：approval/request 必须用 prepend（否则永远轮不到）", () => {
+  // 这条断言对应一个真实故障（2026-11-26）：宿主的 `@deepseek-ai/dsh-api-remotes`
+  // 在 boot 阶段就把 `approval/request` 注册成转发监听器，把请求推给浏览器的
+  // `dsh-client-ui-approval` 弹卡并**一直等到用户作答**。它只在「会话不在这个
+  // 客户端」或「卡片被显式交还」时才 next()。
+  //
+  // 所以追加注册的监听器排在它之后 = 永远轮不到：开关打开、配置正确、单测全绿，
+  // 用户看到的仍是每一张卡都照弹。顺序不是优化，是功能成立的前提。
+  const env = setup();
+  try {
+    const registration = env.registrations.find((item) => item.name === "approval/request");
+    assert.ok(registration, "必须注册 approval/request 监听器");
+    assert.equal(
+      registration.options?.prepend,
+      true,
+      "必须以 prepend 注册：宿主把 approval/request 转发给浏览器弹卡的监听器在 boot 就排上了",
+    );
   } finally {
     env.restore();
   }

@@ -1,6 +1,40 @@
 # DECISIONS.md — 设计决策日志
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
+
+## DEC-091 ⛔️ 取代 DEC-089 的注册方式：`approval/request` 必须 prepend，否则永远轮不到（2026-11-26）
+
+**背景**：用户报告「已经加了开关，为什么还在不断收到 danger-full-access challenge」，并给出会话 `session-f72497ae-74a7-4664-9c22-af9c42a9bcec` 现场。两份证据：
+
+1. `~/.dsh/plugins/dsh-decision-engine/config.yml` 里 `dangerFullAccessDecider: false`——开关**根本没打开**（配置时间 10:02，用户从未拨过）。
+2. 该会话 11:38:55 与 11:39:05 两次 `approval/asked`（reason 都是 `escalate sandbox to danger-full-access: ...`），插件侧 `telemetry.jsonl` 里 `tag":"escalation"` 的记录数为 **0**。
+
+第 2 条暴露出 DEC-089 的一个实现缺陷：**即使打开开关也不会生效**。
+
+**决定**：
+
+- **`ctx.on("approval/request", ...)` 改为 `{ prepend: true }`**。DEC-089 当时写下「不是 prepend，靠三道闸判断」，理由是宿主文档说「同级监听器顺序不是策略优先级机制」。这个判断只对了一半：顺序确实不是**策略**优先级，但它决定**我们在不在链上**。
+  - 宿主 `@deepseek-ai/dsh-api-remotes` 在 boot 阶段就把 `approval/request` 注册成转发监听器（`API_REMOTE_FORWARDED_EVENTS` 的 `{ event: 'approval/request', mode: 'waterfall' }`），把请求推给浏览器的 `dsh-client-ui-approval`，在那边弹卡并**一直等到用户作答**；
+  - 它只在两种情况下 `next()`：`sessionId === undefined`（会话不在这个客户端）、或卡片被显式交还（`pending.delegate()`）。正常弹卡时它挂着不返回；
+  - 于是追加注册的监听器**永远轮不到**：配置对、开关开、单测全绿，用户看到的仍是每张卡照弹。
+- **依据同包先例**：宿主 `dsh-experimental-auto-review` 在 `tools/pre-execute` 上就是用 `{ prepend: true }` 抢在链头，理由一致——想让自己的答案先生效，必须排在前面。
+- **补一条专用验收**：`test/sandbox-escalation.test.js` 新增「注册在转发桥之前」用例，直接断言 `ctx.on` 收到的 `options.prepend === true`。去掉 prepend 后该用例变红（其余 14 条仍是绿的——这正是它必须单独存在的原因：功能失效而其它用例全绿）。
+
+**为什么**：
+
+- **「三道闸保证了顺序不重要」这个推理是错的**：三道闸决定「我们会不会作答」，顺序决定「我们会不会被问到」。前者不蕴含后者。DEC-089 把这两件事混成一件，于是写出了一段永远不执行的正确代码。
+- **必须测注册形态，而不只是测行为**：行为测试的夹具自己实现了一套 `ctx.on`，它按调用顺序直接执行监听器——于是「追加注册也被视为先执行」，测试环境比真机宽松。夹具必须记录并断言 options，否则这类顺序故障在测试里永远看不见。
+- **用户的现场记录比日志更可信**：`approval/asked` 在会话日志里、`escalation` 遥测为 0，两条一比就能定位「监听器没被调用」，而不是「模型判错了」。
+
+**顺带确认的两件事**：用户当前 `tolerance: autonomous` 与 `pointAuthorize: enforce` 都已生效（11:38–11:40 的 `tag":"guard"` 遥测里 `tolerance.level=autonomous`、`action=delegate`），所以工具调用确实不再询问——弹的只有沙箱升权卡，与 DEC-089 的诊断一致。
+
+**红→绿**：新增用例先红（去掉 prepend 后 14 绿 1 红，红点正是它），改回 prepend 后 15/15 全绿。全套 **982/982 通过**，`verify-wiring` 与 `build-client --check` 全绿。
+
+**改动文件**：`lib/index.js`、`test/sandbox-escalation.test.js`、`DECISIONS.md`。
+
+
+
+
 ## DEC-090 连续慢调用在「统计与对比」tab 上报警：tab 图标 + 内容顶部横幅（2026-11-26）
 
 **背景**：用户要求「如果连续多次出现一次调用耗时超过 10s 的情况，需要在 tab title 右边显示一个 warning icon，并且在 tab 内容的顶部说明这个情况」。经确认：落点是**插件详情页的「统计与对比」tab**（不是会话里的「决策」tab——那条路的宿主 `ViewTabLabel` 只渲染纯文本 label，塞不进真正的图标，只能退化成标题末尾的字符）；连续次数取 **5 次**，阈值**固定 10s**、不做成配置项。
