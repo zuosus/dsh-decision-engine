@@ -89,6 +89,30 @@ test("全新安装（数据目录不存在）首次保存能成功，并自动�
   }
 });
 
+test("dangerFullAccessDecider 在保存白名单里：拨了就能落盘（DEC-089）", async () => {
+  // 这一项的风险不在「存错值」，而在**静默不存**：界面已经弹过风险提示、
+  // 用户已经确认，服务端却 400「no updatable fields」，于是下次进来开关又是关的
+  // ——而用户以为模型一直在替他把关。白名单漏项是这个项目反复踩到的坑
+  // （telemetryLevel / tolerance 都栽过），所以这里直接对落盘文件断言。
+  const { home, routes, configPath } = setup();
+  try {
+    const { status, data } = await putConfig(routes, {
+      provider: "systemone",
+      keyStorage: "config",
+      enabled: true,
+      systemoneApiKey: "sk-WHITELIST-123456",
+      dangerFullAccessDecider: true,
+    });
+    assert.equal(status, 200, `保存应成功，实际：${JSON.stringify(data)}`);
+    assert.ok(
+      readFileSync(configPath, "utf8").includes("dangerFullAccessDecider: true"),
+      "开关必须真的写进 config.yml",
+    );
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("配置写入失败时，已写入的凭据回滚为原值（不留半套改动）", async () => {
   const { home, routes, credPath, configPath } = setup({
     seedCredentials: "version: 1\nrefs:\n  TYPESAFE_API_KEY: sk-ORIGINAL-KEY\n",

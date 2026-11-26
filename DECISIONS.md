@@ -2,6 +2,38 @@
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
 
+## DEC-089 危险权限申请（danger-full-access）交决策模型：接管 approval/request，只放行不拒绝（2026-11-26）
+
+**背景**：用户报告「已经开了自治（人工审核比例=autonomous）、工具授权也调到 enforce，但 `danger-full-access` 的权限申请还是经常弹出来」，并希望把这类请求做成可选项：打开后由决策模型判断是否放行，同时打开时弹一次风险与免责警告。
+
+查证结论：这类卡片**根本不经过本插件的 `tools/pre-execute` 守卫**。链路是 `dsh-tool-bash` / `dsh-tool-fs` → `dsh-sandbox` 的 `approveEscalation()` → `ctx.approval.request({ reason: "escalate sandbox to <mode>: <justification>" })` → `approval/request` waterfall → 交互式应答者（UI 弹卡）。而 Auto 权限预设本身就是 `sandbox: danger-full-access` + `approval: ask`。所以「开了自治还老弹」不是插件失灵，而是这条通道与插件无关——根因是**没有任何插件接管它**。
+
+**决定**：
+
+- **新增开关 `dangerFullAccessDecider`，默认 `false`**。默认关：它替用户跨过的是整个文件系统的写边界，比「工具调用放不放行」重一个量级，不能默认替用户打开。
+- **接管 `approval/request` 而不是 `tools/pre-execute`**：升权 ask 只在这条 waterfall 上出现。新模块 `lib/sandbox-escalation.js` 承载解析、裁决映射与失败方向，`lib/index.js` 只负责依赖注入，于是这段安全逻辑能被单测直接驱动而不必起整个插件。
+- **只认宿主固定文案**：`escalate sandbox to <mode>: <justification>`（允许引号/大小写变体）；解析不出形状、不是 `danger-full-access`、reason 缺失（如 auto-review 回执）一律 `next()`。宁可多弹一张卡，也不能把别的审批误当成升权。
+- **只放行，不拒绝**：模型裁决为 `ask` / `deny` 时一律 `next()`。宿主把任何非 `allowed-once` 的结果报给模型时写的是「**用户**拒绝了」；用模型判断顶掉用户、还在模型面前冒充用户，会把「谁做了这个决定」这条审计事实说错。
+- **与工具守卫同一口径**：把守卫里「四问 → 最终裁决（含 tolerance 调整）」抽成 `adjudicateAuthorize()`，两条通道共用它——同一套阈值、同一个校准窗口、同一个档位。否则档位拨到自治后工具调用不问了、升权卡照弹，用户感受到的仍是「设置没生效」。
+- **三道闸全开才接管**：开关为 true · reason 是 danger-full-access 升权 · 「工具授权」决策点为 enforce（observe 只记录）。任一不满足即 `next()`；模型降级、答案形状不符、抛异常同样 `next()`——最多让用户少看一张卡，绝不替用户挡掉他会同意的操作。
+- **配置页开关 + 风险警告对话框**：对话框用独立状态 `dangerConfirmOpen` 表达，不借草稿——借草稿会让「点开看看说什么 → 取消」变成一次已保存的开启。文案分四段：越界范围（整块磁盘）、小模型会出错、后果自负且插件与作者不承担任何责任、随时可关且关掉立刻恢复。取消按钮在前（默认动作是「不开」），确认按钮用宿主错误语义色。
+- **落盘链路三处齐补**：`DEFAULTS` / zod schema / 状态回显（传生效值）/ PUT 白名单。漏任何一处都是「面板能拨、显示已保存、值从来没落盘」——这一项尤其不能静默失效：界面已经弹过风险提示、用户已经确认，结果一次都没接管。
+
+**为什么**：
+
+- **「自治」的语义不该在两条通道上分裂**：用户说的「别问我了」是对打扰频率的设定，不区分这张卡是工具守卫发的还是沙箱发的。所以复用同一个 tolerance 档位，而不是给升权卡另设一套阈值。
+- **只放行不拒绝是唯一诚实的做法**：宿主的错误文案把拒绝归因给用户（`the user rejected escalating this ...`）。模型可以替用户说「可以」，但不能替用户说「不」——前者是省事，后者是伪造审计记录。
+- **默认必须关、且必须弹警告**：这个开关的实际效果是「无人值守地发出 disk-wide 写权限」。让它在用户读过风险说明之后才生效，是这块功能唯一可接受的产品形态。
+- **接管点必须在交互式应答者之前**：同一条 waterfall 上 UI 一旦作答请求就结束，排在它后面等于永远轮不到。但行为正确性不依赖顺序——三道闸与 fail-open 让位保证了「排在前面」只影响谁先看到请求，不影响谁最终作答；模型判断期间用户仍可取消（signal 透传）。
+
+**红→绿**：新增 `test/sandbox-escalation.test.js`（13 条：解析纯函数 4 条 + 真链路 9 条，覆盖默认关闭不发请求、模型放行即批准、高风险仍弹卡、observe 只记录、off 不问模型、更窄升权不接管、无 reason 让位、降级让位、插件关闭让位）与 `test/danger-approval-ui.test.js`（7 条：默认关、回显开、不发遮罩、四段风险文案、按钮顺序、开/关两态说明、英文无残留中文），另加 `test/save-path.test.js` 一条白名单落盘验收。把 `lib/index.js` 回退到改动前再跑，9 条链路用例全红（纯函数 4 条仍绿，因为它们测的是新模块）；实现后全绿。全套 **961/961 通过**，`verify-wiring` 与 `build-client --check` 全绿。
+
+**改动文件**：`lib/sandbox-escalation.js`（新增）、`lib/index.js`、`lib/client-src/04-i18n-misc-dictionary.js`、`15-config-values-and-url.js`、`16-config-patch-and-format.js`、`31-config-page-state.js`、`32-config-page-save.js`、`35-config-page-guard-items.js`、`lib/client.config.css`、`lib/client.js`（构建产物）、`config.example.yml`、`README.md`、`README.zh.md`、`test/sandbox-escalation.test.js`（新增）、`test/danger-approval-ui.test.js`（新增）、`test/save-path.test.js`、`DECISIONS.md`。
+
+
+
+
+
 ## DEC-088 人工审核比例控件重做：去掉贯穿圆点的横线，配色交回宿主语义令牌（2026-11-25）
 
 **背景**：用户指出「人工审核比例」UI 不够优雅——配色用的是硬编码的 `#818cf8` 圆点 / `#6366f1` 实心，且一条横线穿过所有未选中圆点。两处问题都在 `ToleranceSlider` 的内联样式里：轨道 `.toleranceRail` 绝对定位画一条灰线，四个档位是「圆点 + 标签」，线从圆点正中穿过。这个控件在配置页与「决策」会话页共用，后者不在 `.de-settings` 外壳里，走不到配置页的样式源。
