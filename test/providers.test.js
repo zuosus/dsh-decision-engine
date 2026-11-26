@@ -57,6 +57,7 @@ test("内置预设齐备", () => {
       "decisionmodels",
       "google-decisions",
       "openai-decisions",
+      "tokenhub",
       "custom",
     ],
   );
@@ -226,6 +227,7 @@ test("providerCatalog 覆盖全部 provider 且带展示信息", () => {
     "decisionModelsApiKey",
     "googleDecisionsApiKey",
     "openaiDecisionsApiKey",
+    "tokenhubApiKey",
     "customApiKey",
   ]);
   // 字段必须互不相同：共用一格会导致切换 provider 时互相覆盖。
@@ -242,6 +244,7 @@ test("providerCatalog 覆盖全部 provider 且带展示信息", () => {
     "decisionModelsModel",
     "googleDecisionsModel",
     "openaiDecisionsModel",
+    "tokenhubModel",
     "customModel",
   ]);
   assert.equal(new Set(modelFields).size, modelFields.length);
