@@ -24,6 +24,7 @@ import {
   classifyWorkspaceTarget,
   isUnderRoots,
   pathTargetOf,
+  pathTargetsOf,
 } from "../lib/scope.js";
 import { POINT_SPECS } from "../lib/points/spec.js";
 
@@ -82,6 +83,53 @@ test("路径提取：认写文件工具的参数名", () => {
 test("路径提取：认 apply_patch 的补丁头", () => {
   const input = "*** Begin Patch\n*** Update File: src/a.ts\n@@\n-x\n+y\n*** End Patch";
   assert.equal(pathTargetOf("apply_patch", { input }), "src/a.ts");
+});
+
+test("路径提取：多目标补丁必须收集全部目标（DEC-045 的边界只认这个）", () => {
+  const input = [
+    "*** Begin Patch",
+    "*** Add File: /w/repo/inside.txt",
+    "+x",
+    "*** Add File: /w/outside.txt",
+    "+y",
+    "*** End Patch",
+  ].join("\n");
+  assert.deepEqual(pathTargetsOf("apply_patch", { input }), ["/w/repo/inside.txt", "/w/outside.txt"]);
+  // `pathTargetOf` 保留「首个目标」的旧语义：它是公开 API，调用方按单目标用。
+  assert.equal(pathTargetOf("apply_patch", { input }), "/w/repo/inside.txt");
+});
+
+test("路径提取：Move File 的源与目标都算目标", () => {
+  assert.deepEqual(pathTargetsOf("apply_patch", { input: "*** Move File: a.ts → b.ts" }), ["a.ts", "b.ts"]);
+  assert.deepEqual(pathTargetsOf("apply_patch", { input: "*** Move File: a.ts -> b.ts" }), ["a.ts", "b.ts"]);
+});
+
+test("路径提取：普通工具就一个目标，没有路径时是空数组", () => {
+  assert.deepEqual(pathTargetsOf("write", { file_path: "/a/b.txt" }), ["/a/b.txt"]);
+  assert.deepEqual(pathTargetsOf("write", {}), []);
+  assert.deepEqual(pathTargetsOf("bash", { command: "rm -rf /etc" }), []);
+});
+
+test("越界判定：多目标补丁里只要有任一个越界，整次调用就算越界", () => {
+  // 回归：修之前 `pathTargetOf` 只取第一个 `*** ... File:`，于是
+  // 「界内 + 越界」的补丁返回 none，越界让位（DEC-045）整段不触发——
+  // 本该交还宿主沙箱的写入被静默送进了决策模型。
+  const roots = ["/w/repo"];
+  const classify = (input) => classifyWorkspaceTarget({ tool: "apply_patch", args: { input }, roots, cwd: "/w/repo" });
+
+  const mixed = "*** Begin Patch\n*** Add File: /w/repo/a.txt\n+x\n*** Add File: /w/out.txt\n+y\n*** End Patch";
+  assert.equal(classify(mixed).kind, SCOPE_KINDS.outsideWorkspace, "第二个目标越界也必须判越界");
+
+  // 越界排在第三位同样不能被前两条界内目标掩盖。
+  const third = "*** Add File: /w/repo/a\n*** Add File: /w/repo/b\n*** Add File: /w/out\n";
+  assert.equal(classify(third).kind, SCOPE_KINDS.outsideWorkspace, "越界目标排在后面同样要判");
+
+  // 全部界内仍然是 none（不能因为改成「任一」就把正常补丁也拦下来）。
+  const inside = "*** Add File: /w/repo/a\n*** Add File: /w/repo/b\n";
+  assert.equal(classify(inside).kind, SCOPE_NONE, "全部界内不应判越界");
+
+  // Move 的目标越界也算：只改路径的移动同样会写到越界位置。
+  assert.equal(classify("*** Move File: /w/repo/a → /w/out").kind, SCOPE_KINDS.outsideWorkspace);
 });
 
 test("路径提取：没有明确路径时返回 undefined（不猜）", () => {

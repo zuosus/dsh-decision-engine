@@ -255,6 +255,37 @@ test("apply_patch 的补丁头指向工作区外时同样让位", async () => {
   }
 });
 
+test("多目标补丁：越界目标排在界内目标之后，同样必须让位", async () => {
+  // 回归（DEC-045）：修之前 scope.js 只匹配第一个 `*** ... File:`，于是
+  // 「界内 + 越界」的补丁被判成 none，越界让位整段不触发——这次调用会被
+  // 送进决策模型，而不是交还宿主沙箱。这是「同一个危险目标因为排在第二位
+  // 就消失」的那类 bug，必须在集成层面钉住，不能只测纯函数。
+  const env = setup();
+  try {
+    writeConfig(env.configPath);
+    const patch = [
+      "*** Begin Patch",
+      "*** Add File: /work/repo/harmless.txt",
+      "+ok",
+      "*** Add File: /etc/evil.txt",
+      "+bad",
+      "*** End Patch",
+    ].join("\n");
+    let released = false;
+    await env.listener(
+      toolCall({ name: "apply_patch", args: { input: patch } }),
+      () => {
+        released = true;
+        return { kind: "allow" };
+      },
+    );
+    assert.equal(released, true, "越界目标存在时必须让位给宿主");
+    assert.equal(env.calls.length, 0, "让位时不应发出决策请求");
+  } finally {
+    env.restore();
+  }
+});
+
 test("bash 命令里的路径不判定（不解析 shell，只交给宿主沙箱）", async () => {
   const env = setup();
   try {
