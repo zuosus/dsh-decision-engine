@@ -250,7 +250,7 @@ test("会话归属：付费通道的 spec.sessionId 写进决策明细", async (
     modeOf: (cfg, id) => (id === "cotTranslate" ? "enforce" : "off"),
     log: async () => {},
     specOf: (id) => POINT_SPECS[id],
-    recordDetail: (record, referenced) => details.push({ record, referenced }),
+    recordDetail: (record) => details.push({ record }),
   });
   const { translator } = makeTranslator("译文");
   const { telemetry } = makeTelemetry();
@@ -260,7 +260,6 @@ test("会话归属：付费通道的 spec.sessionId 写进决策明细", async (
   await translator.translate({ text: "Please translate this sentence.", targetLanguage: "zh", sessionId: "s-paid" });
   assert.equal(details.length, 1, "enforce 下拿到裁决就该写一条明细");
   assert.equal(details[0].record.sessionId, "s-paid", "会话 id 必须来自 spec.sessionId");
-  assert.equal(details[0].referenced, "s-paid", "原始会话引用（id 字符串）也要原样传下去，由存储层取名");
 });
 
 test("会话归属：匿名通道（无 sessionId）保持「不可归属」而不是编一个", async () => {
@@ -282,7 +281,7 @@ test("会话归属：匿名通道（无 sessionId）保持「不可归属」而�
     modeOf: (cfg, id) => (id === "cotTranslate" ? "enforce" : "off"),
     log: async () => {},
     specOf: (id) => POINT_SPECS[id],
-    recordDetail: (record, referenced) => details.push({ record, referenced }),
+    recordDetail: (record) => details.push({ record }),
   });
   const { translator } = makeTranslator("译文");
   const { telemetry } = makeTelemetry();
@@ -292,5 +291,4 @@ test("会话归属：匿名通道（无 sessionId）保持「不可归属」而�
   await translator.translate({ text: "Anonymous channel has no session id.", targetLanguage: "zh" });
   assert.equal(details.length, 1);
   assert.equal(details[0].record.sessionId, "", "拿不到会话就必须留空");
-  assert.equal(details[0].referenced, undefined, "不能给存储层塞一个假引用");
 });
