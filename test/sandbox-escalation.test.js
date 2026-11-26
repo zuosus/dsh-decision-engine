@@ -31,7 +31,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -314,6 +314,32 @@ test("决策模型降级：让位给用户（fail-open 到人，不是放行）"
     });
     assert.equal(asked, true, "降级不能变成自动批准");
     assert.equal(result, "rejected");
+  } finally {
+    env.restore();
+  }
+});
+
+test("接管时写一条遥测：tag=escalation 且带目标模式（事后可核对）", async () => {
+  // 遥测是「插件这次到底插手没有」的唯一现场记录。不写的话，用户问
+  // 「那次升权卡为什么没弹」时日志里根本没有这一笔；统计页也拿不到这次裁决
+  // 的 provider × model 归属，看起来就像模型从没参与过。
+  const env = setup();
+  try {
+    writeConfig(env.configPath);
+    await env.listener(escalationAsk(), userAllows());
+    const telemetryPath = join(env.home, "plugins", "dsh-decision-engine", "telemetry.jsonl");
+    assert.ok(existsSync(telemetryPath), "接管后必须写出遥测文件");
+    const escalationLines = readFileSync(telemetryPath, "utf8")
+      .split("\n")
+      .filter((line) => line.trim().length > 0)
+      .map((line) => JSON.parse(line))
+      // 免费模型刷新等旁路也会写遥测，只挑出升权那几条。
+      .filter((entry) => entry.tag === "escalation");
+    assert.equal(escalationLines.length, 1, "一次升权裁决应写一条遥测");
+    assert.equal(escalationLines[0].point, "authorize");
+    assert.equal(escalationLines[0].tool, "bash");
+    assert.equal(escalationLines[0].escalated_mode, "danger-full-access");
+    assert.equal(escalationLines[0].action, "delegate");
   } finally {
     env.restore();
   }
