@@ -152,6 +152,116 @@ function toolCall({ name = "write", args = {}, cwd = "/work/repo" } = {}) {
   };
 }
 
+// ------------------------------------------------ 预设隔离域里的服务查找
+
+/**
+ * 隔离域夹具：`sandboxPolicy` **只**在 Agent 的预设域里可见。
+ *
+ * 按宿主的规则（`@deepseek-ai/dsh-agent-preset-registry` 的 `serviceFor`）：
+ * 预设服务发布在自己的 `cordis:group` realm 里，group 之外的普通 Context
+ * lookup 仍选宿主 realm，因此插件根 `ctx.get("sandboxPolicy")` 拿不到它。
+ * 这正是「越界让位静默失效」的成因（DEC-045 的边界判定整段被跳过）。
+ */
+function setupIsolatedRealm({ workspaceRoot = "/work/repo" } = {}) {
+  const home = mkdtempSync(join(tmpdir(), "dsh-realm-"));
+  process.env.DSH_HOME = home;
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), body: init?.body });
+    return new Response(JSON.stringify(answerBody()), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  const hooks = new Map();
+  const connection = { fetch: { register() {} } };
+  /** 预设域里才有的那个沙箱策略。 */
+  const scopedPolicy = {
+    resolve: (request) => ({
+      mode: "workspace-write",
+      workspaceRoot: request?.session?.header?.cwd ?? workspaceRoot,
+      additionalWritableRoots: [],
+    }),
+  };
+  let serviceForCalls = 0;
+  const ctx = {
+    logger: { info() {}, warn() {}, debug() {} },
+    on(name, listener) {
+      const list = hooks.get(name) ?? [];
+      list.push(listener);
+      hooks.set(name, list);
+      return () => {};
+    },
+    get(name) {
+      if (name === "connection") return connection;
+      // `agentPresets` 本身在根 ctx 上是可见的（它是插件级服务），
+      // 但它管理的那些服务在隔离域里。
+      if (name === "agentPresets") {
+        return {
+          serviceFor(agent, serviceName) {
+            serviceForCalls += 1;
+            return serviceName === "sandboxPolicy" ? scopedPolicy : undefined;
+          },
+        };
+      }
+      // 关键：根 ctx **刻意不提供** sandboxPolicy——真实宿主在这一点上就是这样。
+      return undefined;
+    },
+    inject(_names, fn) {
+      fn();
+    },
+    plugin() {},
+    effect() {},
+  };
+  apply(ctx, {});
+  const listeners = hooks.get("tools/pre-execute") ?? [];
+  return {
+    home,
+    configPath: join(home, "plugins", "dsh-decision-engine", "config.yml"),
+    listener: listeners[0],
+    calls,
+    serviceForCalls: () => serviceForCalls,
+    restore() {
+      globalThis.fetch = originalFetch;
+    },
+  };
+}
+
+test("隔离域：sandboxPolicy 只在预设域里时，越界让位仍然生效", async () => {
+  // 回归：修之前插件只用根 ctx 查服务，隔离域里的 sandboxPolicy 永远取不到，
+  // 写根为空 → 边界判定整段跳过 → 越界写入被送进决策模型（而不是交还宿主）。
+  const env = setupIsolatedRealm();
+  try {
+    writeConfig(env.configPath);
+    let released = false;
+    await env.listener(
+      toolCall({ name: "write", args: { file_path: "/etc/evil.txt" } }),
+      () => {
+        released = true;
+        return { kind: "allow" };
+      },
+    );
+    assert.equal(released, true, "越界写必须让位给宿主");
+    assert.equal(env.calls.length, 0, "让位时不应发出决策请求");
+    assert.ok(env.serviceForCalls() > 0, "必须先问过 agentPresets.serviceFor");
+  } finally {
+    env.restore();
+  }
+});
+
+test("隔离域：界内写仍然照常走模型判断（服务查得到不等于一律放行）", async () => {
+  const env = setupIsolatedRealm();
+  try {
+    writeConfig(env.configPath);
+    await env.listener(toolCall({ name: "write", args: { file_path: "/work/repo/a.txt" } }), () => ({ kind: "allow" }));
+    assert.ok(env.calls.length > 0, "界内写应当照常发请求");
+  } finally {
+    env.restore();
+  }
+});
+
 // ---------------------------------------------------------------- 契约
 
 test("越出工作区的写入：放行，且**不发请求**", async () => {
