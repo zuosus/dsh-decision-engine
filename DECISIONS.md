@@ -2,6 +2,38 @@
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
 
+## DEC-093 新配置项必须同时登记进 `patchDiffersFromServer`，否则拨了也发不出请求（2026-11-26）
+
+**背景**：用户报告「`危险权限申请交给决策模型` 选项，我打开后，去别的页面再回来，发现又是关闭的」。
+
+排查顺序与结论：
+
+1. `config.yml` 里仍是 `dangerFullAccessDecider: false`，mtime 还是 10:02——**一次都没写进去**；
+2. 客户端三处接线（草稿派生 / patch 组装 / 兜底默认值）都在，渲染测试也绿；
+3. 服务端 PUT 白名单里有这一项，落盘测试也绿；
+4. 用最小 react 桩真驱动控件（点开关 → 点「我了解风险，仍然开启」），`fetch` 只看到两次 `GET /status`，**一个 PUT 都没有**。反推得到 `patch` 里确实带了 `dangerFullAccessDecider: true`，但 `configNeeded` 算成了 false。
+
+真凶是 `patchDiffersFromServer()`：它用一张手写的 `pairs` 表判断「这次改动值不值得发请求」，新字段漏登记 → 判定「没有变化」→ 不发请求 → 但 `setSaveState("saved")` 照旧显示「已保存」→ 下次 `/status` 回显把它画回关。
+
+**决定**：
+
+- **在 `pairs` 里补 `["dangerFullAccessDecider", view.dangerFullAccessDecider === true]`**，位置紧跟 `tolerance`，并注明「缺了这一行的后果是拨了开关一个 PUT 都不发」。
+- **新增 `test/danger-approval-save.test.js`（2 条）**：真驱动控件点到底、断言 `fetch` 收到 PUT 且请求体带该字段。两个方向都测——打开（`true`）与关闭（`false`）。关掉那个方向更重要：用户以为已经收回权限，实际服务端还开着。
+
+**为什么**：
+
+- **这是三张表必须同步的第三张**：一个配置项要同时出现在 `DEFAULTS` / zod schema / `/status` 回显 / PUT 白名单 / **`patchDiffersFromServer` 的 pairs 表** 五处。前四处 DEC-089 已经补全，第五处漏了，而这处的失效方式最隐蔽——**界面显示「已保存」**，既没有报错也没有回滚，只是什么也没发生。
+- **渲染测试与白名单测试都测不到它**：前者证明「开关画得对」，后者证明「服务端收到就能存」，中间「客户端到底发没发」无人覆盖。这正是本项目反复出现的「两个端点各自都绿，中间那一段没人看」。
+- **必须断言真实请求，而不是内部变量**：`patchDiffersFromServer` 返回什么不重要，重要的是 `fetch` 有没有被调用。测试因此一路点到 `fetch`，并在文件头写明「fetch 桩必须活到点击之后」——早还原会让请求打到真实网络，flush 的 catch 把错误吞成状态行文案，测试就只看到「没有 PUT」，分不清是没发还是发失败。
+
+**红→绿**：把 `pairs` 那一行删掉再跑新测试，两条全红（实际请求列表里只有两次 `GET`）；补回后全绿。全套 **1014/1014 通过**，`verify-wiring` 与 `build-client --check` 全绿。
+
+**改动文件**：`lib/client-src/16-config-patch-and-format.js`、`lib/client.js`（构建产物）、`test/danger-approval-save.test.js`（新增）、`DECISIONS.md`。
+
+
+
+
+
 ## DEC-091 ⛔️ 取代 DEC-089 的注册方式：`approval/request` 必须 prepend，否则永远轮不到（2026-11-26）
 
 **背景**：用户报告「已经加了开关，为什么还在不断收到 danger-full-access challenge」，并给出会话 `session-f72497ae-74a7-4664-9c22-af9c42a9bcec` 现场。两份证据：
