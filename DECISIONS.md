@@ -2,6 +2,30 @@
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
 
+## DEC-095 ⛔️ 取代 DEC-088 的控件外形：四档合并为一整块 iOS 式分段控件（2026-11-27）
+
+**背景**：用户要求把「人工审核比例」的 UI 改成 iOS 的 segmented control——「按钮都是挨着的」。DEC-088 的形态是四个**独立**线框按钮，档与档之间留 `gap: 8px`，各自画 1px 边框与 6px 圆角：视觉上读起来是「四个按钮」，而四档明明是同一条单调轴（从不问 → 更常问）上的相邻取值，应该读成「一个控件、四个刻度位」。
+
+**决定**（纯 CSS，DOM/JS 零改动）：
+
+- **外框交给 `.de-tolerance__stops` 容器**：`gap` 从 `var(--de-space-1)` 改为 `0`，容器加一条 1px 边框与 `--de-radius` 圆角，并显式 `box-sizing: border-box`——决策历史页不在 `.de-settings` 外壳里，那里没有全局 border-box 兜底，不写就会溢出 2px。
+- **段不再各自画框**：`.de-tolerance__stop` 基础规则改 `border: none; border-radius: 0`；档间唯一的线是**分隔线**，由 `.de-tolerance__stop + .de-tolerance__stop { border-left: 1px solid var(--de-border) }` 画在非首段左缘。
+- **iOS 行为：紧贴选中段的分隔线隐去**——选中段自己的左线与它右邻的左线都 `border-left-color: transparent`。只转透明不撤宽度：1px 占位仍在，背景按 border-box 铺到边，选中色块与相邻段严丝合缝。
+- **首末段圆角贴合外框内侧**：`calc(var(--de-radius) - 1px)`（外框占了 1px，内侧半径要减掉，否则选中色块的直角会顶穿圆角）。
+- **选中态保留 `--de-accent` 反色 + 宿主 contrast 文字色**；旧规则里的 `border-color: var(--de-accent)` 删除——已经没有段级外框可涂。hover 反色问题不存在：选中规则带 `!important`，压过 hover。
+
+**DEC-088 保留的部分**：去掉贯穿圆点横线、配色走宿主语义令牌（`--de-*` 映射 `--dsw-alias-*`）、`aria-pressed` 表达选中、令牌挂在控件自身让配置页与决策历史页共用。被取代的仅是「四个独立线框按钮」这一控件外形。
+
+**为什么**：
+
+- **外形与语义一致**：离散轴的相邻取值 → 一整块共享边框的控件；8px 缝隙把「一条轴的四个档位」切成「四个互不相干的开关」，用户得自己脑补它们的连续性——这正是 DEC-088 反对 dropdown 时用的同一条理由的反面应用。
+- **分隔线隐藏是 segmented control 的惯例**：选中块是连成整片的一块，不被线切成两半。
+- **零 DOM 改动把变更半径压到最小**：既有类名、`aria-pressed`、i18n、竖排事故守卫全部原样通过，改动只落在 `client.config.css` 的一段规则里。
+
+**红→绿**：先把 `test/tolerance-design.test.js` 第四条验收改写为分段控件断言（gap 0、容器承担外框与圆角、段无独立边框、相邻段分隔线、首末段贴合圆角、选中段两侧分隔线透明、选中反色不变）；实现前该条红（败在「分段之间不留缝隙」），实现后绿。全套 **1031/1031 通过**，`verify-wiring` 与 `build-client --check` 全绿。
+
+**改动文件**：`lib/client.config.css`、`lib/client-src/15-config-values-and-url.js`（注释）、`lib/client-src/10-styles-shell-and-controls.js`（注释）、`lib/client.js`（构建产物）、`test/tolerance-design.test.js`、`DECISIONS.md`。
+
 ## DEC-093 新配置项必须同时登记进 `patchDiffersFromServer`，否则拨了也发不出请求（2026-11-26）
 
 **背景**：用户报告「`危险权限申请交给决策模型` 选项，我打开后，去别的页面再回来，发现又是关闭的」。
