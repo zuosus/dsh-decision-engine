@@ -1,6 +1,28 @@
 # DECISIONS.md — 设计决策日志
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
+## DEC-096 匿名统计新增非免费模型的 provider × model 次数（2026-11-27）
+
+**背景**：用户要求「对于非免费模型，统计 provider 和模型名称；这个功能同样被匿名统计管理」。现有匿名统计只有七个字段（安装 id / 版本 / 平台 / 架构 / 宿主版本 / 当日决策数 / 事件种类），看不到用户实际在用哪些非免费模型；而配置页的 provider × model 是本机数据，服务端无从得知。
+
+**决定**：
+
+1. **一份新字段 `pm`，放在同一条心跳里**：`[provider, model, count][]`。不新增请求、不新增上报时机，照旧由 `telemetryLevel` 管理——`off` 时整条上报都不发，`install` 档只在首次运行带一次，`daily` 档每天一次。跨日补报定时器沿用原路径，因此明细与 `d`（决策数）永远来自同一个上一完整自然日。
+2. **只统计非免费模型**：provider 为 `server`（服务端下发的免费模型）或 `unknown`（归因失败）的行排除在明细之外；总量 `d` 不受影响。`lib/model-usage.js` 是这层边界的唯一执行点，纯函数、可单测。
+3. **只带标识与次数**：provider/model 名称按 `[0-9A-Za-z._:/+-]` 白名单清洗、各截到 32 字符（与站点 `MAX_FIELD` 对齐），次数上限 100000；最多 12 组，按次数降序、名称升序稳定排序。没有 token、耗时、prompt、工具参数、地址或 key。空明细整字段省略。
+4. **站点侧同批落库**：`dsh-site` 新增迁移 `model_usage_daily`，主键 `(plugin, day, install_id, provider, model)`，`decisions` 取 MAX（与 `daily_active` 一致）。采集端只接受三元组数组，服务端再清洗一次并排除 `server`/`unknown`；按客户端声明的 `day` 归档，因为这是「昨天谁被用了」，按收到日归档会让日报永远查不到。写入与 `installs`/`daily_active` 共用一次 `DB.batch`。
+5. **日报可见**：`scheduled()` 新增一行「模型排行（非免费）」，按前一天 `day` 查 `model_usage_daily`，按 provider × model 汇总取 Top5。
+
+**为什么**：
+
+- **不另开上报通道**：匿名统计的三档语义是用户唯一的隐私开关。任何「模型统计」若走另一条请求或另一个开关，等于绕开用户已经作出的选择；同一条心跳里带一个短字段，才能说「同样被匿名统计管理」。
+- **免费模型排除是需求原话**：`server` 是服务端下发的免费额度，统计它既不符合「非免费」的口径，也会让排行被免费模型刷满。`unknown` 则是归因失败，上报只会污染数据——宁可少一条，不猜一个名字。
+- **声明日归档**：客户端在跨日补报时，收到请求可能是今天，而数据属于昨天。`daily_active` 用收到日是因为它统计的是「今天活跃」，模型明细用声明日是因为它统计的是「昨天用了谁」——两套口径不能混用。
+
+**红→绿**：插件端新增 `test/model-usage.test.js` 4 条 + `test/telemetry.test.js` 2 条（pm 透传 / 空明细省略）；实现前 6 条因模块缺失或字段缺失而红，实现后 24/24 绿。站点端新增 `test/model-usage.test.js` 4 条（迁移列、pm 校验与同批事务、SQL 列一致、日报排行）；实现前 4 条红，实现后站点全套 564/564 绿，bundle 构建成功。
+
+**改动文件**：`lib/model-usage.js`（新增）、`lib/telemetry.js`、`lib/index.js`、`test/model-usage.test.js`（新增）、`test/telemetry.test.js`、`config.example.yml`、`DECISIONS.md`；`dsh-site`：`migrations/0003_model_usage_daily.sql`（新增）、`make-bundle.mjs`、`test/model-usage.test.js`（新增）。
+
 
 ## DEC-095 ⛔️ 取代 DEC-088 的控件外形：四档合并为一整块 iOS 式分段控件（2026-11-27）
 

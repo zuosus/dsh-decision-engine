@@ -149,11 +149,12 @@ test("buildPayload 只包含允许的字段，且没有自由文本位", () => {
     arch: "arm64",
     hostVersion: "",
     decisions: 42,
+    modelUsage: [["systemone", "jev-latest", 42]],
   });
   const keys = Object.keys(payload).sort();
   // `p` = 插件标识。多插件共存靠它区分，因此它必须在允许列表里，
   // 而不是被当作「多余字段」删掉。
-  assert.deepEqual(keys, ["arch", "d", "id", "k", "os", "p", "v", "ver"]);
+  assert.deepEqual(keys, ["arch", "d", "id", "k", "os", "p", "pm", "v", "ver"]);
   assert.equal(payload.p, PLUGIN);
   assert.equal(payload.v, 1);
   assert.equal(payload.d, 42);
@@ -177,6 +178,15 @@ test("buildPayload 只包含允许的字段，且没有自由文本位", () => {
   assert.equal(dirty.ver, "1.0.0rm-rf");
   assert.equal(dirty.os, "darwin");
   assert.equal(dirty.arch, "arm64");
+});
+
+test("buildPayload 的 pm 字段：有明细时透传，空/非数组时整字段省略", () => {
+  const base = { installId: newInstallId(), kind: "heartbeat", version: "1.0.0" };
+  const pairs = [["systemone", "jev-latest", 7], ["siliconflow", "qwen-7b", 2]];
+  assert.deepEqual(buildPayload({ ...base, modelUsage: pairs }).pm, pairs);
+  assert.equal(buildPayload({ ...base }).pm, undefined);
+  assert.equal(buildPayload({ ...base, modelUsage: [] }).pm, undefined);
+  assert.equal(buildPayload({ ...base, modelUsage: "not-an-array" }).pm, undefined);
 });
 
 test("buildPayload 的 decisions 边界", () => {
