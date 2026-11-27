@@ -1,6 +1,6 @@
 # dsh-decision-engine
 
-![dsh-decision-engine — DeepSeek Harness 决策引擎](docs/assets/hero.jpeg)
+![dsh-decision-engine — DeepSeek Harness 决策引擎](./hero.png)
 
 **提供免费决策模型**
 

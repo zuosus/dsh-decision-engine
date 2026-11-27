@@ -1,6 +1,28 @@
 # DECISIONS.md — 设计决策日志
 
 <!-- APPEND-ONLY LOG: 新条目插入到此行之后 -->
+## DEC-097 统一 hero 图：JPEG→PNG 无损转换并移到仓库根 `hero.png`（2026-11-27）
+
+**背景**：插件有两份 README（英文 / 中文），首图引用 `docs/assets/hero.jpeg`（2240x960 JPEG）——图片埋在 `docs/assets/` 子目录里、格式是 JPEG。需要一份跨中英 README 统一引用的、位于仓库根的 `hero.png`，并被 npm 包收录。
+
+**决定**：
+
+1. **格式 JPEG→PNG，像素不变**：用打包环境 Python 3.12 + Pillow 12.3.0 把 `docs/assets/hero.jpeg` 解码后 `save(format="PNG")`，不缩放、不重绘。`file hero.png` 确认为 `PNG image data, 2240 x 960, 8-bit/color RGB`，与源文件 2240x960 完全一致；`read_image` 目视复核，画面无可见变化。
+2. **位置与命名统一**：新文件落在仓库根，文件名精确为 `hero.png`；`git rm docs/assets/hero.jpeg` 删除旧图（该目录原本只有这一个图片，`docs/assets` 条目保留在 files 中以兼容其它文档潜在引用，不删）。
+3. **两份 README 同步**：`README.md` 与 `README.zh.md` 的 `<img>` 引用从 `docs/assets/hero.jpeg` 改为 `./hero.png`，alt 文本保留原样。
+4. **npm 收录**：`package.json` 的 `files` 数组在 `README.zh.md` 后加入 `"hero.png"`，确保 `npm pack` 带上首图；`docs/assets` 条目原样保留。
+
+**为什么**：
+
+- **根目录 + 统一名字**让中英 README 用同一条 `./hero.png` 相对引用，不受文档层级变动影响，也便于其它工具/站点直接取用。
+- **PNG 无损转换**保住 2240x960 原始像素与画面内容，避免用有损格式反复转存带来的二次压缩，同时满足「文件名必须叫 hero.png、格式 PNG」的硬性要求。
+- **保留 `docs/assets`**：判断基于实测——转换前 `find docs -type f` 显示该目录仅 `hero.jpeg` 一个文件；保留该 files 条目成本为零，且为将来其它文档图片留出位置，不做无关清理。
+
+**验证**：`file` 确认 PNG / 2240x960；`read_image` 目视确认画面一致；中英 README 与 `package.json` 引用逐项核对；`node --test test/` 测试套全绿。
+
+**改动文件**：`hero.png`（新增，仓库根）、`docs/assets/hero.jpeg`（删除）、`README.md`、`README.zh.md`、`package.json`、`DECISIONS.md`。
+
+
 ## DEC-096 匿名统计新增非免费模型的 provider × model 次数（2026-11-27）
 
 **背景**：用户要求「对于非免费模型，统计 provider 和模型名称；这个功能同样被匿名统计管理」。现有匿名统计只有七个字段（安装 id / 版本 / 平台 / 架构 / 宿主版本 / 当日决策数 / 事件种类），看不到用户实际在用哪些非免费模型；而配置页的 provider × model 是本机数据，服务端无从得知。
